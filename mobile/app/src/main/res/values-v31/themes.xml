@@ -3,6 +3,6 @@
     <style name="Theme.PGuard" parent="android:Theme.Material.Light.NoActionBar">
         <!-- Configure the Android 12+ Splash Screen API -->
         <item name="android:windowSplashScreenBackground">@color/splash_background</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
     </style>
 </resources>
