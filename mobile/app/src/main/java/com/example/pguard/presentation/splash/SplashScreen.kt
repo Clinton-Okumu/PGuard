@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -20,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -69,11 +71,21 @@ fun SplashScreen(
                 .scale(scale.value)
                 .alpha(alpha.value)
         ) {
-            Image(
-                painter = painterResource(id = R.drawable.ic_pguard_shield),
-                contentDescription = "PGuard Logo",
-                modifier = Modifier.size(96.dp)
-            )
+            // Branded Coral Card with Globe & Shield Emblem
+            Box(
+                modifier = Modifier
+                    .size(108.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(MaterialTheme.colorScheme.primary),
+                contentAlignment = Alignment.Center
+            ) {
+                Image(
+                    painter = painterResource(id = R.drawable.ic_pguard_globe_shield),
+                    contentDescription = "PGuard Logo",
+                    modifier = Modifier.size(70.dp)
+                )
+            }
+
             Spacer(modifier = Modifier.height(20.dp))
             Text(
                 text = "PGuard",

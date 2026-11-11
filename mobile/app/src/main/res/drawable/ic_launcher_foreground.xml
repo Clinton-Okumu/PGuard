@@ -3,28 +3,80 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
     <group
-        android:pivotX="60"
-        android:pivotY="60"
-        android:scaleX="0.65"
-        android:scaleY="0.65"
-        android:translateX="-6"
-        android:translateY="-6">
-        <!-- Outer Shield Glow / Background Accent -->
+        android:pivotX="30"
+        android:pivotY="30"
+        android:scaleX="0.9"
+        android:scaleY="0.9"
+        android:translateX="24"
+        android:translateY="24">
+
+        <!-- Globe Outer Circle (White Stroke) -->
         <path
-            android:fillColor="#26FFFFFF"
-            android:pathData="M60,8 C82,8 104,18 104,44 C104,78 60,112 60,112 C60,112 16,78 16,44 C16,18 38,8 60,8 Z" />
-        <!-- Main Coral Shield Body -->
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2.5"
+            android:strokeLineCap="round"
+            android:pathData="M30,6 C16.75,6 6,16.75 6,30 C6,43.25 16.75,54 30,54 C35.2,54 39.9,52.3 43.8,49.5" />
+        <path
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2.5"
+            android:strokeLineCap="round"
+            android:pathData="M49.5,43.8 C52.3,39.9 54,35.2 54,30 C54,16.75 43.25,6 30,6 Z" />
+
+        <!-- Globe Equator / Latitudes -->
+        <path
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2.2"
+            android:strokeLineCap="round"
+            android:pathData="M6.5,30 L28,30" />
+        <path
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2.2"
+            android:strokeLineCap="round"
+            android:pathData="M11,18 C16,21 24,22 30,22 C37,22 45,21 49,18" />
+        <path
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2.2"
+            android:strokeLineCap="round"
+            android:pathData="M11,42 C16,39 21,38 26,38" />
+
+        <!-- Globe Longitudes / Meridians -->
+        <path
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2.2"
+            android:strokeLineCap="round"
+            android:pathData="M30,6 C22,14 18,22 18,30 C18,38 22,46 30,54" />
+        <path
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2.2"
+            android:strokeLineCap="round"
+            android:pathData="M30,6 C34.5,10.5 38,16 39.8,22" />
+        <path
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2.2"
+            android:strokeLineCap="round"
+            android:pathData="M30,6 L30,22" />
+
+        <!-- Shield Fill (Masks Globe Behind It with Coral Brand Color) -->
         <path
             android:fillColor="#FFFF5252"
-            android:pathData="M60,14 C80,14 98,24 98,46 C98,76 60,106 60,106 C60,106 22,76 22,46 C22,24 40,14 60,14 Z" />
-        <!-- Inner Dark / Contrast Shield -->
+            android:pathData="M27,24 L49,24 C49,38 38,48 38,48 C38,48 27,38 27,24 Z" />
+
+        <!-- Outer Shield Outline (White) -->
         <path
-            android:fillColor="#1E1E1E"
-            android:pathData="M60,24 C74,24 88,32 88,48 C88,72 60,96 60,96 C60,96 32,72 32,48 C32,32 46,24 60,24 Z" />
-        <!-- Center Check / Guard Symbol -->
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="2.5"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M27,24 L49,24 C49,38 38,48 38,48 C38,48 27,38 27,24 Z" />
+
+        <!-- Inner Shield Inset (White) -->
         <path
-            android:fillColor="#FFFF5252"
-            android:pathData="M54,68 L42,56 L47,51 L54,58 L73,39 L78,44 Z" />
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="1.8"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round"
+            android:pathData="M31,28 L45,28 C45,36.5 38,43.5 38,43.5 C38,43.5 31,36.5 31,28 Z" />
     </group>
 </vector>
