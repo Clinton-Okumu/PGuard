@@ -22,10 +22,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -66,19 +64,19 @@ fun LoginScreen(
     modifier: Modifier = Modifier
 ) {
     val contentAlpha = remember { Animatable(0f) }
-    val contentOffsetY = remember { Animatable(20f) }
+    val contentOffsetY = remember { Animatable(16f) }
 
     LaunchedEffect(Unit) {
         launch {
             contentAlpha.animateTo(
                 targetValue = 1f,
-                animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing)
+                animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing)
             )
         }
         launch {
             contentOffsetY.animateTo(
                 targetValue = 0f,
-                animationSpec = tween(durationMillis = 600, easing = FastOutSlowInEasing)
+                animationSpec = tween(durationMillis = 500, easing = FastOutSlowInEasing)
             )
         }
     }
@@ -90,223 +88,233 @@ fun LoginScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // Ambient Radial Glow behind the shield
+        // Ambient Radial Glow behind the shield (anchored behind middle content)
         Box(
             modifier = Modifier
-                .size(340.dp)
-                .align(Alignment.TopCenter)
-                .offset(y = 20.dp)
+                .size(360.dp)
+                .align(Alignment.Center)
+                .offset(y = (-80).dp)
                 .background(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            CoralPrimary.copy(alpha = 0.20f),
-                            CoralPrimary.copy(alpha = 0.06f),
+                            CoralPrimary.copy(alpha = 0.18f),
+                            CoralPrimary.copy(alpha = 0.05f),
                             Color.Transparent
                         )
                     )
                 )
         )
 
-        // Top "SKIP" Button
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 16.dp, end = 20.dp),
-            horizontalArrangement = Arrangement.End
-        ) {
-            OutlinedButton(
-                onClick = onSkipClick,
-                shape = CircleShape,
-                border = BorderStroke(1.dp, CoralPrimary.copy(alpha = 0.85f)),
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = CoralPrimary
-                ),
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 6.dp),
-                modifier = Modifier.height(36.dp)
-            ) {
-                Text(
-                    text = "SKIP",
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        letterSpacing = 1.sp
-                    ),
-                    color = CoralPrimary
-                )
-            }
-        }
-
-        // Main Scrollable Body
+        // Main Layout distributing Top, Middle, and Bottom
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(horizontal = 24.dp)
-                .verticalScroll(rememberScrollState())
                 .alpha(contentAlpha.value)
                 .offset(y = contentOffsetY.value.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(60.dp))
+            // 1. TOP BAR: Skip Button
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                OutlinedButton(
+                    onClick = onSkipClick,
+                    shape = CircleShape,
+                    border = BorderStroke(1.dp, CoralPrimary.copy(alpha = 0.85f)),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = CoralPrimary
+                    ),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 6.dp),
+                    modifier = Modifier.height(36.dp)
+                ) {
+                    Text(
+                        text = "SKIP",
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            letterSpacing = 1.sp
+                        ),
+                        color = CoralPrimary
+                    )
+                }
+            }
 
-            // Official PGuard Shield Brand Logo
-            Image(
-                painter = painterResource(id = R.drawable.ic_pguard_shield),
-                contentDescription = "PGuard Shield Logo",
-                modifier = Modifier.size(92.dp)
-            )
-
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // Main Value Proposition Headline
-            Text(
-                text = "Take Control of Your Focus",
-                style = MaterialTheme.typography.headlineSmall.copy(
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = (-0.5).sp
-                ),
-                color = MaterialTheme.colorScheme.onBackground,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Subtitle
-            Text(
-                text = "Block adult content across all browsers & apps.\nStay accountable to what truly matters.",
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 13.5.sp,
-                    lineHeight = 19.sp
-                ),
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f),
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(28.dp))
-
-            // Trust & Feature Highlights Card
+            // 2. MIDDLE CONTENT: Shield Logo, Headline & Trust Card
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(SurfaceDark.copy(alpha = 0.7f))
-                    .padding(vertical = 14.dp, horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                    .padding(vertical = 12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                FeatureHighlightRow(
-                    iconRes = R.drawable.ic_feature_shield,
-                    title = "System-Wide Protection",
-                    subtitle = "Blocks adult sites in all browsers, apps & private tabs"
+                // PGuard Shield Logo
+                Image(
+                    painter = painterResource(id = R.drawable.ic_pguard_shield),
+                    contentDescription = "PGuard Shield Logo",
+                    modifier = Modifier.size(88.dp)
                 )
-                FeatureHighlightRow(
-                    iconRes = R.drawable.ic_feature_lock,
-                    title = "100% Private & On-Device",
-                    subtitle = "Zero browsing history is ever logged or shared"
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Headline
+                Text(
+                    text = "Take Control of Your Focus",
+                    style = MaterialTheme.typography.headlineSmall.copy(
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = (-0.5).sp
+                    ),
+                    color = MaterialTheme.colorScheme.onBackground,
+                    textAlign = TextAlign.Center
                 )
-                FeatureHighlightRow(
-                    iconRes = R.drawable.ic_feature_bolt,
-                    title = "Fast & Battery Friendly",
-                    subtitle = "Local DNS engine ensures zero lag and zero battery drain"
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Subtitle
+                Text(
+                    text = "Block adult content across all browsers & apps.\nStay accountable to what truly matters.",
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 13.5.sp,
+                        lineHeight = 19.sp
+                    ),
+                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f),
+                    textAlign = TextAlign.Center
                 )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Feature Highlights Card
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(SurfaceDark.copy(alpha = 0.7f))
+                        .padding(vertical = 14.dp, horizontal = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    FeatureHighlightRow(
+                        iconRes = R.drawable.ic_feature_shield,
+                        title = "System-Wide Protection",
+                        subtitle = "Blocks adult sites in all browsers, apps & private tabs"
+                    )
+                    FeatureHighlightRow(
+                        iconRes = R.drawable.ic_feature_lock,
+                        title = "100% Private & On-Device",
+                        subtitle = "Zero browsing history is ever logged or shared"
+                    )
+                    FeatureHighlightRow(
+                        iconRes = R.drawable.ic_feature_bolt,
+                        title = "Fast & Battery Friendly",
+                        subtitle = "Local DNS engine ensures zero lag and zero battery drain"
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Google Login Button
-            Button(
-                onClick = onGoogleLoginClick,
+            // 3. BOTTOM SECTION: Google Button & Disclaimer
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp),
-                shape = CircleShape,
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = CoralPrimary,
-                    contentColor = Color.White
-                ),
-                elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
+                    .padding(bottom = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Icon(
-                    painter = painterResource(id = R.drawable.ic_google_logo),
-                    contentDescription = "Google Logo",
-                    tint = Color.White,
-                    modifier = Modifier.size(22.dp)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = "Login with Google",
-                    style = MaterialTheme.typography.titleMedium.copy(
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.SemiBold
+                // Google Login Button
+                Button(
+                    onClick = onGoogleLoginClick,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp),
+                    shape = CircleShape,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = CoralPrimary,
+                        contentColor = Color.White
                     ),
-                    color = Color.White
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Terms & Privacy Policy Disclaimer
-            val termsAnnotatedString = buildAnnotatedString {
-                withStyle(
-                    style = SpanStyle(
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
-                        fontSize = 11.5.sp
-                    )
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
                 ) {
-                    append("By continuing, you agree to our\n")
-                }
-                pushStringAnnotation(tag = "terms", annotation = "terms")
-                withStyle(
-                    style = SpanStyle(
-                        color = CoralPrimary.copy(alpha = 0.9f),
-                        fontSize = 11.5.sp,
-                        textDecoration = TextDecoration.Underline
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_google_logo),
+                        contentDescription = "Google Logo",
+                        tint = Color.White,
+                        modifier = Modifier.size(22.dp)
                     )
-                ) {
-                    append("Terms of Service")
-                }
-                pop()
-
-                withStyle(
-                    style = SpanStyle(
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
-                        fontSize = 11.5.sp
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Login with Google",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold
+                        ),
+                        color = Color.White
                     )
-                ) {
-                    append(" and ")
                 }
 
-                pushStringAnnotation(tag = "privacy", annotation = "privacy")
-                withStyle(
-                    style = SpanStyle(
-                        color = CoralPrimary.copy(alpha = 0.9f),
-                        fontSize = 11.5.sp,
-                        textDecoration = TextDecoration.Underline
-                    )
-                ) {
-                    append("Privacy Policy")
-                }
-                pop()
+                Spacer(modifier = Modifier.height(14.dp))
 
-                withStyle(
-                    style = SpanStyle(
-                        color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
-                        fontSize = 11.5.sp
-                    )
-                ) {
-                    append(".")
-                }
-            }
+                // Terms & Privacy Policy Disclaimer
+                val termsAnnotatedString = buildAnnotatedString {
+                    withStyle(
+                        style = SpanStyle(
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
+                            fontSize = 11.5.sp
+                        )
+                    ) {
+                        append("By continuing, you agree to our\n")
+                    }
+                    pushStringAnnotation(tag = "terms", annotation = "terms")
+                    withStyle(
+                        style = SpanStyle(
+                            color = CoralPrimary.copy(alpha = 0.9f),
+                            fontSize = 11.5.sp,
+                            textDecoration = TextDecoration.Underline
+                        )
+                    ) {
+                        append("Terms of Service")
+                    }
+                    pop()
 
-            Text(
-                text = termsAnnotatedString,
-                textAlign = TextAlign.Center,
-                lineHeight = 16.sp,
-                modifier = Modifier
-                    .padding(bottom = 20.dp)
-                    .clickable {
+                    withStyle(
+                        style = SpanStyle(
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
+                            fontSize = 11.5.sp
+                        )
+                    ) {
+                        append(" and ")
+                    }
+
+                    pushStringAnnotation(tag = "privacy", annotation = "privacy")
+                    withStyle(
+                        style = SpanStyle(
+                            color = CoralPrimary.copy(alpha = 0.9f),
+                            fontSize = 11.5.sp,
+                            textDecoration = TextDecoration.Underline
+                        )
+                    ) {
+                        append("Privacy Policy")
+                    }
+                    pop()
+
+                    withStyle(
+                        style = SpanStyle(
+                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
+                            fontSize = 11.5.sp
+                        )
+                    ) {
+                        append(".")
+                    }
+                }
+
+                Text(
+                    text = termsAnnotatedString,
+                    textAlign = TextAlign.Center,
+                    lineHeight = 16.sp,
+                    modifier = Modifier.clickable {
                         // Future handler for links
                     }
-            )
+                )
+            }
         }
     }
 }
