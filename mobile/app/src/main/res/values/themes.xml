@@ -1,7 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Base application theme -->
     <style name="Theme.PGuard" parent="android:Theme.Material.Light.NoActionBar">
-        <!-- Configure the legacy splash screen background to match our app -->
         <item name="android:windowBackground">@color/splash_background</item>
+    </style>
+
+    <!-- Splash screen theme: keep the icon transparent so only our branded Compose splash screen shows -->
+    <style name="Theme.App.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+        <item name="postSplashScreenTheme">@style/Theme.PGuard</item>
     </style>
 </resources>
