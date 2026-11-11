@@ -89,7 +89,7 @@ fun LoginScreen(
             }
         }
 
-        // Center Content: Globe & Shield App Logo Card
+        // Center Content: PGuard App Logo
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -98,20 +98,12 @@ fun LoginScreen(
         ) {
             Spacer(modifier = Modifier.weight(1f))
 
-            // Rounded Square Logo Card
-            Box(
-                modifier = Modifier
-                    .size(108.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(CoralPrimary),
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.ic_pguard_globe_shield),
-                    contentDescription = "PGuard Logo",
-                    modifier = Modifier.size(68.dp)
-                )
-            }
+            // PGuard Shield Logo (matching Splash Screen and App Icon)
+            Image(
+                painter = painterResource(id = R.drawable.ic_pguard_shield),
+                contentDescription = "PGuard Logo",
+                modifier = Modifier.size(108.dp)
+            )
 
             Spacer(modifier = Modifier.weight(1.8f))
 
