@@ -88,23 +88,6 @@ fun LoginScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // Ambient Radial Glow behind the shield (anchored behind middle content)
-        Box(
-            modifier = Modifier
-                .size(360.dp)
-                .align(Alignment.Center)
-                .offset(y = (-80).dp)
-                .background(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            CoralPrimary.copy(alpha = 0.18f),
-                            CoralPrimary.copy(alpha = 0.05f),
-                            Color.Transparent
-                        )
-                    )
-                )
-        )
-
         // Main Layout distributing Top, Middle, and Bottom
         Column(
             modifier = Modifier
