@@ -17,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import com.example.pguard.presentation.login.LoginScreen
 import com.example.pguard.presentation.splash.SplashScreen
 import com.example.pguard.presentation.theme.PGuardTheme
 
@@ -30,15 +31,25 @@ class MainActivity : ComponentActivity() {
         setContent {
             PGuardTheme {
                 var showSplash by remember { mutableStateOf(true) }
+                var showLogin by remember { mutableStateOf(true) }
 
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    if (showSplash) {
-                        SplashScreen(
-                            onSplashFinished = { showSplash = false }
-                        )
-                    } else {
-                        // Temporary placeholder for the Dashboard/Next Screen
-                        MainScreenPlaceholder(modifier = Modifier.padding(innerPadding))
+                    when {
+                        showSplash -> {
+                            SplashScreen(
+                                onSplashFinished = { showSplash = false }
+                            )
+                        }
+                        showLogin -> {
+                            LoginScreen(
+                                onSkipClick = { showLogin = false },
+                                onGoogleLoginClick = { /* No functionality for now */ },
+                                modifier = Modifier.padding(innerPadding)
+                            )
+                        }
+                        else -> {
+                            MainScreenPlaceholder(modifier = Modifier.padding(innerPadding))
+                        }
                     }
                 }
             }
