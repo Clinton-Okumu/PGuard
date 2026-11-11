@@ -127,21 +127,29 @@ fun LoginScreen(
                 }
             }
 
-            // 2. MIDDLE CONTENT: Shield Logo, Headline & Trust Card
+            // 2. MIDDLE CONTENT: Globe Shield Logo, Headline & Trust Card
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // PGuard Shield Logo
-                Image(
-                    painter = painterResource(id = R.drawable.ic_pguard_shield),
-                    contentDescription = "PGuard Shield Logo",
-                    modifier = Modifier.size(88.dp)
-                )
+                // Coral Rounded Card with Globe & Shield Logo (matching wireframe)
+                Box(
+                    modifier = Modifier
+                        .size(96.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(CoralPrimary),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Image(
+                        painter = painterResource(id = R.drawable.ic_pguard_globe_shield),
+                        contentDescription = "PGuard Globe Shield Logo",
+                        modifier = Modifier.size(62.dp)
+                    )
+                }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                 // Headline
                 Text(
