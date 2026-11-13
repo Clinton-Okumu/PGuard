@@ -1,10 +1,14 @@
 *.iml
 .gradle
 .idea
-/local.properties
+local.properties
 .DS_Store
 /build
 /captures
 .externalNativeBuild
 .cxx
-local.properties
+
+# Go artifacts and secrets
+Backend/bin/
+Backend/.env
+*.env
