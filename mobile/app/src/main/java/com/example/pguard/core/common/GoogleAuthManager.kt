@@ -20,7 +20,7 @@ class GoogleAuthManager(
     suspend fun signInWithGoogle(): Result<String> {
         // If webClientId is empty or dev mock is requested, return mock token supported by Go backend
         if (webClientId.isBlank()) {
-            return Result.success("mock:dev.user@pguard.local")
+            return Result.success("mock:clinton@pguard.local")
         }
 
         return try {

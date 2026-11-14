@@ -1,5 +1,7 @@
 package com.example.pguard.core.network
 
+import android.content.Context
+import com.example.pguard.core.datastore.AuthDataStore
 import com.example.pguard.core.network.api.AuthApiService
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -12,8 +14,18 @@ import java.util.concurrent.TimeUnit
 object NetworkClient {
 
     // 10.0.2.2 maps to localhost 127.0.0.1 on the Android emulator.
-    // For physical devices on the same Wi-Fi, replace with your development machine's local IP.
-    private const val DEFAULT_BASE_URL = "http://10.0.2.2:8080/"
+    const val EMULATOR_BASE_URL = "http://10.0.2.2:8080/"
+    // LAN IP printed by your Go backend for physical device testing on local Wi-Fi:
+    const val LAN_BASE_URL = "http://192.168.100.80:8080/"
+
+    private var _baseUrl: String = EMULATOR_BASE_URL
+
+    var baseUrl: String
+        get() = _baseUrl
+        set(value) {
+            _baseUrl = if (value.endsWith("/")) value else "$value/"
+            _apiService = null
+        }
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -26,23 +38,42 @@ object NetworkClient {
         level = HttpLoggingInterceptor.Level.BODY
     }
 
-    val okHttpClient: OkHttpClient = OkHttpClient.Builder()
-        .addInterceptor(loggingInterceptor)
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
-        .build()
+    private var _okHttpClient: OkHttpClient? = null
+    private var _apiService: AuthApiService? = null
 
-    fun createRetrofit(baseUrl: String = DEFAULT_BASE_URL): Retrofit {
-        val contentType = "application/json".toMediaType()
-        return Retrofit.Builder()
-            .baseUrl(baseUrl)
-            .client(okHttpClient)
-            .addConverterFactory(json.asConverterFactory(contentType))
-            .build()
+    fun getOkHttpClient(authDataStore: AuthDataStore? = null): OkHttpClient {
+        return _okHttpClient ?: run {
+            val builder = OkHttpClient.Builder()
+                .addInterceptor(loggingInterceptor)
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(15, TimeUnit.SECONDS)
+                .writeTimeout(15, TimeUnit.SECONDS)
+
+            if (authDataStore != null) {
+                builder.addInterceptor(AuthInterceptor(authDataStore))
+            }
+
+            val client = builder.build()
+            _okHttpClient = client
+            client
+        }
     }
 
-    val authApiService: AuthApiService by lazy {
-        createRetrofit().create(AuthApiService::class.java)
+    fun getAuthApiService(context: Context? = null): AuthApiService {
+        return _apiService ?: run {
+            val authDataStore = context?.let { AuthDataStore(it.applicationContext) }
+            val client = getOkHttpClient(authDataStore)
+            val contentType = "application/json".toMediaType()
+
+            val retrofit = Retrofit.Builder()
+                .baseUrl(_baseUrl)
+                .client(client)
+                .addConverterFactory(json.asConverterFactory(contentType))
+                .build()
+
+            val service = retrofit.create(AuthApiService::class.java)
+            _apiService = service
+            service
+        }
     }
 }

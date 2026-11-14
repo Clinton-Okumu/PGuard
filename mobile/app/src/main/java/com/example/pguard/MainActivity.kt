@@ -57,7 +57,7 @@ class MainActivity : ComponentActivity() {
 
                 val authDataStore = remember { AuthDataStore(context.applicationContext) }
                 val authRepository = remember {
-                    AuthRepository(NetworkClient.authApiService, authDataStore)
+                    AuthRepository(NetworkClient.getAuthApiService(context), authDataStore)
                 }
                 val loginViewModel = remember { LoginViewModel(authRepository) }
 
