@@ -13,12 +13,11 @@ import java.util.concurrent.TimeUnit
 
 object NetworkClient {
 
-    // 10.0.2.2 maps to localhost 127.0.0.1 on the Android emulator.
-    const val EMULATOR_BASE_URL = "http://10.0.2.2:8080/"
-    // LAN IP printed by your Go backend for physical device testing on local Wi-Fi:
+    // LAN IP of your development Mac (accessible by both physical phones on Wi-Fi and emulators):
     const val LAN_BASE_URL = "http://192.168.100.80:8080/"
+    const val EMULATOR_BASE_URL = "http://10.0.2.2:8080/"
 
-    private var _baseUrl: String = EMULATOR_BASE_URL
+    private var _baseUrl: String = LAN_BASE_URL
 
     var baseUrl: String
         get() = _baseUrl
