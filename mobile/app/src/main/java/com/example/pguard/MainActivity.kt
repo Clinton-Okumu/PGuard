@@ -15,6 +15,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,6 +37,7 @@ import com.example.pguard.core.datastore.AuthDataStore
 import com.example.pguard.core.network.NetworkClient
 import com.example.pguard.core.network.model.UserDto
 import com.example.pguard.data.repository.AuthRepository
+import com.example.pguard.presentation.dashboard.HomeScreen
 import com.example.pguard.presentation.login.LoginScreen
 import com.example.pguard.presentation.login.LoginViewModel
 import com.example.pguard.presentation.splash.SplashScreen
@@ -75,7 +77,10 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = MaterialTheme.colorScheme.background
+                ) {
                     when {
                         showSplash -> {
                             SplashScreen(
@@ -88,20 +93,18 @@ class MainActivity : ComponentActivity() {
                                 errorMessage = loginState.errorMessage,
                                 onErrorDismiss = { loginViewModel.dismissError() },
                                 onSkipClick = { userDismissedLogin = true },
-                                onGoogleLoginClick = { loginViewModel.signInWithGoogle(context) },
-                                modifier = Modifier.padding(innerPadding)
+                                onGoogleLoginClick = { loginViewModel.signInWithGoogle(context) }
                             )
                         }
                         else -> {
-                            MainScreenPlaceholder(
+                            HomeScreen(
                                 user = currentUser,
                                 onLogout = {
                                     coroutineScope.launch {
                                         authRepository.logout()
                                         userDismissedLogin = false
                                     }
-                                },
-                                modifier = Modifier.padding(innerPadding)
+                                }
                             )
                         }
                     }
