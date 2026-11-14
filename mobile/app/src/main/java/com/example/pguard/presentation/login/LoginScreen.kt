@@ -1,5 +1,6 @@
 package com.example.pguard.presentation.login
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
@@ -26,6 +27,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -37,7 +39,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
@@ -57,6 +58,9 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun LoginScreen(
+    isLoading: Boolean = false,
+    errorMessage: String? = null,
+    onErrorDismiss: () -> Unit = {},
     onSkipClick: () -> Unit = {},
     onGoogleLoginClick: () -> Unit = {},
     onTermsClick: () -> Unit = {},
@@ -212,9 +216,33 @@ fun LoginScreen(
                     .padding(bottom = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // Error Message Banner (if any)
+                AnimatedVisibility(visible = errorMessage != null) {
+                    if (errorMessage != null) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(bottom = 12.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(CoralPrimary.copy(alpha = 0.15f))
+                                .clickable { onErrorDismiss() }
+                                .padding(horizontal = 14.dp, vertical = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = errorMessage,
+                                color = CoralPrimary,
+                                style = MaterialTheme.typography.bodySmall,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+
                 // Google Login Button
                 Button(
                     onClick = onGoogleLoginClick,
+                    enabled = !isLoading,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(54.dp),
@@ -225,21 +253,29 @@ fun LoginScreen(
                     ),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
                 ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_google_logo),
-                        contentDescription = "Google Logo",
-                        tint = Color.White,
-                        modifier = Modifier.size(22.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = "Login with Google",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.SemiBold
-                        ),
-                        color = Color.White
-                    )
+                    if (isLoading) {
+                        CircularProgressIndicator(
+                            color = Color.White,
+                            strokeWidth = 2.5.dp,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    } else {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_google_logo),
+                            contentDescription = "Google Logo",
+                            tint = Color.White,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Login with Google",
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold
+                            ),
+                            color = Color.White
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
