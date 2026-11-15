@@ -16,10 +16,14 @@ import (
 )
 
 type Application struct {
-	Logger      *log.Logger
-	AuthHandler *api.AuthHandler
-	Middleware  middleware.UserMiddleware
-	DB          *sql.DB
+	Logger                *log.Logger
+	AuthHandler           *api.AuthHandler
+	SettingsHandler       *api.SettingsHandler
+	BlocklistHandler      *api.BlocklistHandler
+	HabitsHandler         *api.HabitsHandler
+	AccountabilityHandler *api.AccountabilityHandler
+	Middleware            middleware.UserMiddleware
+	DB                    *sql.DB
 }
 
 func NewApplication() (*Application, error) {
@@ -43,6 +47,10 @@ func NewApplication() (*Application, error) {
 	// Stores
 	userStore := store.NewPostgresUserStore(gormDB)
 	tokenStore := store.NewPostgresTokenStore(gormDB)
+	settingsStore := store.NewPostgresSettingsStore(gormDB)
+	blocklistStore := store.NewPostgresBlocklistStore(gormDB)
+	habitsStore := store.NewPostgresHabitsStore(gormDB)
+	accountabilityStore := store.NewPostgresAccountabilityStore(gormDB)
 
 	// Services
 	googleVerifier := auth.NewGoogleVerifier()
@@ -50,6 +58,10 @@ func NewApplication() (*Application, error) {
 
 	// Handlers
 	authHandler := api.NewAuthHandler(userStore, tokenStore, googleVerifier, tokenService, logger)
+	settingsHandler := api.NewSettingsHandler(settingsStore, logger)
+	blocklistHandler := api.NewBlocklistHandler(blocklistStore, logger)
+	habitsHandler := api.NewHabitsHandler(habitsStore, logger)
+	accountabilityHandler := api.NewAccountabilityHandler(accountabilityStore, logger)
 
 	// Middleware
 	userMiddleware := middleware.UserMiddleware{
@@ -58,10 +70,14 @@ func NewApplication() (*Application, error) {
 	}
 
 	return &Application{
-		Logger:      logger,
-		AuthHandler: authHandler,
-		Middleware:  userMiddleware,
-		DB:          sqlDB,
+		Logger:                logger,
+		AuthHandler:           authHandler,
+		SettingsHandler:       settingsHandler,
+		BlocklistHandler:      blocklistHandler,
+		HabitsHandler:         habitsHandler,
+		AccountabilityHandler: accountabilityHandler,
+		Middleware:            userMiddleware,
+		DB:                    sqlDB,
 	}, nil
 }
 

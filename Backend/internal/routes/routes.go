@@ -36,6 +36,35 @@ func SetUpRoutes(app *app.Application) *chi.Mux {
 		r.Group(func(r chi.Router) {
 			r.Use(app.Middleware.Authenticate)
 			r.Get("/me", app.Middleware.RequireUser(app.Me))
+
+			// Settings endpoints
+			r.Get("/settings", app.Middleware.RequireUser(app.SettingsHandler.HandleGetSettings))
+			r.Put("/settings", app.Middleware.RequireUser(app.SettingsHandler.HandleUpdateSettings))
+
+			// Blocklist endpoints
+			r.Get("/blocklist", app.Middleware.RequireUser(app.BlocklistHandler.HandleGetBlocklist))
+			r.Post("/blocklist", app.Middleware.RequireUser(app.BlocklistHandler.HandleCreateBlocklistItem))
+			r.Patch("/blocklist/{id}", app.Middleware.RequireUser(app.BlocklistHandler.HandleToggleBlocklistItem))
+			r.Delete("/blocklist/{id}", app.Middleware.RequireUser(app.BlocklistHandler.HandleDeleteBlocklistItem))
+
+			// Streak & Recovery endpoints
+			r.Get("/streak", app.Middleware.RequireUser(app.HabitsHandler.HandleGetStreak))
+			r.Post("/streak/reset", app.Middleware.RequireUser(app.HabitsHandler.HandleResetStreak))
+			r.Get("/streak/history", app.Middleware.RequireUser(app.HabitsHandler.HandleGetRelapseHistory))
+
+			// Habits & Daily Check-in endpoints
+			r.Get("/habits", app.Middleware.RequireUser(app.HabitsHandler.HandleGetHabits))
+			r.Post("/habits", app.Middleware.RequireUser(app.HabitsHandler.HandleCreateHabit))
+			r.Post("/habits/{id}/toggle", app.Middleware.RequireUser(app.HabitsHandler.HandleToggleHabit))
+			r.Delete("/habits/{id}", app.Middleware.RequireUser(app.HabitsHandler.HandleDeleteHabit))
+
+			// Accountability Partner & Security Alert endpoints
+			r.Get("/accountability/partner", app.Middleware.RequireUser(app.AccountabilityHandler.HandleGetPartner))
+			r.Post("/accountability/invite", app.Middleware.RequireUser(app.AccountabilityHandler.HandleCreateInvite))
+			r.Post("/accountability/accept", app.Middleware.RequireUser(app.AccountabilityHandler.HandleAcceptInvite))
+			r.Delete("/accountability/partner", app.Middleware.RequireUser(app.AccountabilityHandler.HandleDisconnectPartner))
+			r.Post("/accountability/event", app.Middleware.RequireUser(app.AccountabilityHandler.HandleRecordEvent))
+			r.Get("/accountability/events", app.Middleware.RequireUser(app.AccountabilityHandler.HandleGetEvents))
 		})
 	})
 

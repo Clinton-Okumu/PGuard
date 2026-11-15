@@ -44,5 +44,16 @@ func Open() (*gorm.DB, error) {
 }
 
 func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(&User{}, &RefreshToken{})
+	return db.AutoMigrate(
+		&User{},
+		&RefreshToken{},
+		&UserSettings{},
+		&BlocklistItem{},
+		&Streak{},
+		&RelapseLog{},
+		&Habit{},
+		&HabitLog{},
+		&AccountabilityPartner{},
+		&SecurityAlert{},
+	)
 }
