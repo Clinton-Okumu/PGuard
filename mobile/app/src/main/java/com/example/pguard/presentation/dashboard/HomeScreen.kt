@@ -23,10 +23,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.sp
+import com.example.pguard.core.network.NetworkClient
 import com.example.pguard.core.network.model.UserDto
+import com.example.pguard.data.repository.AccountabilityRepository
+import com.example.pguard.data.repository.SettingsRepository
 import com.example.pguard.presentation.blocklist.BlocklistScreen
 import com.example.pguard.presentation.habits.HabitsScreen
 import com.example.pguard.presentation.navigation.PGuardBottomBar
@@ -42,6 +46,18 @@ fun HomeScreen(
     onLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val context = LocalContext.current
+    val settingsRepository = remember {
+        com.example.pguard.engine.accessibility.PGuardAccessibilityService.loadSettings(context)
+        SettingsRepository(NetworkClient.getSettingsApiService(context))
+    }
+    val accountabilityRepository = remember {
+        AccountabilityRepository(NetworkClient.getAccountabilityApiService(context))
+    }
+    val blockingViewModel = remember {
+        BlockingViewModel(settingsRepository, accountabilityRepository)
+    }
+
     val tabs = remember { PGuardTab.entries }
     var currentTab by remember { mutableStateOf(PGuardTab.BLOCKING) }
     var showPremiumScreen by remember { mutableStateOf(false) }
@@ -81,6 +97,7 @@ fun HomeScreen(
                 when (tabs[page]) {
                     PGuardTab.BLOCKING -> {
                         BlockingScreen(
+                            viewModel = blockingViewModel,
                             onPremiumClick = { showPremiumScreen = true },
                             onGuideClick = { /* Guide/FAQ modal */ },
                             onFocusModeClick = { /* Focus mode sheet */ }

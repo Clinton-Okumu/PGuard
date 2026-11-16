@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">PGuard</string>
+    <string name="accessibility_service_label">PGuard Protection Service</string>
+    <string name="accessibility_service_description">PGuard monitors and blocks adult websites, enforces habit limits, and protects against unauthorized uninstallation or tampering.</string>
 </resources>

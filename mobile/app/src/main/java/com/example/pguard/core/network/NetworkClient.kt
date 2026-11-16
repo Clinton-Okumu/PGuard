@@ -2,7 +2,11 @@ package com.example.pguard.core.network
 
 import android.content.Context
 import com.example.pguard.core.datastore.AuthDataStore
+import com.example.pguard.core.network.api.AccountabilityApiService
 import com.example.pguard.core.network.api.AuthApiService
+import com.example.pguard.core.network.api.BlocklistApiService
+import com.example.pguard.core.network.api.HabitsApiService
+import com.example.pguard.core.network.api.SettingsApiService
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -23,7 +27,12 @@ object NetworkClient {
         get() = _baseUrl
         set(value) {
             _baseUrl = if (value.endsWith("/")) value else "$value/"
-            _apiService = null
+            _retrofit = null
+            _authApiService = null
+            _settingsApiService = null
+            _blocklistApiService = null
+            _habitsApiService = null
+            _accountabilityApiService = null
         }
 
     private val json = Json {
@@ -38,7 +47,12 @@ object NetworkClient {
     }
 
     private var _okHttpClient: OkHttpClient? = null
-    private var _apiService: AuthApiService? = null
+    private var _retrofit: Retrofit? = null
+    private var _authApiService: AuthApiService? = null
+    private var _settingsApiService: SettingsApiService? = null
+    private var _blocklistApiService: BlocklistApiService? = null
+    private var _habitsApiService: HabitsApiService? = null
+    private var _accountabilityApiService: AccountabilityApiService? = null
 
     fun getOkHttpClient(authDataStore: AuthDataStore? = null): OkHttpClient {
         return _okHttpClient ?: run {
@@ -58,8 +72,8 @@ object NetworkClient {
         }
     }
 
-    fun getAuthApiService(context: Context? = null): AuthApiService {
-        return _apiService ?: run {
+    fun getRetrofit(context: Context? = null): Retrofit {
+        return _retrofit ?: run {
             val authDataStore = context?.let { AuthDataStore(it.applicationContext) }
             val client = getOkHttpClient(authDataStore)
             val contentType = "application/json".toMediaType()
@@ -70,8 +84,47 @@ object NetworkClient {
                 .addConverterFactory(json.asConverterFactory(contentType))
                 .build()
 
-            val service = retrofit.create(AuthApiService::class.java)
-            _apiService = service
+            _retrofit = retrofit
+            retrofit
+        }
+    }
+
+    fun getAuthApiService(context: Context? = null): AuthApiService {
+        return _authApiService ?: run {
+            val service = getRetrofit(context).create(AuthApiService::class.java)
+            _authApiService = service
+            service
+        }
+    }
+
+    fun getSettingsApiService(context: Context? = null): SettingsApiService {
+        return _settingsApiService ?: run {
+            val service = getRetrofit(context).create(SettingsApiService::class.java)
+            _settingsApiService = service
+            service
+        }
+    }
+
+    fun getBlocklistApiService(context: Context? = null): BlocklistApiService {
+        return _blocklistApiService ?: run {
+            val service = getRetrofit(context).create(BlocklistApiService::class.java)
+            _blocklistApiService = service
+            service
+        }
+    }
+
+    fun getHabitsApiService(context: Context? = null): HabitsApiService {
+        return _habitsApiService ?: run {
+            val service = getRetrofit(context).create(HabitsApiService::class.java)
+            _habitsApiService = service
+            service
+        }
+    }
+
+    fun getAccountabilityApiService(context: Context? = null): AccountabilityApiService {
+        return _accountabilityApiService ?: run {
+            val service = getRetrofit(context).create(AccountabilityApiService::class.java)
+            _accountabilityApiService = service
             service
         }
     }

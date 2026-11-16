@@ -24,9 +24,10 @@ func NewSettingsHandler(settingsStore store.SettingsStore, logger *log.Logger) *
 
 type updateSettingsRequest struct {
 	BlockAdultContent        *bool   `json:"block_adult_content"`
-	BlockMediaSearch         *bool   `json:"block_media_search"`
 	BlockShorts              *bool   `json:"block_shorts"`
 	BlockWhatsAppChannels    *bool   `json:"block_whatsapp_channels"`
+	BlockInstagramReels      *bool   `json:"block_instagram_reels"`
+	BlockTikTok              *bool   `json:"block_tiktok"`
 	UninstallProtection      *bool   `json:"uninstall_protection"`
 	BlockUnsupportedBrowsers *bool   `json:"block_unsupported_browsers"`
 	BlockNewlyInstalledApps  *bool   `json:"block_newly_installed_apps"`
@@ -76,14 +77,17 @@ func (h *SettingsHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Re
 	if req.BlockAdultContent != nil {
 		current.BlockAdultContent = *req.BlockAdultContent
 	}
-	if req.BlockMediaSearch != nil {
-		current.BlockMediaSearch = *req.BlockMediaSearch
-	}
 	if req.BlockShorts != nil {
 		current.BlockShorts = *req.BlockShorts
 	}
 	if req.BlockWhatsAppChannels != nil {
 		current.BlockWhatsAppChannels = *req.BlockWhatsAppChannels
+	}
+	if req.BlockInstagramReels != nil {
+		current.BlockInstagramReels = *req.BlockInstagramReels
+	}
+	if req.BlockTikTok != nil {
+		current.BlockTikTok = *req.BlockTikTok
 	}
 	if req.UninstallProtection != nil {
 		current.UninstallProtection = *req.UninstallProtection

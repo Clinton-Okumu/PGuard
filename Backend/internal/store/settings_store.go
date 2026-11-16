@@ -11,9 +11,10 @@ type UserSettings struct {
 	ID                       uint      `gorm:"primaryKey" json:"id"`
 	UserID                   uint      `gorm:"uniqueIndex;not null" json:"user_id"`
 	BlockAdultContent        bool      `gorm:"default:true" json:"block_adult_content"`
-	BlockMediaSearch         bool      `gorm:"default:false" json:"block_media_search"`
 	BlockShorts              bool      `gorm:"default:false" json:"block_shorts"`
 	BlockWhatsAppChannels    bool      `gorm:"default:false" json:"block_whatsapp_channels"`
+	BlockInstagramReels      bool      `gorm:"default:false" json:"block_instagram_reels"`
+	BlockTikTok              bool      `gorm:"default:false" json:"block_tiktok"`
 	UninstallProtection      bool      `gorm:"default:false" json:"uninstall_protection"`
 	BlockUnsupportedBrowsers bool      `gorm:"default:false" json:"block_unsupported_browsers"`
 	BlockNewlyInstalledApps  bool      `gorm:"default:false" json:"block_newly_installed_apps"`
@@ -29,9 +30,10 @@ func DefaultUserSettings(userID uint) *UserSettings {
 	return &UserSettings{
 		UserID:                   userID,
 		BlockAdultContent:        true,
-		BlockMediaSearch:         false,
 		BlockShorts:              false,
 		BlockWhatsAppChannels:    false,
+		BlockInstagramReels:      false,
+		BlockTikTok:              false,
 		UninstallProtection:      false,
 		BlockUnsupportedBrowsers: false,
 		BlockNewlyInstalledApps:  false,
@@ -84,9 +86,10 @@ func (s *PostgresSettingsStore) Upsert(settings *UserSettings) (*UserSettings, e
 	}
 
 	existing.BlockAdultContent = settings.BlockAdultContent
-	existing.BlockMediaSearch = settings.BlockMediaSearch
 	existing.BlockShorts = settings.BlockShorts
 	existing.BlockWhatsAppChannels = settings.BlockWhatsAppChannels
+	existing.BlockInstagramReels = settings.BlockInstagramReels
+	existing.BlockTikTok = settings.BlockTikTok
 	existing.UninstallProtection = settings.UninstallProtection
 	existing.BlockUnsupportedBrowsers = settings.BlockUnsupportedBrowsers
 	existing.BlockNewlyInstalledApps = settings.BlockNewlyInstalledApps
