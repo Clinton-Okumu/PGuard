@@ -34,6 +34,9 @@ class PGuardAccessibilityService : AccessibilityService() {
         const val KEY_UNINSTALL = "uninstall_protection"
         const val KEY_MESSAGE = "blocked_screen_message"
         const val KEY_COUNTDOWN = "blocked_screen_countdown"
+        const val KEY_ACCOUNTABILITY_MODE = "accountability_mode"
+        const val KEY_TIME_DELAY_UNLOCK_AT = "time_delay_unlock_at"
+        const val KEY_TIME_DELAY_TARGET = "time_delay_target"
 
         private val _isRunning = MutableStateFlow(false)
         val isRunning = _isRunning.asStateFlow()
@@ -47,6 +50,9 @@ class PGuardAccessibilityService : AccessibilityService() {
         var isUninstallProtectionEnabled: Boolean = false
         var blockedScreenMessage: String = "This page is blocked."
         var blockedScreenCountdown: Int = 3
+        var accountabilityMode: String = "none"
+        var timeDelayUnlockAt: Long = 0L
+        var timeDelayTarget: String = ""
 
         val customBlocklist: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
@@ -60,7 +66,38 @@ class PGuardAccessibilityService : AccessibilityService() {
             isUninstallProtectionEnabled = prefs.getBoolean(KEY_UNINSTALL, false)
             blockedScreenMessage = prefs.getString(KEY_MESSAGE, "This page is blocked.") ?: "This page is blocked."
             blockedScreenCountdown = prefs.getInt(KEY_COUNTDOWN, 3)
-            Log.d(TAG, "Loaded settings: adult=$isAdultBlockingEnabled, shorts=$isShortsBlockingEnabled, whatsapp=$isWhatsAppChannelsBlockingEnabled, reels=$isInstagramReelsBlockingEnabled, tiktok=$isTikTokBlockingEnabled")
+            accountabilityMode = prefs.getString(KEY_ACCOUNTABILITY_MODE, "none") ?: "none"
+            timeDelayUnlockAt = prefs.getLong(KEY_TIME_DELAY_UNLOCK_AT, 0L)
+            timeDelayTarget = prefs.getString(KEY_TIME_DELAY_TARGET, "") ?: ""
+            Log.d(TAG, "Loaded settings: adult=$isAdultBlockingEnabled, shorts=$isShortsBlockingEnabled, whatsapp=$isWhatsAppChannelsBlockingEnabled, reels=$isInstagramReelsBlockingEnabled, tiktok=$isTikTokBlockingEnabled, mode=$accountabilityMode")
+        }
+
+        fun saveAccountabilityMode(context: Context, mode: String) {
+            accountabilityMode = mode
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putString(KEY_ACCOUNTABILITY_MODE, mode)
+                .apply()
+        }
+
+        fun setTimeDelay(context: Context, unlockAt: Long, target: String) {
+            timeDelayUnlockAt = unlockAt
+            timeDelayTarget = target
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .putLong(KEY_TIME_DELAY_UNLOCK_AT, unlockAt)
+                .putString(KEY_TIME_DELAY_TARGET, target)
+                .apply()
+        }
+
+        fun clearTimeDelay(context: Context) {
+            timeDelayUnlockAt = 0L
+            timeDelayTarget = ""
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit()
+                .remove(KEY_TIME_DELAY_UNLOCK_AT)
+                .remove(KEY_TIME_DELAY_TARGET)
+                .apply()
         }
 
         fun saveSettings(

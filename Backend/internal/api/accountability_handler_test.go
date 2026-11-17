@@ -35,7 +35,7 @@ func (m *MockAccountabilityStore) CreateInvite(userID uint, userEmail, partnerEm
 	if partnerEmail == "" || !strings.Contains(partnerEmail, "@") {
 		return nil, store.ErrInvalidEmail
 	}
-	if strings.EqualFold(partnerEmail, userEmail) {
+	if store.AreEmailsEquivalent(partnerEmail, userEmail) {
 		return nil, store.ErrSelfInvite
 	}
 
@@ -76,6 +76,9 @@ func (m *MockAccountabilityStore) AcceptInvite(code string, partnerUserID *uint)
 	if err != nil {
 		return nil, err
 	}
+	if partnerUserID != nil && *partnerUserID == p.UserID {
+		return nil, store.ErrSelfInvite
+	}
 	p.Status = store.PartnerStatusAccepted
 	p.PartnerUserID = partnerUserID
 	p.UpdatedAt = time.Now()
@@ -113,7 +116,7 @@ func (m *MockAccountabilityStore) GetRecentEvents(userID uint, limit int) ([]sto
 func TestAccountabilityHandler_PartnerFlow(t *testing.T) {
 	logger := log.New(io.Discard, "", 0)
 	mockStore := NewMockAccountabilityStore()
-	handler := NewAccountabilityHandler(mockStore, logger)
+	handler := NewAccountabilityHandler(mockStore, nil, logger)
 
 	user1 := &store.User{ID: 1, Email: "user1@pguard.local"}
 	user2 := &store.User{ID: 2, Email: "partner@example.com"}
@@ -146,6 +149,19 @@ func TestAccountabilityHandler_PartnerFlow(t *testing.T) {
 		handler.HandleCreateInvite(rr, req)
 
 		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Contains(t, rr.Body.String(), "You cannot invite yourself as an accountability partner")
+	})
+
+	t.Run("POST /api/v1/accountability/invite prevents self-invite with email alias", func(t *testing.T) {
+		body := `{"partner_email": "user1+partner@pguard.local"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/invite", strings.NewReader(body))
+		req = middleware.SetUser(req, user1)
+		rr := httptest.NewRecorder()
+
+		handler.HandleCreateInvite(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Contains(t, rr.Body.String(), "You cannot invite yourself as an accountability partner")
 	})
 
 	t.Run("POST /api/v1/accountability/invite creates pending invite", func(t *testing.T) {
@@ -166,6 +182,18 @@ func TestAccountabilityHandler_PartnerFlow(t *testing.T) {
 		assert.Equal(t, "partner@example.com", resp.Partner.PartnerEmail)
 		assert.Equal(t, "pending", resp.Partner.Status)
 		assert.NotEmpty(t, resp.Partner.InviteCode)
+	})
+
+	t.Run("POST /api/v1/accountability/accept prevents accepting own invite code", func(t *testing.T) {
+		body := `{"invite_code": "PG-TEST01"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/accept", strings.NewReader(body))
+		req = middleware.SetUser(req, user1)
+		rr := httptest.NewRecorder()
+
+		handler.HandleAcceptInvite(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+		assert.Contains(t, rr.Body.String(), "You cannot accept your own invite code")
 	})
 
 	t.Run("POST /api/v1/accountability/accept links partner", func(t *testing.T) {
@@ -206,7 +234,7 @@ func TestAccountabilityHandler_PartnerFlow(t *testing.T) {
 func TestAccountabilityHandler_SecurityEvents(t *testing.T) {
 	logger := log.New(io.Discard, "", 0)
 	mockStore := NewMockAccountabilityStore()
-	handler := NewAccountabilityHandler(mockStore, logger)
+	handler := NewAccountabilityHandler(mockStore, nil, logger)
 
 	user := &store.User{ID: 1, Email: "user@pguard.local"}
 

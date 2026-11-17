@@ -32,6 +32,9 @@ func SetUpRoutes(app *app.Application) *chi.Mux {
 		r.Post("/auth/refresh", app.AuthHandler.HandleRefreshToken)
 		r.Post("/auth/logout", app.AuthHandler.HandleLogout)
 
+		// Public Partner One-Click Web Acceptance (No App or Login required)
+		r.Get("/accountability/accept-web", app.AccountabilityHandler.HandleAcceptInviteWeb)
+
 		// Protected endpoints
 		r.Group(func(r chi.Router) {
 			r.Use(app.Middleware.Authenticate)
@@ -65,6 +68,7 @@ func SetUpRoutes(app *app.Application) *chi.Mux {
 			r.Delete("/accountability/partner", app.Middleware.RequireUser(app.AccountabilityHandler.HandleDisconnectPartner))
 			r.Post("/accountability/event", app.Middleware.RequireUser(app.AccountabilityHandler.HandleRecordEvent))
 			r.Get("/accountability/events", app.Middleware.RequireUser(app.AccountabilityHandler.HandleGetEvents))
+			r.Post("/accountability/request-unlock", app.Middleware.RequireUser(app.AccountabilityHandler.HandleRequestUnlockCode))
 		})
 	})
 

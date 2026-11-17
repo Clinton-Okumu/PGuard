@@ -7,6 +7,8 @@ import com.example.pguard.core.network.model.PartnerInviteResponse
 import com.example.pguard.core.network.model.PartnerStatusResponse
 import com.example.pguard.core.network.model.RecordEventRequest
 import com.example.pguard.core.network.model.RecordEventResponse
+import com.example.pguard.core.network.model.RequestUnlockCodeRequest
+import com.example.pguard.core.network.model.RequestUnlockCodeResponse
 import com.example.pguard.core.network.model.SecurityEventsResponse
 import com.example.pguard.core.network.model.StatusResponse
 import retrofit2.http.Body
@@ -42,4 +44,9 @@ interface AccountabilityApiService {
     suspend fun getEvents(
         @Query("limit") limit: Int = 20
     ): SecurityEventsResponse
+
+    @POST("api/v1/accountability/request-unlock")
+    suspend fun requestUnlockCode(
+        @Body request: RequestUnlockCodeRequest
+    ): RequestUnlockCodeResponse
 }

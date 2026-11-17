@@ -7,7 +7,7 @@ import androidx.compose.ui.graphics.Color
 import com.example.pguard.R
 import com.example.pguard.core.network.model.UserSettingsDto
 
-internal enum class BlockingToggle {
+enum class BlockingToggle {
     ADULT_CONTENT,
     SHORTS,
     WHATSAPP_CHANNELS,

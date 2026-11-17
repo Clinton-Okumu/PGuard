@@ -27,6 +27,8 @@ object NetworkClient {
         get() = _baseUrl
         set(value) {
             _baseUrl = if (value.endsWith("/")) value else "$value/"
+            _okHttpClient = null
+            _hasAuthSetup = false
             _retrofit = null
             _authApiService = null
             _settingsApiService = null
@@ -47,6 +49,7 @@ object NetworkClient {
     }
 
     private var _okHttpClient: OkHttpClient? = null
+    private var _hasAuthSetup: Boolean = false
     private var _retrofit: Retrofit? = null
     private var _authApiService: AuthApiService? = null
     private var _settingsApiService: SettingsApiService? = null
@@ -55,38 +58,42 @@ object NetworkClient {
     private var _accountabilityApiService: AccountabilityApiService? = null
 
     fun getOkHttpClient(authDataStore: AuthDataStore? = null): OkHttpClient {
-        return _okHttpClient ?: run {
-            val builder = OkHttpClient.Builder()
-                .addInterceptor(loggingInterceptor)
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .readTimeout(15, TimeUnit.SECONDS)
-                .writeTimeout(15, TimeUnit.SECONDS)
-
-            if (authDataStore != null) {
-                builder.addInterceptor(AuthInterceptor(authDataStore))
-            }
-
-            val client = builder.build()
-            _okHttpClient = client
-            client
+        if (_okHttpClient != null && (_hasAuthSetup || authDataStore == null)) {
+            return _okHttpClient!!
         }
+        val builder = OkHttpClient.Builder()
+            .addInterceptor(loggingInterceptor)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+
+        if (authDataStore != null) {
+            builder.addInterceptor(AuthInterceptor(authDataStore))
+            builder.authenticator(TokenAuthenticator(authDataStore, { _baseUrl }, json))
+            _hasAuthSetup = true
+        }
+
+        val client = builder.build()
+        _okHttpClient = client
+        return client
     }
 
     fun getRetrofit(context: Context? = null): Retrofit {
-        return _retrofit ?: run {
-            val authDataStore = context?.let { AuthDataStore(it.applicationContext) }
-            val client = getOkHttpClient(authDataStore)
-            val contentType = "application/json".toMediaType()
-
-            val retrofit = Retrofit.Builder()
-                .baseUrl(_baseUrl)
-                .client(client)
-                .addConverterFactory(json.asConverterFactory(contentType))
-                .build()
-
-            _retrofit = retrofit
-            retrofit
+        val authDataStore = context?.let { AuthDataStore(it.applicationContext) }
+        val client = getOkHttpClient(authDataStore)
+        if (_retrofit != null && (_hasAuthSetup || authDataStore == null)) {
+            return _retrofit!!
         }
+        val contentType = "application/json".toMediaType()
+
+        val retrofit = Retrofit.Builder()
+            .baseUrl(_baseUrl)
+            .client(client)
+            .addConverterFactory(json.asConverterFactory(contentType))
+            .build()
+
+        _retrofit = retrofit
+        return retrofit
     }
 
     fun getAuthApiService(context: Context? = null): AuthApiService {

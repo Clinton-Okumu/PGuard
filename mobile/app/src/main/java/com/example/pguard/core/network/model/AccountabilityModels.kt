@@ -74,3 +74,17 @@ data class SecurityEventsResponse(
     @SerialName("count") val count: Int = 0,
     @SerialName("error") val error: String? = null
 )
+
+@Serializable
+data class RequestUnlockCodeRequest(
+    @SerialName("feature_name") val featureName: String
+)
+
+@Serializable
+data class RequestUnlockCodeResponse(
+    @SerialName("message") val message: String? = null,
+    @SerialName("partner_email") val partnerEmail: String? = null,
+    @SerialName("feature_name") val featureName: String? = null,
+    @SerialName("code") val code: String? = null,
+    @SerialName("error") val error: String? = null
+)

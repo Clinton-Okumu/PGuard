@@ -16,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -27,6 +28,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.sp
+import com.example.pguard.core.datastore.AuthDataStore
 import com.example.pguard.core.network.NetworkClient
 import com.example.pguard.core.network.model.UserDto
 import com.example.pguard.data.repository.AccountabilityRepository
@@ -54,8 +56,13 @@ fun HomeScreen(
     val accountabilityRepository = remember {
         AccountabilityRepository(NetworkClient.getAccountabilityApiService(context))
     }
+    val authDataStore = remember { AuthDataStore(context.applicationContext) }
     val blockingViewModel = remember {
-        BlockingViewModel(settingsRepository, accountabilityRepository)
+        BlockingViewModel(settingsRepository, accountabilityRepository, authDataStore)
+    }
+
+    LaunchedEffect(user?.email) {
+        blockingViewModel.setCurrentUserEmail(user?.email)
     }
 
     val tabs = remember { PGuardTab.entries }

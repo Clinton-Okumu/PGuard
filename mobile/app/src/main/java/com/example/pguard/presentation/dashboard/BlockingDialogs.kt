@@ -229,7 +229,8 @@ internal fun InvitePartnerDialog(
     email: String,
     onEmailChange: (String) -> Unit,
     onSubmit: () -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    errorMessage: String? = null
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -253,10 +254,15 @@ internal fun InvitePartnerDialog(
                     onValueChange = onEmailChange,
                     placeholder = { Text("partner@example.com") },
                     singleLine = true,
+                    isError = !errorMessage.isNullOrEmpty(),
+                    supportingText = if (!errorMessage.isNullOrEmpty()) {
+                        { Text(text = errorMessage, color = MaterialTheme.colorScheme.error) }
+                    } else null,
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = CoralPrimary,
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f),
+                        errorBorderColor = MaterialTheme.colorScheme.error
                     )
                 )
             }

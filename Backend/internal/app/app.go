@@ -9,6 +9,7 @@ import (
 
 	"Backend/internal/api"
 	"Backend/internal/auth"
+	"Backend/internal/mailer"
 	"Backend/internal/middleware"
 	"Backend/internal/store"
 	"Backend/internal/tokens"
@@ -55,13 +56,14 @@ func NewApplication() (*Application, error) {
 	// Services
 	googleVerifier := auth.NewGoogleVerifier()
 	tokenService := tokens.NewTokenService()
+	resendMailer := mailer.NewResendMailer(logger)
 
 	// Handlers
 	authHandler := api.NewAuthHandler(userStore, tokenStore, googleVerifier, tokenService, logger)
 	settingsHandler := api.NewSettingsHandler(settingsStore, logger)
 	blocklistHandler := api.NewBlocklistHandler(blocklistStore, logger)
 	habitsHandler := api.NewHabitsHandler(habitsStore, logger)
-	accountabilityHandler := api.NewAccountabilityHandler(accountabilityStore, logger)
+	accountabilityHandler := api.NewAccountabilityHandler(accountabilityStore, resendMailer, logger)
 
 	// Middleware
 	userMiddleware := middleware.UserMiddleware{

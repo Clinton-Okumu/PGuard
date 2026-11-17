@@ -73,7 +73,19 @@ internal data class BlockingScreenCallbacks(
     val onGuideDismiss: () -> Unit,
     val onInviteEmailChange: (String) -> Unit,
     val onInviteSubmit: () -> Unit,
-    val onInviteDismiss: () -> Unit
+    val onInviteDismiss: () -> Unit,
+    val onManageAccountabilityMode: () -> Unit,
+    val onSelectAccountabilityMode: (AccountabilityMode) -> Unit,
+    val onDismissModeSelection: () -> Unit,
+    val onTypingChallengeSuccess: () -> Unit,
+    val onDismissTypingChallenge: () -> Unit,
+    val onConfirmTimeDelay: () -> Unit,
+    val onCancelTimeDelay: () -> Unit,
+    val onDismissTimeDelayConfirm: () -> Unit,
+    val onFriendApprovalSuccess: () -> Unit,
+    val onVerifyFriendApprovalCode: (String) -> Unit,
+    val onDismissFriendApproval: () -> Unit,
+    val onRequestPartnerApproval: (String) -> Unit
 )
 
 @Composable
@@ -112,13 +124,21 @@ fun BlockingScreen(
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                alerts = readPermissionAlerts(context)
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    alerts = readPermissionAlerts(context)
+                    viewModel.refreshPartnerStatus()
+                }
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    viewModel.stopPartnerPolling()
+                }
+                else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+            viewModel.stopPartnerPolling()
         }
     }
 
@@ -130,38 +150,12 @@ fun BlockingScreen(
         },
         onFocusModeClick = onFocusModeClick,
         onToggle = { toggle, checked ->
-            when (toggle) {
-                BlockingToggle.ADULT_CONTENT ->
-                    PGuardAccessibilityService.saveSettings(context, adult = checked)
-                BlockingToggle.SHORTS ->
-                    PGuardAccessibilityService.saveSettings(context, shorts = checked)
-                BlockingToggle.WHATSAPP_CHANNELS ->
-                    PGuardAccessibilityService.saveSettings(context, whatsapp = checked)
-                BlockingToggle.INSTAGRAM_REELS ->
-                    PGuardAccessibilityService.saveSettings(context, instagramReels = checked)
-                BlockingToggle.TIKTOK ->
-                    PGuardAccessibilityService.saveSettings(context, tiktok = checked)
-                BlockingToggle.UNINSTALL_PROTECTION ->
-                    PGuardAccessibilityService.saveSettings(context, uninstall = checked)
-                BlockingToggle.UNSUPPORTED_BROWSERS,
-                BlockingToggle.NEW_INSTALLED_APPS -> Unit
-            }
-
-            when (toggle) {
-                BlockingToggle.ADULT_CONTENT -> viewModel.setAdultBlocking(checked)
-                BlockingToggle.SHORTS -> viewModel.setShortsBlocking(checked)
-                BlockingToggle.WHATSAPP_CHANNELS -> viewModel.setWhatsAppChannelsBlocking(checked)
-                BlockingToggle.INSTAGRAM_REELS -> viewModel.setInstagramReelsBlocking(checked)
-                BlockingToggle.TIKTOK -> viewModel.setTikTokBlocking(checked)
-                BlockingToggle.UNINSTALL_PROTECTION -> viewModel.setUninstallProtection(checked)
-                BlockingToggle.UNSUPPORTED_BROWSERS -> viewModel.setUnsupportedBrowsersBlocking(checked)
-                BlockingToggle.NEW_INSTALLED_APPS -> viewModel.setNewlyInstalledAppsBlocking(checked)
-            }
+            viewModel.handleToggleRequested(toggle, checked, context)
         },
         onEditSetting = viewModel::openEditor,
         onInfo = viewModel::showInfo,
         onPartnerAction = {
-            if (state.partner == null) viewModel.showInviteDialog() else viewModel.disconnectPartner()
+            if (state.partner == null) viewModel.showInviteDialog() else viewModel.requestDisconnectPartner(context)
         },
         onFixPushNotifications = {
             openNotificationSettings(context)
@@ -183,7 +177,19 @@ fun BlockingScreen(
         onGuideDismiss = viewModel::dismissGuide,
         onInviteEmailChange = viewModel::updateInviteEmail,
         onInviteSubmit = viewModel::submitInvite,
-        onInviteDismiss = viewModel::dismissInviteDialog
+        onInviteDismiss = viewModel::dismissInviteDialog,
+        onManageAccountabilityMode = { viewModel.requestChangeAccountabilityMode(context) },
+        onSelectAccountabilityMode = { viewModel.requestSetAccountabilityMode(it, context) },
+        onDismissModeSelection = viewModel::dismissModeSelection,
+        onTypingChallengeSuccess = { viewModel.onTypingChallengeSuccess(context) },
+        onDismissTypingChallenge = viewModel::dismissTypingChallenge,
+        onConfirmTimeDelay = { viewModel.onStartTimeDelay(context) },
+        onCancelTimeDelay = { viewModel.cancelTimeDelay(context) },
+        onDismissTimeDelayConfirm = viewModel::dismissTimeDelayConfirm,
+        onFriendApprovalSuccess = { viewModel.onFriendApprovalSuccess(context) },
+        onVerifyFriendApprovalCode = { code -> viewModel.verifyFriendApprovalCode(code, context) },
+        onDismissFriendApproval = viewModel::dismissFriendApproval,
+        onRequestPartnerApproval = viewModel::requestPartnerApprovalCode
     )
 
     BlockingScreenContent(
@@ -205,8 +211,16 @@ internal fun BlockingScreenContent(
     val partnerStatus = when {
         state.isPartnerLinked -> "Active (${state.partner?.partnerEmail})"
         state.partner != null -> "Pending (${state.partner?.partnerEmail})"
-        else -> "Not found"
+        else -> "No partner linked"
     }
+
+    val partnerActionLabel = when {
+        state.accountabilityMode == AccountabilityMode.FRIEND && state.partner == null -> "Invite"
+        state.partner != null -> "Remove"
+        else -> null
+    }
+
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     Box(
         modifier = modifier
@@ -262,10 +276,26 @@ internal fun BlockingScreenContent(
                     )
                 }
 
+                AnimatedVisibility(visible = state.timeDelayUnlockAt > 0L) {
+                    TimeDelayActiveBanner(
+                        targetFeatureTitle = targetDisplayName(state.timeDelayTarget),
+                        unlockAt = state.timeDelayUnlockAt,
+                        onCancel = callbacks.onCancelTimeDelay
+                    )
+                }
+
                 AccountabilityCard(
+                    mode = state.accountabilityMode,
                     partnerStatus = partnerStatus,
-                    actionLabel = if (state.partner == null) "Invite" else "Remove",
-                    onAction = callbacks.onPartnerAction
+                    onManageMode = callbacks.onManageAccountabilityMode,
+                    onPartnerAction = callbacks.onPartnerAction,
+                    partnerActionLabel = partnerActionLabel,
+                    onInfoClick = {
+                        callbacks.onInfo(
+                            "Accountability Guard",
+                            "Choose friction mode before turning off protection:\n\n• Friend: Partner must approve via email code.\n• Myself: 60-second typing challenge with zero typos.\n• 24h Time Delay: 24-hour cooling-off period."
+                        )
+                    }
                 )
             }
 
@@ -367,7 +397,44 @@ private fun BlockingScreenDialogs(
             email = state.inviteEmail,
             onEmailChange = callbacks.onInviteEmailChange,
             onSubmit = callbacks.onInviteSubmit,
-            onDismiss = callbacks.onInviteDismiss
+            onDismiss = callbacks.onInviteDismiss,
+            errorMessage = state.inviteEmailError
+        )
+    }
+
+    if (state.isModeSelectionVisible) {
+        AccountabilityModeSelectionDialog(
+            currentMode = state.accountabilityMode,
+            onSelectMode = callbacks.onSelectAccountabilityMode,
+            onDismiss = callbacks.onDismissModeSelection
+        )
+    }
+
+    state.typingChallengeTarget?.let { target ->
+        TypingChallengeDialog(
+            targetFeatureTitle = target.title,
+            onSuccess = callbacks.onTypingChallengeSuccess,
+            onDismiss = callbacks.onDismissTypingChallenge
+        )
+    }
+
+    state.timeDelayConfirmTarget?.let { target ->
+        TimeDelayConfirmDialog(
+            targetFeatureTitle = target.title,
+            onConfirm = callbacks.onConfirmTimeDelay,
+            onDismiss = callbacks.onDismissTimeDelayConfirm
+        )
+    }
+
+    state.friendApprovalTarget?.let { target ->
+        val featureTitle = target.title
+        FriendApprovalDialog(
+            targetFeatureTitle = featureTitle,
+            partnerEmail = state.partner?.partnerEmail ?: "",
+            onRequestCode = { callbacks.onRequestPartnerApproval(featureTitle) },
+            onSubmitCode = callbacks.onVerifyFriendApprovalCode,
+            onDismiss = callbacks.onDismissFriendApproval,
+            devCode = state.devApprovalCode
         )
     }
 }
@@ -414,5 +481,17 @@ private fun previewCallbacks() = BlockingScreenCallbacks(
     onGuideDismiss = {},
     onInviteEmailChange = {},
     onInviteSubmit = {},
-    onInviteDismiss = {}
+    onInviteDismiss = {},
+    onManageAccountabilityMode = {},
+    onSelectAccountabilityMode = {},
+    onDismissModeSelection = {},
+    onTypingChallengeSuccess = {},
+    onDismissTypingChallenge = {},
+    onConfirmTimeDelay = {},
+    onCancelTimeDelay = {},
+    onDismissTimeDelayConfirm = {},
+    onFriendApprovalSuccess = {},
+    onVerifyFriendApprovalCode = {},
+    onDismissFriendApproval = {},
+    onRequestPartnerApproval = {}
 )

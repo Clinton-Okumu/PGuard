@@ -39,6 +39,37 @@ func IsValidEventType(t string) bool {
 	}
 }
 
+// NormalizeEmail normalizes an email for comparison:
+// trims, converts to lowercase, strips plus-tag addressing, and ignores dots for Gmail.
+func NormalizeEmail(email string) string {
+	email = strings.ToLower(strings.TrimSpace(email))
+	parts := strings.Split(email, "@")
+	if len(parts) != 2 {
+		return email
+	}
+	user, domain := parts[0], parts[1]
+	if idx := strings.Index(user, "+"); idx != -1 {
+		user = user[:idx]
+	}
+	if domain == "gmail.com" || domain == "googlemail.com" {
+		user = strings.ReplaceAll(user, ".", "")
+	}
+	return user + "@" + domain
+}
+
+// AreEmailsEquivalent returns true if two emails resolve to the same account or are equal.
+func AreEmailsEquivalent(email1, email2 string) bool {
+	e1 := strings.TrimSpace(email1)
+	e2 := strings.TrimSpace(email2)
+	if e1 == "" || e2 == "" {
+		return false
+	}
+	if strings.EqualFold(e1, e2) {
+		return true
+	}
+	return NormalizeEmail(e1) == NormalizeEmail(e2)
+}
+
 type AccountabilityPartner struct {
 	ID            uint      `gorm:"primaryKey" json:"id"`
 	UserID        uint      `gorm:"not null;index:idx_user_partner_email,unique" json:"user_id"`
@@ -96,7 +127,7 @@ func (s *PostgresAccountabilityStore) CreateInvite(userID uint, userEmail, partn
 		return nil, ErrInvalidEmail
 	}
 
-	if strings.EqualFold(email, strings.TrimSpace(userEmail)) {
+	if AreEmailsEquivalent(email, userEmail) {
 		return nil, ErrSelfInvite
 	}
 
@@ -160,6 +191,10 @@ func (s *PostgresAccountabilityStore) AcceptInvite(code string, partnerUserID *u
 	partner, err := s.GetInviteByCode(code)
 	if err != nil {
 		return nil, err
+	}
+
+	if partnerUserID != nil && *partnerUserID == partner.UserID {
+		return nil, ErrSelfInvite
 	}
 
 	partner.Status = PartnerStatusAccepted

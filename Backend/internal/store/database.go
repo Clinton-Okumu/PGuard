@@ -10,7 +10,7 @@ import (
 )
 
 func Open() (*gorm.DB, error) {
-	_ = godotenv.Load()
+	_ = godotenv.Load(".env", "Backend/.env")
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
