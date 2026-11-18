@@ -178,21 +178,217 @@ fun AccessibilityExplanationDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    PermissionGuideDialog(
-        title = "Enable Accessibility",
-        category = "Core Content Filtering",
-        iconRes = R.drawable.ic_accessibility,
-        description = "PGuard requires Accessibility service to inspect browser URLs, social feeds (Shorts/Reels/TikTok), and newly launched apps in real time to keep you protected.",
-        steps = listOf(
-            "Tap \"Open Settings\" below to go to Android Accessibility settings.",
-            "Tap \"Installed apps\" (or \"Downloaded services\").",
-            "Find and tap \"PGuard\".",
-            "Turn the toggle ON and tap \"Allow\" on the confirmation prompt."
-        ),
-        confirmLabel = "Open Settings",
-        onConfirm = onConfirm,
-        onDismiss = onDismiss
-    )
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = CardBackground,
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(22.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                // Header
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(46.dp)
+                            .background(CoralPrimary.copy(alpha = 0.15f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_accessibility),
+                            contentDescription = null,
+                            tint = CoralPrimary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Accessibility Disclosure",
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Prominent In-App Consent",
+                            fontSize = 12.sp,
+                            color = CoralPrimary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Core explanation
+                Text(
+                    text = "PGuard uses Android's AccessibilityService API solely for real-time digital wellbeing protection and content filtering.",
+                    fontSize = 13.sp,
+                    color = Color.White.copy(alpha = 0.85f),
+                    lineHeight = 19.sp
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Section 1: What Data Is Monitored
+                DisclosureSection(
+                    title = "WHAT DATA IS INSPECTED",
+                    items = listOf(
+                        "Web Browser URLs: Scanned in real time to detect and block explicit or restricted websites.",
+                        "On-Screen Text & Metadata: Inspected to detect banned keywords in feeds and short-form video tabs (Shorts, Reels, TikTok)."
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Section 2: Non-Destructive Protection
+                DisclosureSection(
+                    title = "HOW IT PROTECTS YOU",
+                    items = listOf(
+                        "Two-Tier State Changes: Applies a targeted feed blur or non-destructive overlay over flagged content without terminating your host apps.",
+                        "Clear Dismissal: Displays a prominent 'Go Back' escape button and back navigation at all times."
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Section 3: Strict Privacy Guarantee
+                DisclosureSection(
+                    title = "PRIVACY & SECURITY GUARANTEE",
+                    items = listOf(
+                        "100% On-Device: All content evaluation runs locally on your phone.",
+                        "Zero Data Collection: No personal data, passwords, keystrokes, messages, or financial information is ever logged, stored, or transmitted off your device."
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Activation steps
+                Text(
+                    text = "ACTIVATION STEPS:",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White.copy(alpha = 0.5f),
+                    letterSpacing = 0.5.sp
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                listOf(
+                    "Tap \"Agree & Open Settings\" below.",
+                    "Select \"Installed apps\" (or \"Downloaded services\").",
+                    "Tap \"PGuard Protection Service\" and toggle it ON."
+                ).forEachIndexed { index, step ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(20.dp)
+                                .background(Color.White.copy(alpha = 0.08f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "${index + 1}",
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = CoralPrimary
+                            )
+                        }
+                        Text(
+                            text = step,
+                            fontSize = 12.5.sp,
+                            color = Color.White.copy(alpha = 0.9f),
+                            lineHeight = 17.sp,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Action buttons (Decline vs Affirmative Consent)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Decline", color = Color.White.copy(alpha = 0.7f), fontSize = 13.5.sp)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = onConfirm,
+                        colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = "Agree & Open Settings",
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.5.sp
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DisclosureSection(
+    title: String,
+    items: List<String>
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(12.dp))
+            .padding(10.dp)
+    ) {
+        Text(
+            text = title,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            color = CoralPrimary,
+            letterSpacing = 0.5.sp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        items.forEach { item ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    text = "•",
+                    color = CoralPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = item,
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.85f),
+                    lineHeight = 16.5.sp
+                )
+            }
+        }
+    }
 }
 
 @Composable

@@ -3,6 +3,7 @@ package com.example.pguard.engine.accessibility
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.content.SharedPreferences
+import android.graphics.Rect
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -240,6 +241,7 @@ class PGuardAccessibilityService : AccessibilityService() {
     private var lastUnsupportedBrowserBlockedTimestamp: Long = 0L
     private var lastAppBlockedTimestamp: Long = 0L
     private val mainHandler = Handler(Looper.getMainLooper())
+    val overlayManager by lazy { AccessibilityOverlayManager(this) }
     private val dynamicInstallReceiver = com.example.pguard.engine.receiver.NewAppInstallReceiver()
 
     @Suppress("DEPRECATION")
@@ -276,6 +278,11 @@ class PGuardAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         val packageName = event.packageName?.toString() ?: return
+
+        // Dynamic State Reset / Scroll-Through Clearance (Feeds Only)
+        if (event.eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED && overlayManager.isContainerShowing) {
+            overlayManager.hideContainerOverlay()
+        }
 
         // 0. App Blocking (Blocked apps from blocklist / auto-blocked newly installed apps)
         if (blockedAppPackages.contains(packageName) && packageName != applicationContext.packageName) {
@@ -346,23 +353,15 @@ class PGuardAccessibilityService : AccessibilityService() {
     private fun inspectBrowserActivity(event: AccessibilityEvent) {
         var blockedTarget: String? = null
 
-        // A. Immediate check on the event itself (contains URL or page title directly)
-        val eventText = extractEventText(event)
-        if (eventText.isNotBlank() && shouldBlock(eventText)) {
-            blockedTarget = eventText
-        }
-
         val rootNode = findRootNode(event)
 
-        // B. Primary: Extract from address bar / search input / event text
-        if (blockedTarget == null) {
-            val detectedUrl = BrowserInspector.extractUrl(rootNode, event)
-            if (detectedUrl != null && shouldBlock(detectedUrl)) {
-                blockedTarget = detectedUrl
-            }
+        // A. Primary: Extract from address bar / search input / navigation URL
+        val detectedUrl = BrowserInspector.extractUrl(rootNode, event)
+        if (detectedUrl != null && shouldBlock(detectedUrl)) {
+            blockedTarget = detectedUrl
         }
 
-        // C. Fallback scan: Deep scan for visible adult keywords or domain nodes
+        // B. Visible adult content / domain scan on the web page
         if (blockedTarget == null && rootNode != null) {
             val matchedContent = BrowserInspector.findRestrictedContent(rootNode) { text ->
                 shouldBlock(text)
@@ -372,8 +371,20 @@ class PGuardAccessibilityService : AccessibilityService() {
             }
         }
 
+        // C. Check event text (e.g. window title or search query)
+        if (blockedTarget == null) {
+            val eventText = extractEventText(event)
+            if (eventText.isNotBlank() && shouldBlock(eventText)) {
+                blockedTarget = eventText
+            }
+        }
+
         if (blockedTarget != null) {
-            triggerBlock(blockedTarget)
+            // Web browsers display web content in a unified scrollable canvas.
+            // Rather than pinning floating cards that stick over scrolling HTML,
+            // we display the Tier 2 Full-Screen Display Overlay with true hardware
+            // Gaussian blur and a prominent "Go Back" button.
+            triggerBlock(blockedTarget, isBrowserContext = true)
         }
     }
 
@@ -475,7 +486,11 @@ class PGuardAccessibilityService : AccessibilityService() {
         return lower.contains("tiktok.com")
     }
 
-    private fun triggerBlock(target: String) {
+    private fun triggerBlock(
+        target: String,
+        matchedNode: AccessibilityNodeInfo? = null,
+        isBrowserContext: Boolean = false
+    ) {
         val now = System.currentTimeMillis()
         if (target == lastBlockedUrl && (now - lastBlockedTimestamp) < BLOCK_COOLDOWN_MS) {
             return
@@ -484,24 +499,57 @@ class PGuardAccessibilityService : AccessibilityService() {
         lastBlockedUrl = target
         lastBlockedTimestamp = now
 
-        Log.w(TAG, "BLOCKED restricted content detected: $target")
+        Log.w(TAG, "BLOCKED restricted content detected: $target (browser=$isBrowserContext)")
 
-        // Immediately close or navigate away from the page
-        performGlobalAction(GLOBAL_ACTION_BACK)
-
-        // Launch full-screen Blocked warning
-        try {
-            BlockedActivity.start(
-                context = this,
-                url = target,
-                message = blockedScreenMessage,
-                countdownSeconds = blockedScreenCountdown,
-                redirectUrl = redirectUrl
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start BlockedActivity, falling back to home: ${e.message}")
-            performGlobalAction(GLOBAL_ACTION_HOME)
+        // 1. Standard Scrollable Feeds in native apps (not web browsers):
+        // Context classification for targeted container overlay over feed items
+        if (!isBrowserContext && matchedNode != null && isFeedContainerItem(matchedNode)) {
+            val bounds = Rect()
+            matchedNode.getBoundsInScreen(bounds)
+            Log.i(TAG, "Displaying Tier 1 container blur/warning overlay over feed item: $bounds")
+            overlayManager.showContainerOverlay(bounds, target)
+            return
         }
+
+        // 2. Full-Screen Layouts / Web Browsers:
+        // System-level TYPE_ACCESSIBILITY_OVERLAY window with authentic hardware Gaussian blur
+        // and prominent "Go Back" button. Neutralizes visual exposure without force-closing the app.
+        overlayManager.showFullScreenOverlay(
+            target = target,
+            message = blockedScreenMessage,
+            countdownSeconds = blockedScreenCountdown,
+            redirectUrl = redirectUrl,
+            onGoBack = {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            }
+        )
+    }
+
+    private fun isFeedContainerItem(node: AccessibilityNodeInfo): Boolean {
+        var current: AccessibilityNodeInfo? = node
+        var hasScrollableAncestor = false
+        while (current != null) {
+            val className = current.className?.toString() ?: ""
+            if (current.isScrollable ||
+                className.contains("RecyclerView", ignoreCase = true) ||
+                className.contains("ListView", ignoreCase = true) ||
+                className.contains("ScrollView", ignoreCase = true) ||
+                className.contains("ViewPager", ignoreCase = true)
+            ) {
+                hasScrollableAncestor = true
+                break
+            }
+            current = current.parent
+        }
+
+        if (!hasScrollableAncestor) return false
+
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        val displayMetrics = resources.displayMetrics
+        val screenHeight = displayMetrics.heightPixels
+
+        return bounds.height() > 0 && bounds.height() < (screenHeight * 0.8)
     }
 
     private fun isYouTubePackage(packageName: String): Boolean {
@@ -613,20 +661,16 @@ class PGuardAccessibilityService : AccessibilityService() {
         }
         lastShortsBlockedTimestamp = now
 
-        Log.w(TAG, "BLOCKED: YouTube Shorts detected, pressing BACK")
-        performGlobalAction(GLOBAL_ACTION_BACK)
-
-        try {
-            BlockedActivity.start(
-                context = this,
-                url = "YouTube Shorts",
-                message = if (blockedScreenMessage.isNotBlank()) blockedScreenMessage else "YouTube Shorts is blocked.",
-                countdownSeconds = blockedScreenCountdown,
-                redirectUrl = redirectUrl
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to launch BlockedActivity for Shorts: ${e.message}")
-        }
+        Log.w(TAG, "BLOCKED: YouTube Shorts detected, showing full-screen overlay")
+        overlayManager.showFullScreenOverlay(
+            target = "YouTube Shorts",
+            message = if (blockedScreenMessage.isNotBlank()) blockedScreenMessage else "YouTube Shorts is blocked.",
+            countdownSeconds = blockedScreenCountdown,
+            redirectUrl = redirectUrl,
+            onGoBack = {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            }
+        )
     }
 
     private fun isWhatsAppPackage(packageName: String): Boolean {
@@ -748,20 +792,16 @@ class PGuardAccessibilityService : AccessibilityService() {
         }
         lastWhatsAppBlockedTimestamp = now
 
-        Log.w(TAG, "BLOCKED: $reason, pressing BACK")
-        performGlobalAction(GLOBAL_ACTION_BACK)
-
-        try {
-            BlockedActivity.start(
-                context = this,
-                url = "WhatsApp Channels",
-                message = reason,
-                countdownSeconds = blockedScreenCountdown,
-                redirectUrl = redirectUrl
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to launch BlockedActivity for WhatsApp: ${e.message}")
-        }
+        Log.w(TAG, "BLOCKED: $reason, showing full-screen overlay")
+        overlayManager.showFullScreenOverlay(
+            target = "WhatsApp Channels",
+            message = reason,
+            countdownSeconds = blockedScreenCountdown,
+            redirectUrl = redirectUrl,
+            onGoBack = {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            }
+        )
     }
 
     // --- TIKTOK BLOCKING ---
@@ -784,20 +824,16 @@ class PGuardAccessibilityService : AccessibilityService() {
         }
         lastTikTokBlockedTimestamp = now
 
-        Log.w(TAG, "BLOCKED: TikTok application opened, returning HOME")
-        performGlobalAction(GLOBAL_ACTION_HOME)
-
-        try {
-            BlockedActivity.start(
-                context = this,
-                url = "TikTok",
-                message = "TikTok is completely blocked.",
-                countdownSeconds = blockedScreenCountdown,
-                redirectUrl = redirectUrl
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to launch BlockedActivity for TikTok: ${e.message}")
-        }
+        Log.w(TAG, "BLOCKED: TikTok application opened, showing full-screen overlay")
+        overlayManager.showFullScreenOverlay(
+            target = "TikTok",
+            message = "TikTok is completely blocked.",
+            countdownSeconds = blockedScreenCountdown,
+            redirectUrl = redirectUrl,
+            onGoBack = {
+                performGlobalAction(GLOBAL_ACTION_HOME)
+            }
+        )
     }
 
     // --- INSTAGRAM REELS BLOCKING ---
@@ -906,20 +942,16 @@ class PGuardAccessibilityService : AccessibilityService() {
         }
         lastInstagramBlockedTimestamp = now
 
-        Log.w(TAG, "BLOCKED: Instagram Reels closed, pressing BACK")
-        performGlobalAction(GLOBAL_ACTION_BACK)
-
-        try {
-            BlockedActivity.start(
-                context = this,
-                url = "Instagram Reels",
-                message = "Instagram Reels are blocked.",
-                countdownSeconds = blockedScreenCountdown,
-                redirectUrl = redirectUrl
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to launch BlockedActivity for Reels: ${e.message}")
-        }
+        Log.w(TAG, "BLOCKED: Instagram Reels detected, showing full-screen overlay")
+        overlayManager.showFullScreenOverlay(
+            target = "Instagram Reels",
+            message = "Instagram Reels are blocked.",
+            countdownSeconds = blockedScreenCountdown,
+            redirectUrl = redirectUrl,
+            onGoBack = {
+                performGlobalAction(GLOBAL_ACTION_BACK)
+            }
+        )
     }
 
     private fun triggerAppBlock(packageName: String) {
@@ -938,27 +970,15 @@ class PGuardAccessibilityService : AccessibilityService() {
         }
 
         Log.w(TAG, "BLOCKED: Blocked application accessed: $appName ($packageName)")
-        performGlobalAction(GLOBAL_ACTION_HOME)
-
-        try {
-            BlockedActivity.start(
-                context = this,
-                url = appName,
-                message = "This app is in your Blocklist.",
-                countdownSeconds = blockedScreenCountdown,
-                redirectUrl = redirectUrl
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to launch BlockedActivity for blocked app: ${e.message}")
-        }
-
-        mainHandler.post {
-            Toast.makeText(
-                applicationContext,
-                "$appName is in your Blocklist.",
-                Toast.LENGTH_LONG
-            ).show()
-        }
+        overlayManager.showFullScreenOverlay(
+            target = appName,
+            message = "This app is in your Blocklist.",
+            countdownSeconds = blockedScreenCountdown,
+            redirectUrl = redirectUrl,
+            onGoBack = {
+                performGlobalAction(GLOBAL_ACTION_HOME)
+            }
+        )
     }
 
     private fun triggerUnsupportedBrowserBlock(packageName: String) {
@@ -971,28 +991,16 @@ class PGuardAccessibilityService : AccessibilityService() {
         val browserName = BrowserInspector.getBrowserDisplayName(packageName, applicationContext)
         Log.w(TAG, "BLOCKED: Unsupported browser detected: $browserName ($packageName)")
 
-        performGlobalAction(GLOBAL_ACTION_HOME)
-
-        try {
-            val supportedListStr = BrowserInspector.SUPPORTED_BROWSER_NAMES.joinToString(", ")
-            BlockedActivity.start(
-                context = this,
-                url = browserName,
-                message = "This browser is unsupported. Supported browsers are: $supportedListStr.",
-                countdownSeconds = blockedScreenCountdown,
-                redirectUrl = redirectUrl
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to launch BlockedActivity for unsupported browser: ${e.message}")
-        }
-
-        mainHandler.post {
-            Toast.makeText(
-                applicationContext,
-                "$browserName is an unsupported browser. Please use a supported browser.",
-                Toast.LENGTH_LONG
-            ).show()
-        }
+        val supportedListStr = BrowserInspector.SUPPORTED_BROWSER_NAMES.joinToString(", ")
+        overlayManager.showFullScreenOverlay(
+            target = browserName,
+            message = "This browser is unsupported. Supported browsers are: $supportedListStr.",
+            countdownSeconds = blockedScreenCountdown,
+            redirectUrl = redirectUrl,
+            onGoBack = {
+                performGlobalAction(GLOBAL_ACTION_HOME)
+            }
+        )
     }
 
     private fun isTamperPackage(pkg: String): Boolean {
@@ -1147,11 +1155,13 @@ class PGuardAccessibilityService : AccessibilityService() {
 
     override fun onInterrupt() {
         Log.w(TAG, "PGuard Accessibility Service interrupted")
+        overlayManager.hideAll()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         _isRunning.value = false
+        overlayManager.hideAll()
         try {
             unregisterReceiver(dynamicInstallReceiver)
         } catch (_: Exception) {}

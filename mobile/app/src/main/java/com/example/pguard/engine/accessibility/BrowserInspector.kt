@@ -425,6 +425,40 @@ object BrowserInspector {
         return scanForRestrictedNode(rootNode, isRestricted, depth = 0)
     }
 
+    fun findRestrictedNodeWithInfo(
+        rootNode: AccessibilityNodeInfo?,
+        isRestricted: (String) -> Boolean
+    ): Pair<AccessibilityNodeInfo, String>? {
+        if (rootNode == null) return null
+        return scanForRestrictedNodeInfo(rootNode, isRestricted, depth = 0)
+    }
+
+    private fun scanForRestrictedNodeInfo(
+        node: AccessibilityNodeInfo?,
+        isRestricted: (String) -> Boolean,
+        depth: Int
+    ): Pair<AccessibilityNodeInfo, String>? {
+        if (node == null || depth > 40) return null
+
+        val text = node.text?.toString()
+        if (!text.isNullOrBlank() && !isIgnoredPlaceholder(text) && isRestricted(text)) {
+            return Pair(node, text)
+        }
+
+        val desc = node.contentDescription?.toString()
+        if (!desc.isNullOrBlank() && !isIgnoredPlaceholder(desc) && isRestricted(desc)) {
+            return Pair(node, desc)
+        }
+
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            val found = scanForRestrictedNodeInfo(child, isRestricted, depth + 1)
+            if (found != null) return found
+        }
+
+        return null
+    }
+
     private fun findAddressBarTextFallback(node: AccessibilityNodeInfo?, depth: Int): String? {
         if (node == null || depth > 35) return null
 

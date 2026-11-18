@@ -27,6 +27,7 @@ class ContentFilter(
 
         if (target.hostTokens.any { it in adultDomainSignatures }) return true
         if (adultPatterns.any { it.containsMatchIn(target.searchableText) }) return true
+        if (!target.isPlainText && ADULT_URL_PATTERNS.any { it.containsMatchIn(target.searchableText) }) return true
         if (target.isPlainText && target.textTokens.any { it in adultDomainSignatures }) return true
         return false
     }
@@ -173,10 +174,14 @@ class ContentFilter(
             "slutload", "twistys", "redgifs", "erothots", "coomer",
         )
 
+        private val ADULT_URL_PATTERNS = listOf(
+            Regex("""\bnsfw\b""")
+        )
+
         private val DEFAULT_ADULT_PATTERNS = listOf(
             Regex("""\bporn\w*"""),
             Regex("""\bxxx+\b"""),
-            Regex("""\bnsfw\b"""),
+            Regex("""\bnsfw\s*(?:content|porn|xxx|nude|sex|video|pic|media)\b"""),
             Regex("""\berotic\w*"""),
             Regex("""\bboobs?\b"""),
             Regex("""\btits\b"""),
