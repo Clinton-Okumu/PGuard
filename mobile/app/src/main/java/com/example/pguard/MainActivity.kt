@@ -47,8 +47,11 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        // Install modern AndroidX SplashScreen
-        installSplashScreen()
+        // Install modern AndroidX SplashScreen and dismiss instantly to avoid double splash
+        val splashScreen = installSplashScreen()
+        splashScreen.setOnExitAnimationListener { splashScreenViewProvider ->
+            splashScreenViewProvider.remove()
+        }
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         com.example.pguard.engine.accessibility.PGuardAccessibilityService.loadSettings(applicationContext)
