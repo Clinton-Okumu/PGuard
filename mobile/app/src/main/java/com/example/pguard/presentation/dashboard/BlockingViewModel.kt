@@ -9,6 +9,7 @@ import com.example.pguard.core.network.model.UserSettingsDto
 import com.example.pguard.data.repository.AccountabilityRepository
 import com.example.pguard.data.repository.SettingsRepository
 import com.example.pguard.engine.accessibility.PGuardAccessibilityService
+import com.example.pguard.engine.admin.DeviceAdminManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,7 +50,8 @@ data class BlockingUiState(
     val timeDelayUnlockAt: Long = 0L,
     val timeDelayTarget: String = "",
     val inviteEmailError: String? = null,
-    val devApprovalCode: String? = null
+    val devApprovalCode: String? = null,
+    val isDeviceAdminDialogVisible: Boolean = false
 )
 
 class BlockingViewModel(
@@ -419,6 +421,18 @@ class BlockingViewModel(
         val currentMode = _uiState.value.accountabilityMode
         if (newMode == currentMode) return
 
+        if (newMode == AccountabilityMode.NONE && _uiState.value.settings.uninstallProtection) {
+            _uiState.update {
+                it.copy(
+                    infoDialog = InfoDialogState(
+                        title = "Uninstall Protection Active",
+                        message = "Uninstall Protection requires an active accountability check (Friend, Myself, or 24-Hour Delay). Please turn off Uninstall Protection before switching to None."
+                    )
+                )
+            }
+            return
+        }
+
         applyAccountabilityMode(newMode, context)
     }
 
@@ -434,6 +448,34 @@ class BlockingViewModel(
         requestSetAccountabilityMode(mode, context)
     }
 
+    fun showDeviceAdminDialog() {
+        _uiState.update { it.copy(isDeviceAdminDialogVisible = true) }
+    }
+
+    fun dismissDeviceAdminDialog(context: android.content.Context? = null) {
+        _uiState.update { it.copy(isDeviceAdminDialogVisible = false) }
+        context?.let { ctx ->
+            if (!DeviceAdminManager.isDeviceAdminActive(ctx)) {
+                executeToggle(BlockingToggle.UNINSTALL_PROTECTION, false, ctx)
+            }
+        }
+    }
+
+    fun onConfirmDeviceAdmin(context: android.content.Context) {
+        _uiState.update { it.copy(isDeviceAdminDialogVisible = false) }
+        executeToggle(BlockingToggle.UNINSTALL_PROTECTION, true, context)
+        DeviceAdminManager.requestEnableDeviceAdmin(context)
+    }
+
+    fun checkDeviceAdminStatus(context: android.content.Context) {
+        val isAdminActive = DeviceAdminManager.isDeviceAdminActive(context)
+        val currentSetting = _uiState.value.settings.uninstallProtection
+
+        if (isAdminActive && !currentSetting && _uiState.value.accountabilityMode != AccountabilityMode.NONE) {
+            executeToggle(BlockingToggle.UNINSTALL_PROTECTION, true, context)
+        }
+    }
+
     fun requestDisconnectPartner(context: android.content.Context) {
         if (_uiState.value.partner == null) return
 
@@ -442,6 +484,46 @@ class BlockingViewModel(
     }
 
     fun handleToggleRequested(toggle: BlockingToggle, checked: Boolean, context: android.content.Context) {
+        if (toggle == BlockingToggle.UNINSTALL_PROTECTION) {
+            if (checked) {
+                val currentMode = _uiState.value.accountabilityMode
+                // If mode is NONE, automatically upgrade to SELF (Typing Challenge) as default check
+                if (currentMode == AccountabilityMode.NONE) {
+                    applyAccountabilityMode(AccountabilityMode.SELF, context)
+                }
+
+                // If mode is FRIEND, ensure partner is linked
+                if (_uiState.value.accountabilityMode == AccountabilityMode.FRIEND) {
+                    val partner = _uiState.value.partner
+                    val isLinked = _uiState.value.isPartnerLinked
+                    if (partner == null || !isLinked) {
+                        _uiState.update {
+                            it.copy(
+                                infoDialog = InfoDialogState(
+                                    title = "Accountability Partner Required",
+                                    message = "You selected Friend accountability. Please link an active partner before activating Uninstall Protection, or switch to Myself in the Accountability card."
+                                )
+                            )
+                        }
+                        return
+                    }
+                }
+
+                // Turn ON the toggle in app and accessibility engine
+                executeToggle(toggle, true, context)
+
+                // If device admin is not active yet, show the modal prompting to enable it
+                if (!DeviceAdminManager.isDeviceAdminActive(context)) {
+                    showDeviceAdminDialog()
+                }
+                return
+            } else {
+                // Turning OFF uninstall protection: strictly uses the selected accountability check (Friend, Myself, or 24-Hour Delay)
+                guardAction(ProtectedAction.ToggleFeature(toggle), context)
+                return
+            }
+        }
+
         if (checked) {
             // Turning ON is always friction-free
             executeToggle(toggle, true, context)
@@ -476,11 +558,12 @@ class BlockingViewModel(
             }
             AccountabilityMode.FRIEND -> {
                 val partner = _uiState.value.partner
-                if (partner != null) {
+                val isLinked = _uiState.value.isPartnerLinked
+                if (partner != null && isLinked) {
                     _uiState.update { it.copy(friendApprovalTarget = action) }
                 } else {
-                    // In friend mode but no partner linked yet -> fall back to typing challenge
-                    _uiState.update { it.copy(typingChallengeTarget = action) }
+                    // No active partner linked yet -> allow changing mode or action directly without trapping user
+                    executeProtectedAction(action, context)
                 }
             }
         }
@@ -610,11 +693,16 @@ class BlockingViewModel(
             BlockingToggle.UNINSTALL_PROTECTION -> {
                 PGuardAccessibilityService.saveSettings(context, uninstall = enabled)
                 setUninstallProtection(enabled)
+                if (!enabled) {
+                    DeviceAdminManager.deactivateDeviceAdmin(context)
+                }
             }
             BlockingToggle.UNSUPPORTED_BROWSERS -> {
+                PGuardAccessibilityService.saveSettings(context, unsupportedBrowsers = enabled)
                 setUnsupportedBrowsersBlocking(enabled)
             }
             BlockingToggle.NEW_INSTALLED_APPS -> {
+                PGuardAccessibilityService.saveSettings(context, newInstalledApps = enabled)
                 setNewlyInstalledAppsBlocking(enabled)
             }
         }
@@ -627,7 +715,10 @@ class BlockingViewModel(
         PGuardAccessibilityService.isInstagramReelsBlockingEnabled = settings.blockInstagramReels
         PGuardAccessibilityService.isTikTokBlockingEnabled = settings.blockTikTok
         PGuardAccessibilityService.isUninstallProtectionEnabled = settings.uninstallProtection
+        PGuardAccessibilityService.isUnsupportedBrowsersBlockingEnabled = settings.blockUnsupportedBrowsers
+        PGuardAccessibilityService.isNewlyInstalledAppsBlockingEnabled = settings.blockNewlyInstalledApps
         PGuardAccessibilityService.blockedScreenMessage = settings.blockedScreenMessage
         PGuardAccessibilityService.blockedScreenCountdown = settings.blockedScreenCountdown
+        PGuardAccessibilityService.redirectUrl = settings.redirectUrl
     }
 }

@@ -52,17 +52,20 @@ class BlockedActivity : ComponentActivity() {
         const val EXTRA_BLOCKED_URL = "extra_blocked_url"
         const val EXTRA_MESSAGE = "extra_message"
         const val EXTRA_COUNTDOWN = "extra_countdown"
+        const val EXTRA_REDIRECT_URL = "extra_redirect_url"
 
         fun start(
             context: Context,
             url: String,
             message: String = "This page is blocked.",
-            countdownSeconds: Int = 3
+            countdownSeconds: Int = 3,
+            redirectUrl: String = ""
         ) {
             val intent = Intent(context, BlockedActivity::class.java).apply {
                 putExtra(EXTRA_BLOCKED_URL, url)
                 putExtra(EXTRA_MESSAGE, message)
                 putExtra(EXTRA_COUNTDOWN, countdownSeconds)
+                putExtra(EXTRA_REDIRECT_URL, redirectUrl)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             }
             context.startActivity(intent)
@@ -76,21 +79,43 @@ class BlockedActivity : ComponentActivity() {
         val blockedUrl = intent.getStringExtra(EXTRA_BLOCKED_URL) ?: "Restricted content"
         val message = intent.getStringExtra(EXTRA_MESSAGE) ?: "This page is blocked."
         val countdown = intent.getIntExtra(EXTRA_COUNTDOWN, 3)
+        val redirectUrl = intent.getStringExtra(EXTRA_REDIRECT_URL) ?: ""
 
         setContent {
             PGuardTheme {
                 BackHandler {
-                    returnToHomeScreen()
+                    handleDismiss(redirectUrl)
                 }
 
                 BlockedScreenContent(
                     blockedUrl = blockedUrl,
                     message = message,
                     initialCountdown = countdown,
-                    onGoHome = { returnToHomeScreen() }
+                    onGoHome = { handleDismiss(redirectUrl) }
                 )
             }
         }
+    }
+
+    private fun handleDismiss(redirectUrl: String) {
+        if (redirectUrl.isNotBlank()) {
+            try {
+                val fullUrl = if (!redirectUrl.startsWith("http://") && !redirectUrl.startsWith("https://")) {
+                    "https://$redirectUrl"
+                } else {
+                    redirectUrl
+                }
+                val browserIntent = Intent(Intent.ACTION_VIEW, android.net.Uri.parse(fullUrl)).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                startActivity(browserIntent)
+                finish()
+                return
+            } catch (e: Exception) {
+                android.util.Log.e("BlockedActivity", "Failed to launch redirect URL: ${e.message}")
+            }
+        }
+        returnToHomeScreen()
     }
 
     private fun returnToHomeScreen() {

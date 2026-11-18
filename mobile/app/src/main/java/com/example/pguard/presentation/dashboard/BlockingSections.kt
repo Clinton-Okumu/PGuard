@@ -6,6 +6,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import com.example.pguard.R
 import com.example.pguard.core.network.model.UserSettingsDto
+import com.example.pguard.engine.accessibility.BrowserInspector
 
 enum class BlockingToggle {
     ADULT_CONTENT,
@@ -116,7 +117,7 @@ internal fun AdvancedBlockingSection(
             onInfoClick = {
                 onInfo(
                     "Uninstall protection",
-                    "Prevents PGuard from being removed or tampered with without authorization."
+                    "Prevents PGuard from being uninstalled or tampered with. Can only be turned off by passing your accountability check."
                 )
             }
         )
@@ -127,9 +128,12 @@ internal fun AdvancedBlockingSection(
             checked = settings.blockUnsupportedBrowsers,
             onCheckedChange = { onToggle(BlockingToggle.UNSUPPORTED_BROWSERS, it) },
             onInfoClick = {
+                val browsersList = BrowserInspector.SUPPORTED_BROWSER_NAMES
+                    .mapIndexed { index, name -> "${index + 1}. $name" }
+                    .joinToString("\n")
                 onInfo(
-                    "Block unsupported browsers",
-                    "Blocks web browsers that do not support PGuard content filtering."
+                    "Supported Browsers",
+                    "PGuard blocks web browsers that do not support content filtering to ensure your protection is not bypassed.\n\nSupported Browsers (${BrowserInspector.SUPPORTED_BROWSER_NAMES.size}):\n$browsersList\n\nAll other browsers will be blocked when this setting is enabled."
                 )
             }
         )

@@ -108,6 +108,28 @@ fun BlocklistScreen(
     val currentApps = if (selectedListType == ListType.BLOCKLIST) blockedApps else whitelistedApps
     val currentKeywords = if (selectedListType == ListType.BLOCKLIST) blockedKeywords else whitelistedKeywords
 
+    LaunchedEffect(Unit) {
+        val saved = com.example.pguard.engine.accessibility.PGuardAccessibilityService.getBlockedApps(context)
+        val pm = context.packageManager
+        saved.forEach { pkg ->
+            if (blockedApps.none { it.packageName == pkg }) {
+                val label = try {
+                    val info = pm.getApplicationInfo(pkg, 0)
+                    pm.getApplicationLabel(info).toString()
+                } catch (_: Exception) {
+                    pkg
+                }
+                val icon = try {
+                    val info = pm.getApplicationInfo(pkg, 0)
+                    pm.getApplicationIcon(info)
+                } catch (_: Exception) {
+                    null
+                }
+                blockedApps.add(InstalledAppItem(pkg, label, icon))
+            }
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -229,7 +251,12 @@ fun BlocklistScreen(
                         items(currentApps, key = { it.packageName }) { app ->
                             AppListItem(
                                 app = app,
-                                onRemove = { currentApps.remove(app) }
+                                onRemove = {
+                                    currentApps.remove(app)
+                                    if (selectedListType == ListType.BLOCKLIST) {
+                                        com.example.pguard.engine.accessibility.PGuardAccessibilityService.removeBlockedApp(context, app.packageName)
+                                    }
+                                }
                             )
                             HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
                         }
@@ -340,6 +367,9 @@ fun BlocklistScreen(
                 selectedApps.forEach { app ->
                     if (currentApps.none { it.packageName == app.packageName }) {
                         currentApps.add(app)
+                        if (selectedListType == ListType.BLOCKLIST) {
+                            com.example.pguard.engine.accessibility.PGuardAccessibilityService.addBlockedApp(context, app.packageName, app.name)
+                        }
                     }
                 }
                 showAddAppDialog = false

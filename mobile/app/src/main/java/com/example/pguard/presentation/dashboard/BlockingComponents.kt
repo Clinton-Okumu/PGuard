@@ -192,17 +192,35 @@ internal fun AccountabilityCard(
     modifier: Modifier = Modifier
 ) {
     val modeName = when (mode) {
-        AccountabilityMode.FRIEND -> "Friend (Email Invite)"
+        AccountabilityMode.NONE -> "None"
+        AccountabilityMode.FRIEND -> "Friend (Accountability Partner)"
         AccountabilityMode.SELF -> "Myself (Typing Challenge)"
         AccountabilityMode.TIME_DELAY -> "24-Hour Time Delay"
-        AccountabilityMode.NONE -> "Not configured"
     }
 
     val modeDetail = when (mode) {
-        AccountabilityMode.FRIEND -> partnerStatus
-        AccountabilityMode.SELF -> "60-second typing challenge required to turn off blocks"
-        AccountabilityMode.TIME_DELAY -> "24-hour waiting delay required to turn off blocks"
-        AccountabilityMode.NONE -> "Tap Setup to activate unlock protection"
+        AccountabilityMode.NONE -> "No friction method active. Toggles can be turned off anytime without restriction."
+        AccountabilityMode.FRIEND -> when {
+            partnerStatus.startsWith("Active") -> partnerStatus
+            partnerStatus.startsWith("Pending") -> "$partnerStatus (awaiting acceptance)"
+            else -> "No partner linked yet. Tap Invite to add an accountability partner."
+        }
+        AccountabilityMode.SELF -> "60-second typing challenge required to turn off blocks."
+        AccountabilityMode.TIME_DELAY -> "24-hour waiting delay required to turn off blocks."
+    }
+
+    val cardIcon = when (mode) {
+        AccountabilityMode.FRIEND -> R.drawable.ic_partner
+        AccountabilityMode.SELF -> R.drawable.ic_target
+        AccountabilityMode.TIME_DELAY -> R.drawable.ic_focus_mode
+        AccountabilityMode.NONE -> R.drawable.ic_feature_shield
+    }
+
+    val badgeText = when (mode) {
+        AccountabilityMode.NONE -> "None Active"
+        AccountabilityMode.FRIEND -> if (partnerStatus.startsWith("Active")) "Friend Active" else "Setup Required"
+        AccountabilityMode.SELF -> "Myself Active"
+        AccountabilityMode.TIME_DELAY -> "24h Delay Active"
     }
 
     Surface(
@@ -216,7 +234,7 @@ internal fun AccountabilityCard(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 14.dp)
         ) {
-            // Heading is ALWAYS "Accountability Partner"
+            // Header Row: Section Title ("Accountability") + Active Method Badge + Info button
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -224,14 +242,14 @@ internal fun AccountabilityCard(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        painter = painterResource(id = R.drawable.ic_partner),
+                        painter = painterResource(id = cardIcon),
                         contentDescription = null,
-                        tint = CoralPrimary,
+                        tint = if (mode == AccountabilityMode.NONE) Color.White.copy(alpha = 0.5f) else CoralPrimary,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Accountability Partner",
+                        text = "Accountability",
                         style = MaterialTheme.typography.titleSmall.copy(
                             fontWeight = FontWeight.SemiBold,
                             fontSize = 14.5.sp
@@ -240,16 +258,50 @@ internal fun AccountabilityCard(
                     )
                 }
 
-                IconButton(
-                    onClick = onInfoClick,
-                    modifier = Modifier.size(24.dp)
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_info),
-                        contentDescription = "Info",
-                        tint = Color.White.copy(alpha = 0.5f),
-                        modifier = Modifier.size(18.dp)
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Status Badge showing only the active friction method
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (mode == AccountabilityMode.NONE) {
+                            Color.White.copy(alpha = 0.08f)
+                        } else {
+                            CoralPrimary.copy(alpha = 0.15f)
+                        },
+                        border = BorderStroke(
+                            1.dp,
+                            if (mode == AccountabilityMode.NONE) {
+                                Color.White.copy(alpha = 0.15f)
+                            } else {
+                                CoralPrimary.copy(alpha = 0.4f)
+                            }
+                        )
+                    ) {
+                        Text(
+                            text = badgeText,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (mode == AccountabilityMode.NONE) {
+                                Color.White.copy(alpha = 0.65f)
+                            } else {
+                                CoralPrimary
+                            },
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    IconButton(
+                        onClick = onInfoClick,
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_info),
+                            contentDescription = "Info",
+                            tint = Color.White.copy(alpha = 0.5f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
 
@@ -258,7 +310,7 @@ internal fun AccountabilityCard(
                 color = dividerColor()
             )
 
-            // Content below heading: Type line + Additional details + Action buttons
+            // Content below heading: Status line (showing only active friction method) + Details + Action buttons
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -271,7 +323,7 @@ internal fun AccountabilityCard(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            text = "Type: ",
+                            text = "Status: ",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Normal,
                             color = Color.White.copy(alpha = 0.6f)
@@ -280,7 +332,11 @@ internal fun AccountabilityCard(
                             text = modeName,
                             fontSize = 13.5.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color.White
+                            color = if (mode == AccountabilityMode.NONE) {
+                                Color.White.copy(alpha = 0.75f)
+                            } else {
+                                Color.White
+                            }
                         )
                     }
 
@@ -303,7 +359,8 @@ internal fun AccountabilityCard(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    if (partnerActionLabel != null) {
+                    // Only show partner action button (Invite/Remove) when Friend mode is active
+                    if (mode == AccountabilityMode.FRIEND && partnerActionLabel != null) {
                         OutlinedButton(
                             onClick = onPartnerAction,
                             shape = CircleShape,
@@ -333,7 +390,7 @@ internal fun AccountabilityCard(
                         modifier = Modifier.height(30.dp)
                     ) {
                         Text(
-                            text = if (mode == AccountabilityMode.NONE) "Setup" else "Change",
+                            text = "Change",
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.SemiBold
                         )

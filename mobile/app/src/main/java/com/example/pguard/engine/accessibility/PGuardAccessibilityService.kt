@@ -3,11 +3,14 @@ package com.example.pguard.engine.accessibility
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.text.TextUtils
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.Toast
 import com.example.pguard.engine.filter.ContentFilter
 import com.example.pguard.presentation.blocked.BlockedActivity
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -32,8 +35,13 @@ class PGuardAccessibilityService : AccessibilityService() {
         const val KEY_INSTAGRAM_REELS = "block_instagram_reels"
         const val KEY_TIKTOK = "block_tiktok"
         const val KEY_UNINSTALL = "uninstall_protection"
+        const val KEY_UNSUPPORTED_BROWSERS = "block_unsupported_browsers"
+        const val KEY_NEW_INSTALLED_APPS = "block_newly_installed_apps"
+        const val KEY_NEW_APPS_ENABLED_AT = "new_apps_enabled_at"
+        const val KEY_BLOCKED_PACKAGES = "blocked_app_packages"
         const val KEY_MESSAGE = "blocked_screen_message"
         const val KEY_COUNTDOWN = "blocked_screen_countdown"
+        const val KEY_REDIRECT_URL = "redirect_url"
         const val KEY_ACCOUNTABILITY_MODE = "accountability_mode"
         const val KEY_TIME_DELAY_UNLOCK_AT = "time_delay_unlock_at"
         const val KEY_TIME_DELAY_TARGET = "time_delay_target"
@@ -48,13 +56,18 @@ class PGuardAccessibilityService : AccessibilityService() {
         var isInstagramReelsBlockingEnabled: Boolean = false
         var isTikTokBlockingEnabled: Boolean = false
         var isUninstallProtectionEnabled: Boolean = false
+        var isUnsupportedBrowsersBlockingEnabled: Boolean = false
+        var isNewlyInstalledAppsBlockingEnabled: Boolean = false
+        var newAppsEnabledAt: Long = 0L
         var blockedScreenMessage: String = "This page is blocked."
         var blockedScreenCountdown: Int = 3
+        var redirectUrl: String = ""
         var accountabilityMode: String = "none"
         var timeDelayUnlockAt: Long = 0L
         var timeDelayTarget: String = ""
 
         val customBlocklist: MutableSet<String> = ConcurrentHashMap.newKeySet()
+        val blockedAppPackages: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
         fun loadSettings(context: Context) {
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -64,12 +77,47 @@ class PGuardAccessibilityService : AccessibilityService() {
             isInstagramReelsBlockingEnabled = prefs.getBoolean(KEY_INSTAGRAM_REELS, false)
             isTikTokBlockingEnabled = prefs.getBoolean(KEY_TIKTOK, false)
             isUninstallProtectionEnabled = prefs.getBoolean(KEY_UNINSTALL, false)
+            isUnsupportedBrowsersBlockingEnabled = prefs.getBoolean(KEY_UNSUPPORTED_BROWSERS, false)
+            isNewlyInstalledAppsBlockingEnabled = prefs.getBoolean(KEY_NEW_INSTALLED_APPS, false)
+            newAppsEnabledAt = prefs.getLong(KEY_NEW_APPS_ENABLED_AT, 0L)
             blockedScreenMessage = prefs.getString(KEY_MESSAGE, "This page is blocked.") ?: "This page is blocked."
             blockedScreenCountdown = prefs.getInt(KEY_COUNTDOWN, 3)
+            redirectUrl = prefs.getString(KEY_REDIRECT_URL, "") ?: ""
             accountabilityMode = prefs.getString(KEY_ACCOUNTABILITY_MODE, "none") ?: "none"
             timeDelayUnlockAt = prefs.getLong(KEY_TIME_DELAY_UNLOCK_AT, 0L)
             timeDelayTarget = prefs.getString(KEY_TIME_DELAY_TARGET, "") ?: ""
-            Log.d(TAG, "Loaded settings: adult=$isAdultBlockingEnabled, shorts=$isShortsBlockingEnabled, whatsapp=$isWhatsAppChannelsBlockingEnabled, reels=$isInstagramReelsBlockingEnabled, tiktok=$isTikTokBlockingEnabled, mode=$accountabilityMode")
+
+            val savedBlocked = prefs.getStringSet(KEY_BLOCKED_PACKAGES, emptySet()) ?: emptySet()
+            blockedAppPackages.clear()
+            blockedAppPackages.addAll(savedBlocked)
+
+            Log.d(TAG, "Loaded settings: adult=$isAdultBlockingEnabled, shorts=$isShortsBlockingEnabled, whatsapp=$isWhatsAppChannelsBlockingEnabled, reels=$isInstagramReelsBlockingEnabled, tiktok=$isTikTokBlockingEnabled, unsupportedBrowsers=$isUnsupportedBrowsersBlockingEnabled, newApps=$isNewlyInstalledAppsBlockingEnabled, mode=$accountabilityMode")
+        }
+
+        fun addBlockedApp(context: Context, packageName: String, label: String = packageName) {
+            blockedAppPackages.add(packageName)
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val set = prefs.getStringSet(KEY_BLOCKED_PACKAGES, emptySet())?.toMutableSet() ?: mutableSetOf()
+            set.add(packageName)
+            prefs.edit().putStringSet(KEY_BLOCKED_PACKAGES, set).apply()
+            Log.i(TAG, "Added blocked app package: $packageName ($label)")
+        }
+
+        fun removeBlockedApp(context: Context, packageName: String) {
+            blockedAppPackages.remove(packageName)
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val set = prefs.getStringSet(KEY_BLOCKED_PACKAGES, emptySet())?.toMutableSet() ?: mutableSetOf()
+            set.remove(packageName)
+            prefs.edit().putStringSet(KEY_BLOCKED_PACKAGES, set).apply()
+            Log.i(TAG, "Removed blocked app package: $packageName")
+        }
+
+        fun getBlockedApps(context: Context): Set<String> {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val set = prefs.getStringSet(KEY_BLOCKED_PACKAGES, emptySet()) ?: emptySet()
+            blockedAppPackages.clear()
+            blockedAppPackages.addAll(set)
+            return set
         }
 
         fun saveAccountabilityMode(context: Context, mode: String) {
@@ -108,8 +156,11 @@ class PGuardAccessibilityService : AccessibilityService() {
             instagramReels: Boolean = isInstagramReelsBlockingEnabled,
             tiktok: Boolean = isTikTokBlockingEnabled,
             uninstall: Boolean = isUninstallProtectionEnabled,
+            unsupportedBrowsers: Boolean = isUnsupportedBrowsersBlockingEnabled,
+            newInstalledApps: Boolean = isNewlyInstalledAppsBlockingEnabled,
             message: String = blockedScreenMessage,
-            countdown: Int = blockedScreenCountdown
+            countdown: Int = blockedScreenCountdown,
+            redirect: String = redirectUrl
         ) {
             isAdultBlockingEnabled = adult
             isShortsBlockingEnabled = shorts
@@ -117,8 +168,16 @@ class PGuardAccessibilityService : AccessibilityService() {
             isInstagramReelsBlockingEnabled = instagramReels
             isTikTokBlockingEnabled = tiktok
             isUninstallProtectionEnabled = uninstall
+            isUnsupportedBrowsersBlockingEnabled = unsupportedBrowsers
+            isNewlyInstalledAppsBlockingEnabled = newInstalledApps
+            if (newInstalledApps && newAppsEnabledAt == 0L) {
+                newAppsEnabledAt = System.currentTimeMillis()
+            } else if (!newInstalledApps) {
+                newAppsEnabledAt = 0L
+            }
             blockedScreenMessage = message
             blockedScreenCountdown = countdown
+            redirectUrl = redirect
 
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 .edit()
@@ -128,10 +187,14 @@ class PGuardAccessibilityService : AccessibilityService() {
                 .putBoolean(KEY_INSTAGRAM_REELS, instagramReels)
                 .putBoolean(KEY_TIKTOK, tiktok)
                 .putBoolean(KEY_UNINSTALL, uninstall)
+                .putBoolean(KEY_UNSUPPORTED_BROWSERS, unsupportedBrowsers)
+                .putBoolean(KEY_NEW_INSTALLED_APPS, newInstalledApps)
+                .putLong(KEY_NEW_APPS_ENABLED_AT, newAppsEnabledAt)
                 .putString(KEY_MESSAGE, message)
                 .putInt(KEY_COUNTDOWN, countdown)
+                .putString(KEY_REDIRECT_URL, redirect)
                 .apply()
-            Log.d(TAG, "Persisted settings: adult=$adult, shorts=$shorts, whatsapp=$whatsapp, reels=$instagramReels, tiktok=$tiktok")
+            Log.d(TAG, "Persisted settings: adult=$adult, shorts=$shorts, whatsapp=$whatsapp, reels=$instagramReels, tiktok=$tiktok, unsupportedBrowsers=$unsupportedBrowsers, newInstalledApps=$newInstalledApps")
         }
 
         /**
@@ -164,6 +227,11 @@ class PGuardAccessibilityService : AccessibilityService() {
     private var lastWhatsAppBlockedTimestamp: Long = 0L
     private var lastInstagramBlockedTimestamp: Long = 0L
     private var lastTikTokBlockedTimestamp: Long = 0L
+    private var lastAntiTamperBlockedTimestamp: Long = 0L
+    private var lastUnsupportedBrowserBlockedTimestamp: Long = 0L
+    private var lastAppBlockedTimestamp: Long = 0L
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val dynamicInstallReceiver = com.example.pguard.engine.receiver.NewAppInstallReceiver()
 
     @Suppress("DEPRECATION")
     override fun onServiceConnected() {
@@ -179,6 +247,20 @@ class PGuardAccessibilityService : AccessibilityService() {
                 android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
         serviceInfo = info
 
+        try {
+            val filter = android.content.IntentFilter(android.content.Intent.ACTION_PACKAGE_ADDED).apply {
+                addDataScheme("package")
+            }
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(dynamicInstallReceiver, filter, Context.RECEIVER_EXPORTED)
+            } else {
+                registerReceiver(dynamicInstallReceiver, filter)
+            }
+            Log.i(TAG, "Registered dynamic NewAppInstallReceiver")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to register dynamic install receiver: ${e.message}")
+        }
+
         Log.i(TAG, "PGuard Accessibility Service connected and active.")
     }
 
@@ -186,8 +268,37 @@ class PGuardAccessibilityService : AccessibilityService() {
         if (event == null) return
         val packageName = event.packageName?.toString() ?: return
 
+        // 0. App Blocking (Blocked apps from blocklist / auto-blocked newly installed apps)
+        if (blockedAppPackages.contains(packageName) && packageName != applicationContext.packageName) {
+            triggerAppBlock(packageName)
+            return
+        }
+
+        // Auto-detect and block newly installed apps upon launch
+        if (isNewlyInstalledAppsBlockingEnabled && newAppsEnabledAt > 0L && packageName != applicationContext.packageName && !isSystemOrLauncherPackage(packageName)) {
+            try {
+                val pkgInfo = packageManager.getPackageInfo(packageName, 0)
+                if (pkgInfo.firstInstallTime >= newAppsEnabledAt) {
+                    val appName = try {
+                        packageManager.getApplicationLabel(pkgInfo.applicationInfo ?: applicationInfo).toString()
+                    } catch (_: Exception) {
+                        packageName
+                    }
+                    addBlockedApp(applicationContext, packageName, appName)
+                    triggerAppBlock(packageName)
+                    return
+                }
+            } catch (_: Exception) {}
+        }
+
+        // 1. Unsupported Browsers Blocking (when toggle is enabled)
+        if (isUnsupportedBrowsersBlockingEnabled && BrowserInspector.isUnsupportedBrowser(packageName, applicationContext)) {
+            triggerUnsupportedBrowserBlock(packageName)
+            return
+        }
+
         // 1. Browser URL and Content Scanning
-        if (BrowserInspector.isBrowser(packageName)) {
+        if (BrowserInspector.isBrowser(packageName, applicationContext)) {
             inspectBrowserActivity(event)
             return
         }
@@ -217,8 +328,9 @@ class PGuardAccessibilityService : AccessibilityService() {
         }
 
         // 6. Anti-Tamper / Uninstall Protection
-        if (isUninstallProtectionEnabled && packageName == "com.android.settings") {
-            inspectSettingsForUninstall(event)
+        if (isUninstallProtectionEnabled && isTamperPackage(packageName)) {
+            inspectTamperAndUninstall(event)
+            return
         }
     }
 
@@ -374,7 +486,8 @@ class PGuardAccessibilityService : AccessibilityService() {
                 context = this,
                 url = target,
                 message = blockedScreenMessage,
-                countdownSeconds = blockedScreenCountdown
+                countdownSeconds = blockedScreenCountdown,
+                redirectUrl = redirectUrl
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start BlockedActivity, falling back to home: ${e.message}")
@@ -499,7 +612,8 @@ class PGuardAccessibilityService : AccessibilityService() {
                 context = this,
                 url = "YouTube Shorts",
                 message = if (blockedScreenMessage.isNotBlank()) blockedScreenMessage else "YouTube Shorts is blocked.",
-                countdownSeconds = blockedScreenCountdown
+                countdownSeconds = blockedScreenCountdown,
+                redirectUrl = redirectUrl
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch BlockedActivity for Shorts: ${e.message}")
@@ -633,7 +747,8 @@ class PGuardAccessibilityService : AccessibilityService() {
                 context = this,
                 url = "WhatsApp Channels",
                 message = reason,
-                countdownSeconds = blockedScreenCountdown
+                countdownSeconds = blockedScreenCountdown,
+                redirectUrl = redirectUrl
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch BlockedActivity for WhatsApp: ${e.message}")
@@ -668,7 +783,8 @@ class PGuardAccessibilityService : AccessibilityService() {
                 context = this,
                 url = "TikTok",
                 message = "TikTok is completely blocked.",
-                countdownSeconds = blockedScreenCountdown
+                countdownSeconds = blockedScreenCountdown,
+                redirectUrl = redirectUrl
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch BlockedActivity for TikTok: ${e.message}")
@@ -789,19 +905,170 @@ class PGuardAccessibilityService : AccessibilityService() {
                 context = this,
                 url = "Instagram Reels",
                 message = "Instagram Reels are blocked.",
-                countdownSeconds = blockedScreenCountdown
+                countdownSeconds = blockedScreenCountdown,
+                redirectUrl = redirectUrl
             )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch BlockedActivity for Reels: ${e.message}")
         }
     }
 
-    private fun inspectSettingsForUninstall(event: AccessibilityEvent) {
-        val rootNode = rootInActiveWindow ?: event.source ?: return
-        val text = rootNode.text?.toString() ?: ""
-        if (text.contains("PGuard", ignoreCase = true)) {
-            Log.w(TAG, "Anti-tamper: Device settings opened for PGuard, returning home")
-            performGlobalAction(GLOBAL_ACTION_HOME)
+    private fun triggerAppBlock(packageName: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastAppBlockedTimestamp < 1500L) {
+            return
+        }
+        lastAppBlockedTimestamp = now
+
+        val appName = try {
+            val pm = packageManager
+            val info = pm.getApplicationInfo(packageName, 0)
+            pm.getApplicationLabel(info).toString()
+        } catch (_: Exception) {
+            packageName
+        }
+
+        Log.w(TAG, "BLOCKED: Blocked application accessed: $appName ($packageName)")
+        performGlobalAction(GLOBAL_ACTION_HOME)
+
+        try {
+            BlockedActivity.start(
+                context = this,
+                url = appName,
+                message = "This app is in your Blocklist.",
+                countdownSeconds = blockedScreenCountdown,
+                redirectUrl = redirectUrl
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to launch BlockedActivity for blocked app: ${e.message}")
+        }
+
+        mainHandler.post {
+            Toast.makeText(
+                applicationContext,
+                "$appName is in your Blocklist.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun triggerUnsupportedBrowserBlock(packageName: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastUnsupportedBrowserBlockedTimestamp < 1500L) {
+            return
+        }
+        lastUnsupportedBrowserBlockedTimestamp = now
+
+        val browserName = BrowserInspector.getBrowserDisplayName(packageName, applicationContext)
+        Log.w(TAG, "BLOCKED: Unsupported browser detected: $browserName ($packageName)")
+
+        performGlobalAction(GLOBAL_ACTION_HOME)
+
+        try {
+            val supportedListStr = BrowserInspector.SUPPORTED_BROWSER_NAMES.joinToString(", ")
+            BlockedActivity.start(
+                context = this,
+                url = browserName,
+                message = "This browser is unsupported. Supported browsers are: $supportedListStr.",
+                countdownSeconds = blockedScreenCountdown,
+                redirectUrl = redirectUrl
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to launch BlockedActivity for unsupported browser: ${e.message}")
+        }
+
+        mainHandler.post {
+            Toast.makeText(
+                applicationContext,
+                "$browserName is an unsupported browser. Please use a supported browser.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun isTamperPackage(pkg: String): Boolean {
+        val lower = pkg.lowercase()
+        return lower == "com.android.settings" ||
+                lower == "com.google.android.settings" ||
+                lower == "com.google.android.packageinstaller" ||
+                lower == "com.android.packageinstaller" ||
+                lower == "com.google.android.permissioncontroller" ||
+                lower == "com.android.permissioncontroller" ||
+                lower == "com.android.vending" ||
+                lower == "android" ||
+                lower.contains("packageinstaller") ||
+                lower.contains("permissioncontroller") ||
+                lower.contains("settings") ||
+                lower.contains("securitycenter")
+    }
+
+    private fun isSystemOrLauncherPackage(pkg: String): Boolean {
+        if (pkg == packageName || pkg == "android" || pkg == "com.android.systemui") return true
+        val lower = pkg.lowercase()
+        return lower.contains("launcher") || lower.contains("trebuchet") || lower.contains("quickstep")
+    }
+
+    private fun inspectTamperAndUninstall(event: AccessibilityEvent) {
+        if (!isUninstallProtectionEnabled) return
+
+        // 1. Check direct event text
+        for (t in event.text) {
+            if (containsPGuardReference(t?.toString())) {
+                triggerUninstallBlock()
+                return
+            }
+        }
+
+        // 2. Check content description
+        val desc = event.contentDescription?.toString()
+        if (containsPGuardReference(desc)) {
+            triggerUninstallBlock()
+            return
+        }
+
+        // 3. Check active window node tree
+        val rootNode = findRootNode(event) ?: return
+        if (isPGuardTargetedInNodeTree(rootNode)) {
+            triggerUninstallBlock()
+        }
+    }
+
+    private fun containsPGuardReference(text: String?): Boolean {
+        if (text.isNullOrBlank()) return false
+        return text.contains("PGuard", ignoreCase = true) ||
+                text.contains("com.example.pguard", ignoreCase = true)
+    }
+
+    private fun isPGuardTargetedInNodeTree(root: AccessibilityNodeInfo): Boolean {
+        val byName = root.findAccessibilityNodeInfosByText("PGuard")
+        if (!byName.isNullOrEmpty()) return true
+
+        val byPkg = root.findAccessibilityNodeInfosByText("com.example.pguard")
+        if (!byPkg.isNullOrEmpty()) return true
+
+        val text = root.text?.toString()
+        if (containsPGuardReference(text)) return true
+
+        val desc = root.contentDescription?.toString()
+        if (containsPGuardReference(desc)) return true
+
+        return false
+    }
+
+    private fun triggerUninstallBlock() {
+        val now = System.currentTimeMillis()
+        if (now - lastAntiTamperBlockedTimestamp < 1500L) return
+        lastAntiTamperBlockedTimestamp = now
+
+        Log.w(TAG, "Anti-tamper: Detected attempt to uninstall or tamper with PGuard. Blocking and returning to Home.")
+        performGlobalAction(GLOBAL_ACTION_HOME)
+
+        mainHandler.post {
+            Toast.makeText(
+                applicationContext,
+                "Uninstall Protection is active. Pass your accountability check inside PGuard to disable.",
+                Toast.LENGTH_LONG
+            ).show()
         }
     }
 
@@ -812,6 +1079,9 @@ class PGuardAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         _isRunning.value = false
+        try {
+            unregisterReceiver(dynamicInstallReceiver)
+        } catch (_: Exception) {}
         Log.i(TAG, "PGuard Accessibility Service destroyed")
     }
 }

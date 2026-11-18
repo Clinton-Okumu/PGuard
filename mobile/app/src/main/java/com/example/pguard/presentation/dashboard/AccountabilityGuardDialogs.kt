@@ -5,6 +5,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -79,6 +81,7 @@ fun AccountabilityModeSelectionDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(22.dp)
             ) {
                 Row(
@@ -118,9 +121,26 @@ fun AccountabilityModeSelectionDialog(
                 Spacer(modifier = Modifier.height(12.dp))
 
                 val modes = listOf(
-                    Triple(AccountabilityMode.FRIEND, "Friend (Accountability Partner)", "Invited friend must authorize disabling protection via email code."),
-                    Triple(AccountabilityMode.SELF, "Myself (Typing Challenge)", "Type a randomly generated commitment phrase within 60 seconds."),
-                    Triple(AccountabilityMode.TIME_DELAY, "24-Hour Time Delay", "Disabling features enforces a 24-hour waiting buffer before unlock.")
+                    Triple(
+                        AccountabilityMode.NONE,
+                        "None (No Restriction)",
+                        "No friction. Toggles can be turned off anytime without an accountability check."
+                    ),
+                    Triple(
+                        AccountabilityMode.FRIEND,
+                        "Friend (Accountability Partner)",
+                        "Invited friend must authorize disabling protection via email code."
+                    ),
+                    Triple(
+                        AccountabilityMode.SELF,
+                        "Myself (Typing Challenge)",
+                        "Type a randomly generated commitment phrase within 60 seconds."
+                    ),
+                    Triple(
+                        AccountabilityMode.TIME_DELAY,
+                        "24-Hour Time Delay",
+                        "Disabling features enforces a 24-hour waiting buffer before unlock."
+                    )
                 )
 
                 modes.forEach { (mode, title, desc) ->
@@ -662,6 +682,97 @@ fun FriendApprovalDialog(
                         shape = RoundedCornerShape(12.dp)
                     ) {
                         Text("Verify & Unlock", color = Color.White, fontWeight = FontWeight.SemiBold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Modal dialog prompting the user to allow Android Device Administrator access
+ * to activate Uninstall Protection.
+ */
+@Composable
+fun DeviceAdminPermissionDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = CardBackground,
+            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(24.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .background(CoralPrimary.copy(alpha = 0.15f), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_feature_shield),
+                            contentDescription = null,
+                            tint = CoralPrimary,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = "Admin Access Required",
+                            fontSize = 17.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Uninstall Protection",
+                            fontSize = 12.sp,
+                            color = CoralPrimary
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Text(
+                    text = "To prevent PGuard from being uninstalled or tampered with, Android requires Device Administrator permission.\n\nOnce activated, the Android operating system prevents PGuard from being uninstalled until you pass your accountability check inside the app.\n\nOn the next screen, tap \"Activate this device admin app\".",
+                    fontSize = 13.5.sp,
+                    color = Color.White.copy(alpha = 0.85f),
+                    lineHeight = 20.sp
+                )
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = onConfirm,
+                        colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = "Allow Admin Access",
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold
+                        )
                     }
                 }
             }

@@ -85,7 +85,9 @@ internal data class BlockingScreenCallbacks(
     val onFriendApprovalSuccess: () -> Unit,
     val onVerifyFriendApprovalCode: (String) -> Unit,
     val onDismissFriendApproval: () -> Unit,
-    val onRequestPartnerApproval: (String) -> Unit
+    val onRequestPartnerApproval: (String) -> Unit,
+    val onConfirmDeviceAdmin: () -> Unit,
+    val onDismissDeviceAdmin: () -> Unit
 )
 
 @Composable
@@ -115,8 +117,11 @@ fun BlockingScreen(
             instagramReels = settings.blockInstagramReels,
             tiktok = settings.blockTikTok,
             uninstall = settings.uninstallProtection,
+            unsupportedBrowsers = settings.blockUnsupportedBrowsers,
+            newInstalledApps = settings.blockNewlyInstalledApps,
             message = settings.blockedScreenMessage,
-            countdown = settings.blockedScreenCountdown
+            countdown = settings.blockedScreenCountdown,
+            redirect = settings.redirectUrl
         )
     }
 
@@ -128,6 +133,7 @@ fun BlockingScreen(
                 Lifecycle.Event.ON_RESUME -> {
                     alerts = readPermissionAlerts(context)
                     viewModel.refreshPartnerStatus()
+                    viewModel.checkDeviceAdminStatus(context)
                 }
                 Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
                     viewModel.stopPartnerPolling()
@@ -189,7 +195,9 @@ fun BlockingScreen(
         onFriendApprovalSuccess = { viewModel.onFriendApprovalSuccess(context) },
         onVerifyFriendApprovalCode = { code -> viewModel.verifyFriendApprovalCode(code, context) },
         onDismissFriendApproval = viewModel::dismissFriendApproval,
-        onRequestPartnerApproval = viewModel::requestPartnerApprovalCode
+        onRequestPartnerApproval = viewModel::requestPartnerApprovalCode,
+        onConfirmDeviceAdmin = { viewModel.onConfirmDeviceAdmin(context) },
+        onDismissDeviceAdmin = { viewModel.dismissDeviceAdminDialog(context) }
     )
 
     BlockingScreenContent(
@@ -216,7 +224,7 @@ internal fun BlockingScreenContent(
 
     val partnerActionLabel = when {
         state.accountabilityMode == AccountabilityMode.FRIEND && state.partner == null -> "Invite"
-        state.partner != null -> "Remove"
+        state.accountabilityMode == AccountabilityMode.FRIEND && state.partner != null -> "Remove"
         else -> null
     }
 
@@ -437,6 +445,13 @@ private fun BlockingScreenDialogs(
             devCode = state.devApprovalCode
         )
     }
+
+    if (state.isDeviceAdminDialogVisible) {
+        DeviceAdminPermissionDialog(
+            onConfirm = callbacks.onConfirmDeviceAdmin,
+            onDismiss = callbacks.onDismissDeviceAdmin
+        )
+    }
 }
 
 private fun readPermissionAlerts(context: Context): PermissionAlerts =
@@ -493,5 +508,7 @@ private fun previewCallbacks() = BlockingScreenCallbacks(
     onFriendApprovalSuccess = {},
     onVerifyFriendApprovalCode = {},
     onDismissFriendApproval = {},
-    onRequestPartnerApproval = {}
+    onRequestPartnerApproval = {},
+    onConfirmDeviceAdmin = {},
+    onDismissDeviceAdmin = {}
 )

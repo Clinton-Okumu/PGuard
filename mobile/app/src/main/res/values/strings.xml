@@ -2,4 +2,6 @@
     <string name="app_name">PGuard</string>
     <string name="accessibility_service_label">PGuard Protection Service</string>
     <string name="accessibility_service_description">PGuard monitors and blocks adult websites, enforces habit limits, and protects against unauthorized uninstallation or tampering.</string>
+    <string name="device_admin_label">PGuard Uninstall Protection</string>
+    <string name="device_admin_description">Prevents PGuard from being uninstalled or tampered with without passing your accountability check.</string>
 </resources>

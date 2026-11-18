@@ -1,15 +1,65 @@
 package com.example.pguard.engine.accessibility
 
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 
 object BrowserInspector {
 
-    private val BROWSER_PACKAGES = setOf(
+    /**
+     * Verified supported browsers:
+     * 1. Google Chrome
+     * 2. Samsung Internet
+     * 3. Mozilla Firefox
+     * 4. Firefox Lite
+     * 5. Brave Browser
+     * 6. Opera
+     * 7. Opera Mini
+     * 8. DuckDuckGo
+     * 9. Vivaldi
+     * 10. Tor Browser
+     * 11. Spin Safe Browser
+     * 12. Ecosia
+     * 13. Free Adblocker Browser
+     * 14. 1DM (1DM & 1DM+)
+     * 15. Web Video Cast
+     */
+    val SUPPORTED_BROWSER_NAMES = listOf(
+        "Google Chrome",
+        "Samsung Internet",
+        "Mozilla Firefox",
+        "Firefox Lite",
+        "Brave Browser",
+        "Opera Browser",
+        "Opera Mini",
+        "DuckDuckGo Privacy Browser",
+        "Vivaldi Browser",
+        "Tor Browser",
+        "Spin Safe Browser",
+        "Ecosia",
+        "Free Adblocker Browser",
+        "1DM / 1DM+ Browser",
+        "Web Video Cast"
+    )
+
+    val SUPPORTED_BROWSER_PACKAGES = setOf(
+        // 1. Chrome
         "com.android.chrome",
         "com.chrome.beta",
         "com.chrome.dev",
         "com.chrome.canary",
+
+        // 2. Samsung Internet
+        "com.sec.android.app.sbrowser",
+        "com.sec.android.app.sbrowser.beta",
+        "com.sec.android.app.sbrowser.lite",
+
+        // 3. Firefox
         "org.mozilla.firefox",
         "org.mozilla.firefox_beta",
         "org.mozilla.fenix",
@@ -17,23 +67,245 @@ object BrowserInspector {
         "org.mozilla.focus",
         "org.mozilla.klar",
         "org.mozilla.fennec_fdroid",
-        "org.torproject.torbrowser",
-        "com.sec.android.app.sbrowser",
-        "com.sec.android.app.sbrowser.beta",
-        "com.microsoft.emmx",
+
+        // 4. Firefox Lite
+        "org.mozilla.rocket",
+
+        // 5. Brave
         "com.brave.browser",
+        "com.brave.browser_beta",
+        "com.brave.browser_nightly",
+
+        // 6. Opera
         "com.opera.browser",
-        "com.opera.mini.native",
+        "com.opera.browser.beta",
         "com.opera.gx",
+        "com.opera.touch",
+
+        // 7. Opera Mini
+        "com.opera.mini.native",
+        "com.opera.mini.native.beta",
+
+        // 8. DuckDuckGo
         "com.duckduckgo.mobile.android",
+
+        // 9. Vivaldi
         "com.vivaldi.browser",
-        "com.kiwibrowser.browser",
-        "com.mi.globalbrowser",
-        "com.heytap.browser",
-        "com.UCMobile.intl",
-        "com.google.android.googlequicksearchbox",
-        "com.google.android.apps.searchlite"
+        "com.vivaldi.browser.snapshot",
+
+        // 10. Tor Browser
+        "org.torproject.torbrowser",
+        "org.torproject.torbrowser_alpha",
+
+        // 11. Spin Safe Browser
+        "com.nationaledtech.spinbrowser",
+
+        // 12. Ecosia
+        "com.ecosia.android",
+
+        // 13. Free Adblocker Browser
+        "com.hsv.freeadblockerbrowser",
+        "com.adblocker.browser",
+
+        // 14. 1DM / 1DM+
+        "idm.internet.download.manager",
+        "idm.internet.download.manager.plus",
+        "idm.internet.download.manager.lite",
+
+        // 15. Web Video Cast
+        "com.instantbits.cast.webvideo"
     )
+
+    /**
+     * Common known unsupported browser packages for instant matching.
+     */
+    val KNOWN_UNSUPPORTED_BROWSER_PACKAGES = setOf(
+        // Microsoft Edge
+        "com.microsoft.emmx",
+        "com.microsoft.emmx.beta",
+        "com.microsoft.emmx.canary",
+        "com.microsoft.emmx.dev",
+
+        // UC Browser / UC Mini
+        "com.ucmobile.intl",
+        "com.uc.browser.en",
+        "com.ucmobile",
+        "com.uc.browser.hd",
+
+        // Kiwi Browser
+        "com.kiwibrowser.browser",
+
+        // Xiaomi / Mint Browser
+        "com.mi.globalbrowser",
+        "com.android.browser",
+        "com.mint.browser",
+
+        // Oppo / Vivo / Realme / ColorOS Browser
+        "com.heytap.browser",
+        "com.vivo.browser",
+        "com.coloros.browser",
+
+        // Dolphin Browser
+        "mobi.mgeek.tunnybrowser",
+
+        // Phoenix Browser
+        "com.transsion.phoenix",
+
+        // Puffin Browser
+        "com.cloudmosa.puffinfree",
+        "com.cloudmosa.puffin",
+
+        // Aloha Browser
+        "alohabrowser.browser",
+        "alohabrowser.browser.lite",
+
+        // Yandex Browser
+        "com.yandex.browser",
+        "com.yandex.browser.alpha",
+        "com.yandex.browser.beta",
+
+        // Huawei Browser
+        "com.huawei.browser",
+
+        // Other generic & niche browsers
+        "mark.via.gp",
+        "com.mycompany.app.soulbrowser",
+        "com.pure.browser",
+        "br.marcelo.monumentbrowser",
+        "com.ghostery.android.ghostery",
+        "com.ksmobile.cb",
+        "com.fulldive.mobile",
+        "com.chimbori.hermitcrab",
+        "com.jio.web.pages"
+    ).map { it.lowercase() }.toSet()
+
+    @Volatile
+    private var cachedBrowserPackages: Set<String>? = null
+    @Volatile
+    private var lastBrowserCacheTime: Long = 0L
+
+    fun getInstalledBrowsers(context: Context): Set<String> {
+        val now = System.currentTimeMillis()
+        val cached = cachedBrowserPackages
+        if (cached != null && now - lastBrowserCacheTime < 30_000L) {
+            return cached
+        }
+
+        val browsers = mutableSetOf<String>()
+        try {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com")).apply {
+                addCategory(Intent.CATEGORY_BROWSABLE)
+            }
+            val pm = context.packageManager
+            val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PackageManager.MATCH_ALL
+            } else {
+                PackageManager.MATCH_DEFAULT_ONLY
+            }
+            val resolved = pm.queryIntentActivities(intent, flags)
+            for (ri in resolved) {
+                val pkg = ri.activityInfo?.packageName
+                if (!pkg.isNullOrBlank() && pkg != "android" && pkg != context.packageName) {
+                    browsers.add(pkg.lowercase())
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("BrowserInspector", "Failed to query browser packages: ${e.message}")
+        }
+        cachedBrowserPackages = browsers
+        lastBrowserCacheTime = now
+        return browsers
+    }
+
+    fun isSupportedBrowser(packageName: String): Boolean {
+        val pkg = packageName.lowercase()
+        return pkg in SUPPORTED_BROWSER_PACKAGES
+    }
+
+    fun isUnsupportedBrowser(packageName: String, context: Context?): Boolean {
+        val pkg = packageName.lowercase()
+        // Supported browsers are never unsupported
+        if (isSupportedBrowser(pkg)) return false
+
+        // Exclude system UI, launchers, settings, and PGuard
+        if (pkg == "android" ||
+            pkg.startsWith("com.android.systemui") ||
+            pkg.contains("launcher") ||
+            pkg.contains("accessibility") ||
+            pkg.contains("settings") ||
+            (context != null && pkg == context.packageName)
+        ) {
+            return false
+        }
+
+        // 1. Static check of known unsupported browser packages
+        if (pkg in KNOWN_UNSUPPORTED_BROWSER_PACKAGES) return true
+
+        // 2. Package naming pattern heuristic
+        if (pkg.contains("browser") ||
+            pkg.contains("webbrowser") ||
+            pkg.contains("internet.browser") ||
+            pkg.endsWith(".browser")
+        ) {
+            return true
+        }
+
+        // 3. Dynamic check via PackageManager
+        if (context != null) {
+            val installed = getInstalledBrowsers(context)
+            if (pkg in installed) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    fun isBrowser(packageName: String, context: Context? = null): Boolean {
+        val pkg = packageName.lowercase()
+        if (isSupportedBrowser(pkg)) return true
+        if (pkg in KNOWN_UNSUPPORTED_BROWSER_PACKAGES) return true
+        if (pkg.contains("firefox") || pkg.contains("mozilla") || pkg.contains("fenix") ||
+            pkg.contains("focus") || pkg.contains("fennec") || pkg.contains("klar") ||
+            pkg.contains("chrome") || pkg.contains("browser") || pkg.contains("opera") ||
+            pkg.contains("brave") || pkg.contains("sbrowser")) {
+            return true
+        }
+        if (pkg == "com.google.android.googlequicksearchbox" || pkg == "com.google.android.apps.searchlite") {
+            return true
+        }
+        if (context != null) {
+            val installed = getInstalledBrowsers(context)
+            if (pkg in installed) return true
+        }
+        return false
+    }
+
+    fun getBrowserDisplayName(packageName: String, context: Context?): String {
+        if (context != null) {
+            try {
+                val pm = context.packageManager
+                val appInfo = pm.getApplicationInfo(packageName, 0)
+                val label = pm.getApplicationLabel(appInfo).toString()
+                if (label.isNotBlank()) return label
+            } catch (_: Exception) {}
+        }
+        val lower = packageName.lowercase()
+        return when {
+            lower.contains("sbrowser") -> "Samsung Internet"
+            lower.contains("edge") || lower.contains("emmx") -> "Microsoft Edge"
+            lower.contains("ucmobile") || lower.contains("uc.browser") -> "UC Browser"
+            lower.contains("kiwi") -> "Kiwi Browser"
+            lower.contains("mi.globalbrowser") || lower.contains("mint") -> "Mi Browser"
+            lower.contains("heytap") || lower.contains("coloros") -> "HeyTap Browser"
+            lower.contains("phoenix") -> "Phoenix Browser"
+            lower.contains("puffin") -> "Puffin Browser"
+            lower.contains("aloha") -> "Aloha Browser"
+            lower.contains("yandex") -> "Yandex Browser"
+            lower.contains("dolphin") || lower.contains("tunny") -> "Dolphin Browser"
+            else -> packageName
+        }
+    }
 
     private val ADDRESS_BAR_ID_SUFFIXES = listOf(
         "mozac_browser_toolbar_url_view",
@@ -47,6 +319,9 @@ object BrowserInspector {
         "url_view",
         "search_box_text",
         "location_bar_edit_text",
+        "location_bar",
+        "control_url",
+        "custom_url_bar",
         "omnibarTextInput",
         "url_field",
         "search_edit_text",
@@ -83,22 +358,6 @@ object BrowserInspector {
         "close",
         "cancel"
     )
-
-    fun isBrowser(packageName: String): Boolean {
-        val pkg = packageName.lowercase()
-        if (pkg.contains("firefox") || pkg.contains("mozilla") || pkg.contains("fenix") ||
-            pkg.contains("focus") || pkg.contains("fennec") || pkg.contains("klar")) {
-            return true
-        }
-        if (pkg.contains("chrome") || pkg.contains("browser") || pkg.contains("opera") ||
-            pkg.contains("edge") || pkg.contains("brave")) {
-            return true
-        }
-        if (pkg == "com.google.android.googlequicksearchbox" || pkg == "com.google.android.apps.searchlite") {
-            return true
-        }
-        return BROWSER_PACKAGES.contains(packageName)
-    }
 
     /**
      * Extracts active URL or search text from event and node hierarchy.
