@@ -8,8 +8,8 @@
     <!-- Splash screen theme for Android 12+ (API 31+) -->
     <style name="Theme.App.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/splash_background</item>
-        <item name="windowSplashScreenAnimatedIcon">@android:color/transparent</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_pguard_globe_shield</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@drawable/ic_pguard_globe_shield</item>
         <item name="postSplashScreenTheme">@style/Theme.PGuard</item>
     </style>
 </resources>

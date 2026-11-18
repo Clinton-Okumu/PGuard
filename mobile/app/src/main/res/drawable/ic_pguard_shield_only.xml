@@ -1,0 +1,31 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="72dp"
+    android:height="72dp"
+    android:viewportWidth="64"
+    android:viewportHeight="64">
+
+    <!-- Shield Cutout Mask (creates a clean 3.5dp gap around the shield) -->
+    <path
+        android:fillColor="#FF5252"
+        android:strokeColor="#FF5252"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M27,24 L49,24 C49,38 38,48 38,48 C38,48 27,38 27,24 Z" />
+
+    <!-- Outer Shield Outline (White) -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M27,24 L49,24 C49,38 38,48 38,48 C38,48 27,38 27,24 Z" />
+
+    <!-- Inner Shield Inset (White) -->
+    <path
+        android:strokeColor="#FFFFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M31,28 L45,28 C45,36.5 38,43.5 38,43.5 C38,43.5 31,36.5 31,28 Z" />
+</vector>

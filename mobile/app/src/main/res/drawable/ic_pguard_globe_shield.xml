@@ -50,9 +50,13 @@
         android:strokeLineCap="round"
         android:pathData="M30,6 L30,22" />
 
-    <!-- Shield Fill (Masks Globe Behind It with Coral Brand Color) -->
+    <!-- Shield Cutout Mask (creates a clean gap/break in globe lines behind shield) -->
     <path
         android:fillColor="#FF5252"
+        android:strokeColor="#FF5252"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
         android:pathData="M27,24 L49,24 C49,38 38,48 38,48 C38,48 27,38 27,24 Z" />
 
     <!-- Outer Shield Outline (White) -->
