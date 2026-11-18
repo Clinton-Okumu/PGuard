@@ -175,22 +175,31 @@ class ContentFilter(
         )
 
         private val ADULT_URL_PATTERNS = listOf(
-            Regex("""\bnsfw\b""")
+            Regex("""\bnsfw\b"""),
+            Regex("""\bporn\b"""),
+            Regex("""\bxxx\b"""),
+            Regex("""\/r\/[a-z0-9_]*porn[a-z0-9_]*""", RegexOption.IGNORE_CASE),
+            Regex("""\/r\/[a-z0-9_]*nsfw[a-z0-9_]*""", RegexOption.IGNORE_CASE)
         )
 
         private val DEFAULT_ADULT_PATTERNS = listOf(
-            Regex("""\bporn\w*"""),
+            Regex("""\b(?:my|free|hot|top|best|hd|asian|gay|teen|amateur|real|live)?porn\w*""", RegexOption.IGNORE_CASE),
+            Regex("""\br\/[a-z0-9_]*porn[a-z0-9_]*\b""", RegexOption.IGNORE_CASE),
+            Regex("""\br\/[a-z0-9_]*nsfw[a-z0-9_]*\b""", RegexOption.IGNORE_CASE),
+            Regex("""\b18\s*\+?\s*nsfw\b|\bnsfw\s*\+?\s*18\b""", RegexOption.IGNORE_CASE),
             Regex("""\bxxx+\b"""),
-            Regex("""\bnsfw\s*(?:content|porn|xxx|nude|sex|video|pic|media)\b"""),
+            Regex("""\bnsfw\s*(?:content|porn|xxx|nude|sex|video|pic|media|post|channel)\b""", RegexOption.IGNORE_CASE),
+            Regex("""\b(?:fuck|fucking|fucked|fucks)\b""", RegexOption.IGNORE_CASE),
+            Regex("""\b(?:cock|cocks|dick|dicks|pussy|pussies|penis|penises|vagina|vaginas)\b""", RegexOption.IGNORE_CASE),
+            Regex("""\b(?:anal|anally|dildo|dildos)\b""", RegexOption.IGNORE_CASE),
             Regex("""\berotic\w*"""),
             Regex("""\bboobs?\b"""),
             Regex("""\btits\b"""),
-            Regex("""\bpuss(?:y|ies)\b"""),
             Regex("""\bblow\s?jobs?\b"""),
             Regex("""\bhand\s?jobs?\b"""),
             Regex("""\bmasturbat\w*"""),
             Regex("""\borgasms?\b"""),
-            Regex("""\bcum\s?shots?\b"""),
+            Regex("""\bcum\s?(?:shots?|ming)?\b"""),
             Regex("""\bdeep\s?throats?\b"""),
             Regex("""\bthree\s?somes?\b"""),
             Regex("""\bmilfs?\b"""),
@@ -199,15 +208,14 @@ class ContentFilter(
             Regex("""\bcream\s?pies?\b"""),
             Regex("""\bfemdom\b"""),
             Regex("""\bcuckold\w*"""),
-            Regex("""\bnudity\b"""),
-            Regex("""\bsex\s?videos?\b"""),
-            Regex("""\bsex\s?movies?\b"""),
+            Regex("""\b(?:nude|nudes|nudity|naked)\b"""),
+            Regex("""\bsex\s?(?:videos?|movies?|clips?)\b"""),
             Regex("""\bcam\s?girls?\b"""),
             Regex("""\bhardcore\s+sex\b"""),
             Regex("""\bx[\s-]?rated\b"""),
-            Regex("""\bhentai\s+haven\b"""),
+            Regex("""\bhentai\b"""),
             Regex("""\brule\s*34\b"""),
-            Regex("""\badult\s+games?\b"""),
+            Regex("""\badult\s+(?:games?|content|video)\b"""),
             Regex("""\bfree\s+sex\b"""),
         )
 

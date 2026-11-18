@@ -351,40 +351,53 @@ class PGuardAccessibilityService : AccessibilityService() {
     }
 
     private fun inspectBrowserActivity(event: AccessibilityEvent) {
-        var blockedTarget: String? = null
+        // Fast Path 1 (0ms latency, zero IPC): Check incoming event text & event source text immediately
+        val eventText = extractEventText(event)
+        if (eventText.isNotBlank() && shouldBlock(eventText)) {
+            Log.w(TAG, "Instant block triggered by event text: $eventText")
+            triggerBlock(eventText, isBrowserContext = true)
+            return
+        }
 
         val rootNode = findRootNode(event)
 
-        // A. Primary: Extract from address bar / search input / navigation URL
+        // Fast Path 2: Extract from address bar / search input / navigation URL
         val detectedUrl = BrowserInspector.extractUrl(rootNode, event)
         if (detectedUrl != null && shouldBlock(detectedUrl)) {
-            blockedTarget = detectedUrl
+            Log.w(TAG, "Instant block triggered by address bar URL: $detectedUrl")
+            triggerBlock(detectedUrl, isBrowserContext = true)
+            return
         }
 
-        // B. Visible adult content / domain scan on the web page
-        if (blockedTarget == null && rootNode != null) {
+        // Fast Path 3: Direct keyword inspection using native C++ findAccessibilityNodeInfosByText (single fast IPC)
+        if (rootNode != null) {
+            val highPriorityKeywords = listOf("porn", "fuck", "nsfw", "sex", "pussy", "dick", "nude", "xxx")
+            for (kw in highPriorityKeywords) {
+                try {
+                    val matchingNodes = rootNode.findAccessibilityNodeInfosByText(kw)
+                    if (!matchingNodes.isNullOrEmpty()) {
+                        for (node in matchingNodes) {
+                            val txt = node.text?.toString() ?: node.contentDescription?.toString() ?: ""
+                            if (txt.isNotBlank() && shouldBlock(txt)) {
+                                Log.w(TAG, "Instant native keyword match on '$kw': $txt")
+                                triggerBlock(txt, isBrowserContext = true)
+                                return
+                            }
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
+        // Fast Path 4: Fallback deep scan on visible web content
+        if (rootNode != null) {
             val matchedContent = BrowserInspector.findRestrictedContent(rootNode) { text ->
                 shouldBlock(text)
             }
             if (matchedContent != null) {
-                blockedTarget = matchedContent
+                Log.w(TAG, "Deep scan match: $matchedContent")
+                triggerBlock(matchedContent, isBrowserContext = true)
             }
-        }
-
-        // C. Check event text (e.g. window title or search query)
-        if (blockedTarget == null) {
-            val eventText = extractEventText(event)
-            if (eventText.isNotBlank() && shouldBlock(eventText)) {
-                blockedTarget = eventText
-            }
-        }
-
-        if (blockedTarget != null) {
-            // Web browsers display web content in a unified scrollable canvas.
-            // Rather than pinning floating cards that stick over scrolling HTML,
-            // we display the Tier 2 Full-Screen Display Overlay with true hardware
-            // Gaussian blur and a prominent "Go Back" button.
-            triggerBlock(blockedTarget, isBrowserContext = true)
         }
     }
 

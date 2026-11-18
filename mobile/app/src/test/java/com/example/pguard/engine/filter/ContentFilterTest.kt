@@ -33,6 +33,10 @@ class ContentFilterTest {
         assertTrue(filter.isAdultContent("best sex videos 2026"))
         assertTrue(filter.isAdultContent("pornography"))
         assertTrue(filter.isAdultContent("masturbation tips"))
+        assertTrue(filter.isAdultContent("r/myporn00"))
+        assertTrue(filter.isAdultContent("Ts parris fuck so good"))
+        assertTrue(filter.isAdultContent("18 NSFW"))
+        assertTrue(filter.isAdultContent("https://www.reddit.com/r/myporn00/comments/123"))
     }
 
     @Test
