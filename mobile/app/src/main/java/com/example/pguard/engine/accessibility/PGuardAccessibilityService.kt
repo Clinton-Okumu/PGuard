@@ -1017,27 +1017,91 @@ class PGuardAccessibilityService : AccessibilityService() {
         return lower.contains("launcher") || lower.contains("trebuchet") || lower.contains("quickstep")
     }
 
+    private fun isPermissionConfigurationScreen(root: AccessibilityNodeInfo?): Boolean {
+        if (root == null) return false
+        val permissionKeywords = listOf(
+            "display over other apps",
+            "appear on top",
+            "display pop-up",
+            "pop-up window",
+            "draw over other apps",
+            "special app access",
+            "allow display",
+            "permit drawing",
+            "notification",
+            "battery",
+            "unrestricted",
+            "autostart",
+            "activate this device admin",
+            "activate admin",
+            "permission manager",
+            "app permissions",
+            "modify system settings"
+        )
+        for (keyword in permissionKeywords) {
+            val matches = root.findAccessibilityNodeInfosByText(keyword)
+            if (!matches.isNullOrEmpty()) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun isUninstallDialog(pkg: String, root: AccessibilityNodeInfo): Boolean {
+        val lowerPkg = pkg.lowercase()
+        val isInstaller = lowerPkg.contains("packageinstaller") || lowerPkg.contains("vending")
+        if (isInstaller && isPGuardTargetedInNodeTree(root)) {
+            val matches = root.findAccessibilityNodeInfosByText("uninstall")
+            if (!matches.isNullOrEmpty()) return true
+        }
+        return false
+    }
+
+    private fun isDestructiveTamperAction(root: AccessibilityNodeInfo): Boolean {
+        val destructiveKeywords = listOf(
+            "uninstall",
+            "force stop",
+            "clear storage",
+            "clear data",
+            "deactivate",
+            "turn off",
+            "stop service"
+        )
+        for (keyword in destructiveKeywords) {
+            val matches = root.findAccessibilityNodeInfosByText(keyword)
+            if (!matches.isNullOrEmpty()) {
+                val isDangerous = matches.any { node ->
+                    val text = (node.text?.toString() ?: "").lowercase()
+                    val desc = (node.contentDescription?.toString() ?: "").lowercase()
+                    (text.contains(keyword) || desc.contains(keyword)) &&
+                    !text.contains("allow") && !desc.contains("allow")
+                }
+                if (isDangerous) return true
+            }
+        }
+        return false
+    }
+
     private fun inspectTamperAndUninstall(event: AccessibilityEvent) {
         if (!isUninstallProtectionEnabled) return
 
-        // 1. Check direct event text
-        for (t in event.text) {
-            if (containsPGuardReference(t?.toString())) {
-                triggerUninstallBlock()
-                return
-            }
+        val rootNode = findRootNode(event) ?: return
+
+        // 1. NEVER block user from granting required permissions (Display over other apps, Notifications, Battery, Admin activation)
+        if (isPermissionConfigurationScreen(rootNode)) {
+            return
         }
 
-        // 2. Check content description
-        val desc = event.contentDescription?.toString()
-        if (containsPGuardReference(desc)) {
+        val pkg = event.packageName?.toString() ?: ""
+
+        // 2. Package installer uninstall prompt for PGuard
+        if (isUninstallDialog(pkg, rootNode)) {
             triggerUninstallBlock()
             return
         }
 
-        // 3. Check active window node tree
-        val rootNode = findRootNode(event) ?: return
-        if (isPGuardTargetedInNodeTree(rootNode)) {
+        // 3. Settings: Only block if PGuard is targeted AND a destructive action (Uninstall, Force Stop, Clear Data, Deactivate) is present
+        if (isPGuardTargetedInNodeTree(rootNode) && isDestructiveTamperAction(rootNode)) {
             triggerUninstallBlock()
         }
     }
