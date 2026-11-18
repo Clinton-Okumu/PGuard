@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        com.example.pguard.engine.accessibility.PGuardAccessibilityService.loadSettings(applicationContext)
 
         setContent {
             PGuardTheme {

@@ -11,6 +11,7 @@
         tools:ignore="QueryAllPackagesPermission" />
 
     <application
+        android:name=".PGuardApplication"
         android:allowBackup="true"
         android:usesCleartextTraffic="true"
         android:dataExtractionRules="@xml/data_extraction_rules"

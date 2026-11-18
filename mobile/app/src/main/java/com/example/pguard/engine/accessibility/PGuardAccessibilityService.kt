@@ -69,7 +69,11 @@ class PGuardAccessibilityService : AccessibilityService() {
         val customBlocklist: MutableSet<String> = ConcurrentHashMap.newKeySet()
         val blockedAppPackages: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
+        @Volatile
+        var appContext: Context? = null
+
         fun loadSettings(context: Context) {
+            appContext = context.applicationContext
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             isAdultBlockingEnabled = prefs.getBoolean(KEY_ADULT, true)
             isShortsBlockingEnabled = prefs.getBoolean(KEY_SHORTS, false)
@@ -149,7 +153,7 @@ class PGuardAccessibilityService : AccessibilityService() {
         }
 
         fun saveSettings(
-            context: Context,
+            context: Context? = appContext,
             adult: Boolean = isAdultBlockingEnabled,
             shorts: Boolean = isShortsBlockingEnabled,
             whatsapp: Boolean = isWhatsAppChannelsBlockingEnabled,
@@ -162,6 +166,11 @@ class PGuardAccessibilityService : AccessibilityService() {
             countdown: Int = blockedScreenCountdown,
             redirect: String = redirectUrl
         ) {
+            if (context != null) {
+                appContext = context.applicationContext
+            }
+            val targetContext = context ?: appContext
+
             isAdultBlockingEnabled = adult
             isShortsBlockingEnabled = shorts
             isWhatsAppChannelsBlockingEnabled = whatsapp
@@ -179,21 +188,21 @@ class PGuardAccessibilityService : AccessibilityService() {
             blockedScreenCountdown = countdown
             redirectUrl = redirect
 
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                .edit()
-                .putBoolean(KEY_ADULT, adult)
-                .putBoolean(KEY_SHORTS, shorts)
-                .putBoolean(KEY_WHATSAPP, whatsapp)
-                .putBoolean(KEY_INSTAGRAM_REELS, instagramReels)
-                .putBoolean(KEY_TIKTOK, tiktok)
-                .putBoolean(KEY_UNINSTALL, uninstall)
-                .putBoolean(KEY_UNSUPPORTED_BROWSERS, unsupportedBrowsers)
-                .putBoolean(KEY_NEW_INSTALLED_APPS, newInstalledApps)
-                .putLong(KEY_NEW_APPS_ENABLED_AT, newAppsEnabledAt)
-                .putString(KEY_MESSAGE, message)
-                .putInt(KEY_COUNTDOWN, countdown)
-                .putString(KEY_REDIRECT_URL, redirect)
-                .apply()
+            targetContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                ?.edit()
+                ?.putBoolean(KEY_ADULT, adult)
+                ?.putBoolean(KEY_SHORTS, shorts)
+                ?.putBoolean(KEY_WHATSAPP, whatsapp)
+                ?.putBoolean(KEY_INSTAGRAM_REELS, instagramReels)
+                ?.putBoolean(KEY_TIKTOK, tiktok)
+                ?.putBoolean(KEY_UNINSTALL, uninstall)
+                ?.putBoolean(KEY_UNSUPPORTED_BROWSERS, unsupportedBrowsers)
+                ?.putBoolean(KEY_NEW_INSTALLED_APPS, newInstalledApps)
+                ?.putLong(KEY_NEW_APPS_ENABLED_AT, newAppsEnabledAt)
+                ?.putString(KEY_MESSAGE, message)
+                ?.putInt(KEY_COUNTDOWN, countdown)
+                ?.putString(KEY_REDIRECT_URL, redirect)
+                ?.apply()
             Log.d(TAG, "Persisted settings: adult=$adult, shorts=$shorts, whatsapp=$whatsapp, reels=$instagramReels, tiktok=$tiktok, unsupportedBrowsers=$unsupportedBrowsers, newInstalledApps=$newInstalledApps")
         }
 

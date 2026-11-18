@@ -72,8 +72,11 @@ class BlockingViewModel(
                 blockInstagramReels = PGuardAccessibilityService.isInstagramReelsBlockingEnabled,
                 blockTikTok = PGuardAccessibilityService.isTikTokBlockingEnabled,
                 uninstallProtection = PGuardAccessibilityService.isUninstallProtectionEnabled,
+                blockUnsupportedBrowsers = PGuardAccessibilityService.isUnsupportedBrowsersBlockingEnabled,
+                blockNewlyInstalledApps = PGuardAccessibilityService.isNewlyInstalledAppsBlockingEnabled,
                 blockedScreenMessage = PGuardAccessibilityService.blockedScreenMessage,
-                blockedScreenCountdown = PGuardAccessibilityService.blockedScreenCountdown
+                blockedScreenCountdown = PGuardAccessibilityService.blockedScreenCountdown,
+                redirectUrl = PGuardAccessibilityService.redirectUrl
             ),
             accountabilityMode = AccountabilityMode.fromCode(PGuardAccessibilityService.accountabilityMode),
             timeDelayUnlockAt = PGuardAccessibilityService.timeDelayUnlockAt,
@@ -118,7 +121,10 @@ class BlockingViewModel(
         return normalizeEmail(email1) == normalizeEmail(email2)
     }
 
-    fun refreshFromLocalPreferences() {
+    fun refreshFromLocalPreferences(context: android.content.Context? = null) {
+        if (context != null) {
+            PGuardAccessibilityService.loadSettings(context)
+        }
         _uiState.update { current ->
             current.copy(
                 settings = current.settings.copy(
@@ -128,8 +134,11 @@ class BlockingViewModel(
                     blockInstagramReels = PGuardAccessibilityService.isInstagramReelsBlockingEnabled,
                     blockTikTok = PGuardAccessibilityService.isTikTokBlockingEnabled,
                     uninstallProtection = PGuardAccessibilityService.isUninstallProtectionEnabled,
+                    blockUnsupportedBrowsers = PGuardAccessibilityService.isUnsupportedBrowsersBlockingEnabled,
+                    blockNewlyInstalledApps = PGuardAccessibilityService.isNewlyInstalledAppsBlockingEnabled,
                     blockedScreenMessage = PGuardAccessibilityService.blockedScreenMessage,
-                    blockedScreenCountdown = PGuardAccessibilityService.blockedScreenCountdown
+                    blockedScreenCountdown = PGuardAccessibilityService.blockedScreenCountdown,
+                    redirectUrl = PGuardAccessibilityService.redirectUrl
                 ),
                 accountabilityMode = AccountabilityMode.fromCode(PGuardAccessibilityService.accountabilityMode),
                 timeDelayUnlockAt = PGuardAccessibilityService.timeDelayUnlockAt,
@@ -151,8 +160,26 @@ class BlockingViewModel(
             _uiState.update { current ->
                 val serverSettings = settingsResult.getOrNull()
                 val finalSettings = if (serverSettings != null) {
-                    syncSettingsToAccessibilityService(serverSettings)
-                    serverSettings
+                    // Smart merge: Do not let unconfigured/default server flags override
+                    // active protections the user already enabled locally on their phone!
+                    val merged = current.settings.copy(
+                        blockAdultContent = current.settings.blockAdultContent || serverSettings.blockAdultContent,
+                        blockShorts = current.settings.blockShorts || serverSettings.blockShorts,
+                        blockWhatsAppChannels = current.settings.blockWhatsAppChannels || serverSettings.blockWhatsAppChannels,
+                        blockInstagramReels = current.settings.blockInstagramReels || serverSettings.blockInstagramReels,
+                        blockTikTok = current.settings.blockTikTok || serverSettings.blockTikTok,
+                        uninstallProtection = current.settings.uninstallProtection || serverSettings.uninstallProtection,
+                        blockUnsupportedBrowsers = current.settings.blockUnsupportedBrowsers || serverSettings.blockUnsupportedBrowsers,
+                        blockNewlyInstalledApps = current.settings.blockNewlyInstalledApps || serverSettings.blockNewlyInstalledApps,
+                        blockedScreenMessage = if (serverSettings.blockedScreenMessage.isNotBlank() && serverSettings.blockedScreenMessage != "This page is blocked.") serverSettings.blockedScreenMessage else current.settings.blockedScreenMessage,
+                        blockedScreenCountdown = if (serverSettings.blockedScreenCountdown > 0) serverSettings.blockedScreenCountdown else current.settings.blockedScreenCountdown,
+                        redirectUrl = if (serverSettings.redirectUrl.isNotBlank()) serverSettings.redirectUrl else current.settings.redirectUrl
+                    )
+                    syncSettingsToAccessibilityService(merged)
+                    if (merged != serverSettings) {
+                        pushSettingsToServer(merged)
+                    }
+                    merged
                 } else {
                     // Keep current local settings if offline/server unreachable
                     current.settings
@@ -709,16 +736,39 @@ class BlockingViewModel(
     }
 
     private fun syncSettingsToAccessibilityService(settings: UserSettingsDto) {
-        PGuardAccessibilityService.isAdultBlockingEnabled = settings.blockAdultContent
-        PGuardAccessibilityService.isShortsBlockingEnabled = settings.blockShorts
-        PGuardAccessibilityService.isWhatsAppChannelsBlockingEnabled = settings.blockWhatsAppChannels
-        PGuardAccessibilityService.isInstagramReelsBlockingEnabled = settings.blockInstagramReels
-        PGuardAccessibilityService.isTikTokBlockingEnabled = settings.blockTikTok
-        PGuardAccessibilityService.isUninstallProtectionEnabled = settings.uninstallProtection
-        PGuardAccessibilityService.isUnsupportedBrowsersBlockingEnabled = settings.blockUnsupportedBrowsers
-        PGuardAccessibilityService.isNewlyInstalledAppsBlockingEnabled = settings.blockNewlyInstalledApps
-        PGuardAccessibilityService.blockedScreenMessage = settings.blockedScreenMessage
-        PGuardAccessibilityService.blockedScreenCountdown = settings.blockedScreenCountdown
-        PGuardAccessibilityService.redirectUrl = settings.redirectUrl
+        PGuardAccessibilityService.saveSettings(
+            adult = settings.blockAdultContent,
+            shorts = settings.blockShorts,
+            whatsapp = settings.blockWhatsAppChannels,
+            instagramReels = settings.blockInstagramReels,
+            tiktok = settings.blockTikTok,
+            uninstall = settings.uninstallProtection,
+            unsupportedBrowsers = settings.blockUnsupportedBrowsers,
+            newInstalledApps = settings.blockNewlyInstalledApps,
+            message = settings.blockedScreenMessage,
+            countdown = settings.blockedScreenCountdown,
+            redirect = settings.redirectUrl
+        )
+    }
+
+    private fun pushSettingsToServer(settings: UserSettingsDto) {
+        val request = UpdateSettingsRequest(
+            blockAdultContent = settings.blockAdultContent,
+            blockShorts = settings.blockShorts,
+            blockWhatsAppChannels = settings.blockWhatsAppChannels,
+            blockInstagramReels = settings.blockInstagramReels,
+            blockTikTok = settings.blockTikTok,
+            uninstallProtection = settings.uninstallProtection,
+            blockUnsupportedBrowsers = settings.blockUnsupportedBrowsers,
+            blockNewlyInstalledApps = settings.blockNewlyInstalledApps,
+            blockedScreenMessage = settings.blockedScreenMessage,
+            blockedScreenCountdown = settings.blockedScreenCountdown,
+            redirectUrl = settings.redirectUrl
+        )
+        viewModelScope.launch {
+            settingsRepository.updateSettings(request).onFailure { err ->
+                android.util.Log.w("BlockingViewModel", "Failed to sync local protections to server: ${err.message}")
+            }
+        }
     }
 }

@@ -104,25 +104,7 @@ fun BlockingScreen(
 
     LaunchedEffect(Unit) {
         PGuardAccessibilityService.loadSettings(context)
-        viewModel.refreshFromLocalPreferences()
-    }
-
-    LaunchedEffect(state.settings) {
-        val settings = state.settings
-        PGuardAccessibilityService.saveSettings(
-            context = context,
-            adult = settings.blockAdultContent,
-            shorts = settings.blockShorts,
-            whatsapp = settings.blockWhatsAppChannels,
-            instagramReels = settings.blockInstagramReels,
-            tiktok = settings.blockTikTok,
-            uninstall = settings.uninstallProtection,
-            unsupportedBrowsers = settings.blockUnsupportedBrowsers,
-            newInstalledApps = settings.blockNewlyInstalledApps,
-            message = settings.blockedScreenMessage,
-            countdown = settings.blockedScreenCountdown,
-            redirect = settings.redirectUrl
-        )
+        viewModel.refreshFromLocalPreferences(context)
     }
 
     var alerts by remember { mutableStateOf(readPermissionAlerts(context)) }
