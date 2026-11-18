@@ -212,6 +212,10 @@ internal fun BlockingScreenContent(
 
     val context = androidx.compose.ui.platform.LocalContext.current
 
+    var showAccessibilityDialog by remember { mutableStateOf(false) }
+    var showOverlayDialog by remember { mutableStateOf(false) }
+    var showNotificationDialog by remember { mutableStateOf(false) }
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -242,7 +246,7 @@ internal fun BlockingScreenContent(
                         subtitle = "If allowed, you will get notified of important updates and changes",
                         actionLabel = "Allow",
                         trailingIcon = R.drawable.ic_notification,
-                        onAction = callbacks.onFixPushNotifications
+                        onAction = { showNotificationDialog = true }
                     )
                 }
 
@@ -252,7 +256,7 @@ internal fun BlockingScreenContent(
                         subtitle = "Some features may not work unless you turn on accessibility service.",
                         actionLabel = "Turn ON",
                         trailingIcon = R.drawable.ic_chevron_right,
-                        onAction = callbacks.onFixAccessibility
+                        onAction = { showAccessibilityDialog = true }
                     )
                 }
 
@@ -262,7 +266,7 @@ internal fun BlockingScreenContent(
                         subtitle = "Allows pop-ups to appear over other apps and enables safe search.",
                         actionLabel = "Turn ON",
                         trailingIcon = R.drawable.ic_chevron_right,
-                        onAction = callbacks.onFixOverlay
+                        onAction = { showOverlayDialog = true }
                     )
                 }
 
@@ -342,6 +346,36 @@ internal fun BlockingScreenContent(
     }
 
     BlockingScreenDialogs(state = state, callbacks = callbacks)
+
+    if (showAccessibilityDialog) {
+        AccessibilityExplanationDialog(
+            onConfirm = {
+                showAccessibilityDialog = false
+                callbacks.onFixAccessibility()
+            },
+            onDismiss = { showAccessibilityDialog = false }
+        )
+    }
+
+    if (showOverlayDialog) {
+        OverlayExplanationDialog(
+            onConfirm = {
+                showOverlayDialog = false
+                callbacks.onFixOverlay()
+            },
+            onDismiss = { showOverlayDialog = false }
+        )
+    }
+
+    if (showNotificationDialog) {
+        NotificationExplanationDialog(
+            onConfirm = {
+                showNotificationDialog = false
+                callbacks.onFixPushNotifications()
+            },
+            onDismiss = { showNotificationDialog = false }
+        )
+    }
 }
 
 @Composable
