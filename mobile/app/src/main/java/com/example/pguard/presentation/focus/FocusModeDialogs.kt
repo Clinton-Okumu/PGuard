@@ -2,6 +2,7 @@ package com.example.pguard.presentation.focus
 
 import android.app.TimePickerDialog
 import android.content.Context
+import java.util.Calendar
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -246,12 +247,52 @@ fun CreateScheduleDialog(
     var endHour by remember { mutableIntStateOf(initialSchedule?.endHour ?: 5) }
     var endMinute by remember { mutableIntStateOf(initialSchedule?.endMinute ?: 5) }
     var repeatDaily by remember { mutableStateOf(initialSchedule?.repeatDaily ?: true) }
+    var selectedDays by remember {
+        mutableStateOf(
+            initialSchedule?.repeatDays ?: setOf(
+                Calendar.MONDAY,
+                Calendar.TUESDAY,
+                Calendar.WEDNESDAY,
+                Calendar.THURSDAY,
+                Calendar.FRIDAY,
+                Calendar.SATURDAY,
+                Calendar.SUNDAY
+            )
+        )
+    }
+
+    val allDays = remember {
+        setOf(
+            Calendar.MONDAY,
+            Calendar.TUESDAY,
+            Calendar.WEDNESDAY,
+            Calendar.THURSDAY,
+            Calendar.FRIDAY,
+            Calendar.SATURDAY,
+            Calendar.SUNDAY
+        )
+    }
+    val weekdays = remember {
+        setOf(
+            Calendar.MONDAY,
+            Calendar.TUESDAY,
+            Calendar.WEDNESDAY,
+            Calendar.THURSDAY,
+            Calendar.FRIDAY
+        )
+    }
+    val weekends = remember {
+        setOf(
+            Calendar.SATURDAY,
+            Calendar.SUNDAY
+        )
+    }
 
     fun showTimePicker(initialH: Int, initialM: Int, onTimeSet: (Int, Int) -> Unit) {
         TimePickerDialog(context, { _, h, m -> onTimeSet(h, m) }, initialH, initialM, true).show()
     }
 
-    val tempSchedule = remember(startHour, startMinute, endHour, endMinute, repeatDaily, selectedAllowedApps) {
+    val tempSchedule = remember(startHour, startMinute, endHour, endMinute, repeatDaily, selectedDays, selectedAllowedApps) {
         FocusSchedule(
             id = initialSchedule?.id ?: java.util.UUID.randomUUID().toString(),
             startHour = startHour,
@@ -259,6 +300,7 @@ fun CreateScheduleDialog(
             endHour = endHour,
             endMinute = endMinute,
             repeatDaily = repeatDaily,
+            repeatDays = if (repeatDaily) allDays else selectedDays,
             allowedApps = selectedAllowedApps
         )
     }
@@ -333,15 +375,15 @@ fun CreateScheduleDialog(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Repeat Daily",
+                            text = "Repeat Everyday",
                             color = Color.White,
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold
                         )
                         Text(
-                            text = "Applies every day automatically",
+                            text = if (repeatDaily) "Applies every day automatically" else "Pick custom scheduled days below",
                             color = Color.White.copy(alpha = 0.6f),
                             fontSize = 12.sp
                         )
@@ -349,7 +391,12 @@ fun CreateScheduleDialog(
 
                     Switch(
                         checked = repeatDaily,
-                        onCheckedChange = { repeatDaily = it },
+                        onCheckedChange = { isDaily ->
+                            repeatDaily = isDaily
+                            if (isDaily) {
+                                selectedDays = allDays
+                            }
+                        },
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
                             checkedTrackColor = Color(0xFF4CAF50),
@@ -357,6 +404,108 @@ fun CreateScheduleDialog(
                             uncheckedTrackColor = Color.White.copy(alpha = 0.2f)
                         )
                     )
+                }
+
+                // Custom Scheduled Days (Calendar Weekday Selector)
+                if (!repeatDaily) {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color.White.copy(alpha = 0.04f))
+                            .padding(12.dp)
+                    ) {
+                        Text(
+                            text = "Scheduled Days",
+                            color = Color.White.copy(alpha = 0.8f),
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        val daysList = remember {
+                            listOf(
+                                Triple(Calendar.MONDAY, "M", "Mon"),
+                                Triple(Calendar.TUESDAY, "T", "Tue"),
+                                Triple(Calendar.WEDNESDAY, "W", "Wed"),
+                                Triple(Calendar.THURSDAY, "T", "Thu"),
+                                Triple(Calendar.FRIDAY, "F", "Fri"),
+                                Triple(Calendar.SATURDAY, "S", "Sat"),
+                                Triple(Calendar.SUNDAY, "S", "Sun")
+                            )
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            for (dayItem in daysList) {
+                                val dayInt = dayItem.first
+                                val letter = dayItem.second
+                                val isSelected = dayInt in selectedDays
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clip(CircleShape)
+                                        .background(if (isSelected) CoralPrimary else Color.White.copy(alpha = 0.08f))
+                                        .clickable {
+                                            selectedDays = if (isSelected) {
+                                                if (selectedDays.size > 1) selectedDays - dayInt else selectedDays
+                                            } else {
+                                                selectedDays + dayInt
+                                            }
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = letter,
+                                        color = if (isSelected) Color.White else Color.White.copy(alpha = 0.5f),
+                                        fontSize = 13.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Quick Presets: Weekdays / Weekends
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (selectedDays == weekdays) CoralPrimary.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.06f))
+                                    .clickable { selectedDays = weekdays }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = "Weekdays (Mon-Fri)",
+                                    fontSize = 11.5.sp,
+                                    color = if (selectedDays == weekdays) CoralPrimary else Color.White.copy(alpha = 0.7f),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (selectedDays == weekends) CoralPrimary.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.06f))
+                                    .clickable { selectedDays = weekends }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = "Weekends (Sat-Sun)",
+                                    fontSize = 11.5.sp,
+                                    color = if (selectedDays == weekends) CoralPrimary else Color.White.copy(alpha = 0.7f),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(18.dp))
@@ -376,17 +525,24 @@ fun CreateScheduleDialog(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Allowed Apps",
+                                text = "Allowed Apps (${selectedAllowedApps.size})",
                                 color = Color.White,
                                 fontSize = 14.5.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                text = "${selectedAllowedApps.size} apps allowed (Call/SMS allowed by default)",
+                                text = "Messages, Calls, Contacts & PGuard are default allowed.",
                                 color = Color.White.copy(alpha = 0.6f),
-                                fontSize = 12.sp
+                                fontSize = 11.5.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "🔒 Allowed apps are locked once the schedule is saved.",
+                                color = CoralPrimary.copy(alpha = 0.85f),
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Medium
                             )
                         }
 

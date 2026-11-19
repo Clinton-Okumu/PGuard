@@ -3,9 +3,12 @@ package com.example.pguard.presentation.focus
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.ContactsContract
 import android.provider.Telephony
 import android.util.Log
+import android.view.inputmethod.InputMethodManager
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.Calendar
@@ -88,10 +91,12 @@ object FocusModeManager {
 
     /**
      * Determines whether a package is permitted during an active focus schedule:
-     * - PGuard itself is always permitted (to adjust settings, disable lock if authorized)
-     * - System dialer & SMS apps are permitted by default for emergencies
+     * - PGuard itself is always permitted
+     * - Standard Defaults: Messages, Calls (Dialer), Contacts are permitted
      * - Home Launcher and System UI are permitted
-     * - Any package explicitly in schedule.allowedApps is permitted
+     * - Input Methods (keyboards) are permitted
+     * - Explicit user-selected allowedApps in the schedule are permitted
+     * - All other applications are strictly blocked
      */
     fun isPackageAllowed(context: Context, packageName: String, schedule: FocusSchedule): Boolean {
         val lower = packageName.lowercase()
@@ -100,12 +105,12 @@ object FocusModeManager {
         // 1. PGuard itself
         if (lower == appPkg) return true
 
-        // 2. Explicitly allowed apps
+        // 2. Explicitly allowed apps selected during schedule creation
         if (schedule.allowedApps.any { it.equals(lower, ignoreCase = true) }) {
             return true
         }
 
-        // 3. System UI & Launcher
+        // 3. System UI & Home Launcher
         if (lower == "android" ||
             lower.startsWith("com.android.systemui") ||
             lower.contains("launcher") ||
@@ -115,8 +120,16 @@ object FocusModeManager {
         ) {
             return true
         }
+        try {
+            val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            val homeResolve = context.packageManager.resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            val homePkg = homeResolve?.activityInfo?.packageName?.lowercase()
+            if (!homePkg.isNullOrBlank() && homePkg == lower) {
+                return true
+            }
+        } catch (_: Exception) {}
 
-        // 4. Default Telephony & Phone Dialer (Emergency Calls)
+        // 4. Calls / Phone Dialer (Default & Emergency Calls)
         val defaultDialer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val telecomManager = context.getSystemService(Context.TELECOM_SERVICE) as? android.telecom.TelecomManager
             telecomManager?.defaultDialerPackage
@@ -125,14 +138,59 @@ object FocusModeManager {
         if (!defaultDialer.isNullOrBlank() && lower == defaultDialer.lowercase()) {
             return true
         }
-
-        if (lower.contains("dialer") || lower.contains("incallui") || lower.contains("phone")) {
+        try {
+            val dialIntent = Intent(Intent.ACTION_DIAL)
+            val dialResolve = context.packageManager.resolveActivity(dialIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            val dialPkg = dialResolve?.activityInfo?.packageName?.lowercase()
+            if (!dialPkg.isNullOrBlank() && dialPkg == lower) {
+                return true
+            }
+        } catch (_: Exception) {}
+        if (lower.contains("dialer") || lower.contains("incallui") || lower.contains("phone") || lower.contains("telecom")) {
             return true
         }
 
-        // 5. Default SMS Provider
+        // 5. Messages / SMS
         val defaultSms = Telephony.Sms.getDefaultSmsPackage(context)
         if (!defaultSms.isNullOrBlank() && lower == defaultSms.lowercase()) {
+            return true
+        }
+        try {
+            val smsIntent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:"))
+            val smsResolve = context.packageManager.resolveActivity(smsIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            val smsPkg = smsResolve?.activityInfo?.packageName?.lowercase()
+            if (!smsPkg.isNullOrBlank() && smsPkg == lower) {
+                return true
+            }
+        } catch (_: Exception) {}
+        if (lower.contains("messaging") || lower.contains("mms") || lower == "com.google.android.apps.messaging") {
+            return true
+        }
+
+        // 6. Contacts (Calls, Messages, Contacts are default allowed)
+        try {
+            val contactsIntent = Intent(Intent.ACTION_PICK, ContactsContract.Contacts.CONTENT_URI)
+            val contactsResolve = context.packageManager.resolveActivity(contactsIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            val contactsPkg = contactsResolve?.activityInfo?.packageName?.lowercase()
+            if (!contactsPkg.isNullOrBlank() && contactsPkg == lower) {
+                return true
+            }
+        } catch (_: Exception) {}
+        if (lower == "com.google.android.contacts" ||
+            lower == "com.android.contacts" ||
+            lower == "com.samsung.android.app.contacts" ||
+            lower.contains("contacts")
+        ) {
+            return true
+        }
+
+        // 7. Input Method Keyboards (Gboard, Swiftkey, Samsung Keyboard, etc.)
+        try {
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            val imes = imm?.enabledInputMethodList?.map { it.packageName.lowercase() } ?: emptyList()
+            if (imes.contains(lower)) return true
+        } catch (_: Exception) {}
+        if (lower.contains("inputmethod") || lower.contains("gboard") || lower.contains("latinime")) {
             return true
         }
 

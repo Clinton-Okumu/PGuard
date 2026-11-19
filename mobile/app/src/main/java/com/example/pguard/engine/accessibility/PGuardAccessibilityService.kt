@@ -976,11 +976,9 @@ class PGuardAccessibilityService : AccessibilityService() {
     }
 
     private fun triggerFocusBlock(packageName: String, schedule: com.example.pguard.presentation.focus.FocusSchedule) {
-        val now = System.currentTimeMillis()
-        if (now - lastAppBlockedTimestamp < 1500L) {
+        if (overlayManager.isFullScreenShowing) {
             return
         }
-        lastAppBlockedTimestamp = now
 
         val appName = try {
             val pm = packageManager

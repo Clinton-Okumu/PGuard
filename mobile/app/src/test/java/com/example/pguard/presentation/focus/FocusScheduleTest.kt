@@ -106,4 +106,79 @@ class FocusScheduleTest {
         }
         assertFalse(schedule.isCurrentlyActive(cal))
     }
+
+    @Test
+    fun `formats recurrence badges correctly`() {
+        val dailySchedule = FocusSchedule(repeatDaily = true)
+        assertEquals("Daily", dailySchedule.formattedDaysBadge)
+
+        val weekdaysSchedule = FocusSchedule(
+            repeatDaily = false,
+            repeatDays = setOf(
+                Calendar.MONDAY,
+                Calendar.TUESDAY,
+                Calendar.WEDNESDAY,
+                Calendar.THURSDAY,
+                Calendar.FRIDAY
+            )
+        )
+        assertEquals("Weekdays", weekdaysSchedule.formattedDaysBadge)
+
+        val weekendsSchedule = FocusSchedule(
+            repeatDaily = false,
+            repeatDays = setOf(Calendar.SATURDAY, Calendar.SUNDAY)
+        )
+        assertEquals("Weekends", weekendsSchedule.formattedDaysBadge)
+
+        val customThreeDays = FocusSchedule(
+            repeatDaily = false,
+            repeatDays = setOf(Calendar.MONDAY, Calendar.WEDNESDAY, Calendar.FRIDAY)
+        )
+        assertEquals("Mon, Wed, Fri", customThreeDays.formattedDaysBadge)
+    }
+
+    @Test
+    fun `evaluates active state with custom days and overnight window correctly`() {
+        val schedule = FocusSchedule(
+            startHour = 22,
+            startMinute = 0,
+            endHour = 4,
+            endMinute = 0,
+            isEnabled = true,
+            repeatDaily = false,
+            repeatDays = setOf(Calendar.MONDAY) // Only active Monday night into Tuesday morning
+        )
+
+        // Monday 23:00 -> Active
+        val calMonNight = Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_WEEK, Calendar.MONDAY)
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 0)
+        }
+        assertTrue(schedule.isCurrentlyActive(calMonNight))
+
+        // Tuesday 02:00 -> Active (started Monday night)
+        val calTueMorning = Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_WEEK, Calendar.TUESDAY)
+            set(Calendar.HOUR_OF_DAY, 2)
+            set(Calendar.MINUTE, 0)
+        }
+        assertTrue(schedule.isCurrentlyActive(calTueMorning))
+
+        // Tuesday 23:00 -> Inactive (Tuesday not in repeatDays)
+        val calTueNight = Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_WEEK, Calendar.TUESDAY)
+            set(Calendar.HOUR_OF_DAY, 23)
+            set(Calendar.MINUTE, 0)
+        }
+        assertFalse(schedule.isCurrentlyActive(calTueNight))
+
+        // Wednesday 02:00 -> Inactive (Tuesday was not in repeatDays)
+        val calWedMorning = Calendar.getInstance().apply {
+            set(Calendar.DAY_OF_WEEK, Calendar.WEDNESDAY)
+            set(Calendar.HOUR_OF_DAY, 2)
+            set(Calendar.MINUTE, 0)
+        }
+        assertFalse(schedule.isCurrentlyActive(calWedMorning))
+    }
 }

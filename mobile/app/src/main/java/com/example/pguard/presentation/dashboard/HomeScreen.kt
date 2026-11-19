@@ -165,7 +165,8 @@ fun HomeScreen(
                 onUpgradeClick = {
                     showFocusModeScreen = false
                     showPremiumScreen = true
-                }
+                },
+                blockingViewModel = blockingViewModel
             )
         }
     }

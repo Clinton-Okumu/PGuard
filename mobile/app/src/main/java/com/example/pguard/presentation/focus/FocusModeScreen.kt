@@ -39,6 +39,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +58,11 @@ import com.example.pguard.R
 import com.example.pguard.engine.accessibility.PGuardAccessibilityService
 import com.example.pguard.presentation.blocklist.InstalledAppItem
 import com.example.pguard.presentation.blocklist.queryDeviceLauncherApps
+import com.example.pguard.presentation.dashboard.AccountabilityMode
+import com.example.pguard.presentation.dashboard.BlockingViewModel
+import com.example.pguard.presentation.dashboard.FriendApprovalDialog
+import com.example.pguard.presentation.dashboard.TimeDelayConfirmDialog
+import com.example.pguard.presentation.dashboard.TypingChallengeDialog
 import com.example.pguard.presentation.theme.CoralPrimary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -68,17 +74,25 @@ private val CardBackground = Color(0xFF1E1E24)
 @Composable
 fun FocusModeScreen(
     onBackClick: () -> Unit,
-    onUpgradeClick: () -> Unit = {}
+    onUpgradeClick: () -> Unit = {},
+    blockingViewModel: BlockingViewModel? = null
 ) {
     val context = LocalContext.current
     val schedules = remember { mutableStateListOf<FocusSchedule>() }
 
+    val blockingUiState = blockingViewModel?.uiState?.collectAsState()?.value
+    val activeFrictionMode = blockingUiState?.accountabilityMode
+        ?: AccountabilityMode.fromCode(PGuardAccessibilityService.accountabilityMode)
+
     var showHelpDialog by remember { mutableStateOf(false) }
     var showCreateDialog by remember { mutableStateOf(false) }
     var showLimitToast by remember { mutableStateOf(false) }
-    var showAccountabilityGuardDialog by remember { mutableStateOf(false) }
 
-    var editingSchedule by remember { mutableStateOf<FocusSchedule?>(null) }
+    var showTypingChallenge by remember { mutableStateOf(false) }
+    var showTimeDelayConfirm by remember { mutableStateOf(false) }
+    var showFriendApproval by remember { mutableStateOf(false) }
+    var pendingFrictionAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+
     var showAppPickerDialog by remember { mutableStateOf(false) }
     var currentAllowedAppsTarget by remember { mutableStateOf<Set<String>>(emptySet()) }
     var onAllowedAppsSelectedCallback by remember { mutableStateOf<((Set<String>) -> Unit)?>(null) }
@@ -100,9 +114,30 @@ fun FocusModeScreen(
         }
     }
 
-    val isAccountabilityLocked = remember {
-        val mode = PGuardAccessibilityService.accountabilityMode
-        mode.isNotBlank() && !mode.equals("none", ignoreCase = true)
+    fun triggerProtectedScheduleAction(action: () -> Unit) {
+        when (activeFrictionMode) {
+            AccountabilityMode.NONE -> {
+                action()
+            }
+            AccountabilityMode.SELF -> {
+                pendingFrictionAction = action
+                showTypingChallenge = true
+            }
+            AccountabilityMode.TIME_DELAY -> {
+                pendingFrictionAction = action
+                showTimeDelayConfirm = true
+            }
+            AccountabilityMode.FRIEND -> {
+                val partner = blockingUiState?.partner
+                val isLinked = blockingUiState?.isPartnerLinked ?: false
+                if (partner != null && isLinked) {
+                    pendingFrictionAction = action
+                    showFriendApproval = true
+                } else {
+                    action()
+                }
+            }
+        }
     }
 
     Scaffold(
@@ -119,7 +154,6 @@ fun FocusModeScreen(
                     if (schedules.size >= FocusModeManager.MAX_FREE_SCHEDULES) {
                         showLimitToast = true
                     } else {
-                        editingSchedule = null
                         currentAllowedAppsTarget = emptySet()
                         showCreateDialog = true
                     }
@@ -175,30 +209,24 @@ fun FocusModeScreen(
                         FocusScheduleCard(
                             schedule = schedule,
                             onToggle = { isEnabled ->
-                                if (!isEnabled && isAccountabilityLocked) {
-                                    showAccountabilityGuardDialog = true
+                                if (!isEnabled) {
+                                    // Turning OFF uses picked friction method
+                                    triggerProtectedScheduleAction {
+                                        FocusModeManager.toggleSchedule(context, schedule.id, false)
+                                        refreshSchedules()
+                                    }
                                 } else {
-                                    FocusModeManager.toggleSchedule(context, schedule.id, isEnabled)
+                                    // Turning ON is friction-free
+                                    FocusModeManager.toggleSchedule(context, schedule.id, true)
                                     refreshSchedules()
                                 }
                             },
                             onDelete = {
-                                if (isAccountabilityLocked) {
-                                    showAccountabilityGuardDialog = true
-                                } else {
+                                // Deleting schedule uses picked friction method
+                                triggerProtectedScheduleAction {
                                     FocusModeManager.deleteSchedule(context, schedule.id)
                                     refreshSchedules()
                                 }
-                            },
-                            onEditAllowedApps = {
-                                editingSchedule = schedule
-                                currentAllowedAppsTarget = schedule.allowedApps
-                                onAllowedAppsSelectedCallback = { updatedApps ->
-                                    val updated = schedule.copy(allowedApps = updatedApps)
-                                    FocusModeManager.saveSchedule(context, updated)
-                                    refreshSchedules()
-                                }
-                                showAppPickerDialog = true
                             }
                         )
                     }
@@ -227,24 +255,68 @@ fun FocusModeScreen(
         FocusHelpDialog(onDismiss = { showHelpDialog = false })
     }
 
-    // Accountability Guard Dialog matching Image 3
-    if (showAccountabilityGuardDialog) {
-        val partnerTitle = when (PGuardAccessibilityService.accountabilityMode.lowercase()) {
-            "friend" -> "Accountability Partner"
-            "time_delay" -> "24-Hour Time Delay"
-            "self" -> "Focus Commitment"
-            else -> "Team"
-        }
-        FocusAccountabilityGuardDialog(
-            partnerModeTitle = partnerTitle,
-            onDismiss = { showAccountabilityGuardDialog = false }
+    // Friction Guard Dialog 1: Myself Typing Challenge
+    if (showTypingChallenge) {
+        TypingChallengeDialog(
+            targetFeatureTitle = "Focus Schedule",
+            onSuccess = {
+                showTypingChallenge = false
+                pendingFrictionAction?.invoke()
+                pendingFrictionAction = null
+            },
+            onDismiss = {
+                showTypingChallenge = false
+                pendingFrictionAction = null
+            }
+        )
+    }
+
+    // Friction Guard Dialog 2: 24-Hour Time Delay
+    if (showTimeDelayConfirm) {
+        TimeDelayConfirmDialog(
+            targetFeatureTitle = "Focus Schedule",
+            onConfirm = {
+                showTimeDelayConfirm = false
+                pendingFrictionAction?.invoke()
+                pendingFrictionAction = null
+            },
+            onDismiss = {
+                showTimeDelayConfirm = false
+                pendingFrictionAction = null
+            }
+        )
+    }
+
+    // Friction Guard Dialog 3: Accountability Partner Approval
+    if (showFriendApproval) {
+        FriendApprovalDialog(
+            targetFeatureTitle = "Focus Schedule",
+            partnerEmail = blockingUiState?.partner?.partnerEmail ?: "",
+            onRequestCode = {
+                blockingViewModel?.requestPartnerApprovalCode("Focus Schedule")
+            },
+            onSubmitCode = { code ->
+                val expected = blockingUiState?.devApprovalCode
+                if (!expected.isNullOrBlank() && code.trim() != expected.trim()) {
+                    // Mismatched code
+                } else {
+                    showFriendApproval = false
+                    pendingFrictionAction?.invoke()
+                    pendingFrictionAction = null
+                }
+            },
+            onDismiss = {
+                showFriendApproval = false
+                pendingFrictionAction = null
+            },
+            devCode = blockingUiState?.devApprovalCode
         )
     }
 
     // Create Schedule Dialog
     if (showCreateDialog) {
         CreateScheduleDialog(
-            initialSchedule = editingSchedule,
+            initialSchedule = null,
             selectedAllowedApps = currentAllowedAppsTarget,
             onDismiss = { showCreateDialog = false },
             onPickAllowedAppsClick = { currentSet ->
@@ -335,8 +407,7 @@ private fun FocusModeTopBar(
 private fun FocusScheduleCard(
     schedule: FocusSchedule,
     onToggle: (Boolean) -> Unit,
-    onDelete: () -> Unit,
-    onEditAllowedApps: () -> Unit
+    onDelete: () -> Unit
 ) {
     var isAccordionExpanded by remember { mutableStateOf(false) }
 
@@ -396,13 +467,13 @@ private fun FocusScheduleCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Row 2: "Daily" pill badge
+            // Row 2: Recurrence Day Pill badge (Daily, Weekdays, Weekends, Custom)
             Surface(
                 shape = RoundedCornerShape(8.dp),
                 color = Color(0xFF2A2A32)
             ) {
                 Text(
-                    text = if (schedule.repeatDaily) "Daily" else "Custom Days",
+                    text = schedule.formattedDaysBadge,
                     color = Color.White.copy(alpha = 0.85f),
                     fontSize = 11.5.sp,
                     fontWeight = FontWeight.Medium,
@@ -437,31 +508,38 @@ private fun FocusScheduleCard(
                 )
             }
 
-            // Expanded Accordion details
+            // Expanded Accordion details: Locked once scheduled
             if (isAccordionExpanded) {
                 Spacer(modifier = Modifier.height(10.dp))
-                if (schedule.allowedApps.isEmpty()) {
+                Text(
+                    text = "Messages, Calls, Contacts & PGuard are default allowed.",
+                    color = Color.White.copy(alpha = 0.7f),
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp
+                )
+
+                if (schedule.allowedApps.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Only standard Call/SMS apps are allowed during this focus session.",
+                        text = "Additional allowed: ${schedule.allowedApps.joinToString(", ")}",
                         color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp
-                    )
-                } else {
-                    Text(
-                        text = "${schedule.allowedApps.size} apps will bypass blocking during focus time.",
-                        color = Color.White.copy(alpha = 0.7f),
-                        fontSize = 12.sp
+                        fontSize = 11.5.sp,
+                        lineHeight = 15.sp
                     )
                 }
+
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Edit Allowed Apps →",
-                    color = CoralPrimary,
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.clickable(onClick = onEditAllowedApps)
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "🔒 Allowed apps are locked once scheduled to prevent bypass.",
+                        color = CoralPrimary.copy(alpha = 0.85f),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
         }
     }
