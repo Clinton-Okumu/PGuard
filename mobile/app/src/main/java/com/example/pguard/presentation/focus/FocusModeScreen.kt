@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -151,18 +152,16 @@ fun FocusModeScreen(
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = {
-                    if (schedules.size >= FocusModeManager.MAX_FREE_SCHEDULES) {
-                        showLimitToast = true
-                    } else {
-                        currentAllowedAppsTarget = emptySet()
-                        showCreateDialog = true
-                    }
+                    currentAllowedAppsTarget = emptySet()
+                    showCreateDialog = true
                 },
                 containerColor = CoralPrimary,
                 contentColor = Color.White,
                 shape = RoundedCornerShape(16.dp),
                 elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
-                modifier = Modifier.padding(bottom = 12.dp, end = 4.dp)
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .padding(bottom = 12.dp, end = 4.dp)
             ) {
                 Icon(
                     painter = painterResource(id = R.drawable.ic_add),
@@ -233,14 +232,15 @@ fun FocusModeScreen(
                 }
             }
 
-            // Bottom Toast Pill matching Image 2
+            // Bottom Toast Pill
             AnimatedVisibility(
                 visible = showLimitToast,
                 enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
                 exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 76.dp)
+                    .navigationBarsPadding()
+                    .padding(bottom = 86.dp)
             ) {
                 FreeLimitPillToast(
                     onDismiss = { showLimitToast = false },

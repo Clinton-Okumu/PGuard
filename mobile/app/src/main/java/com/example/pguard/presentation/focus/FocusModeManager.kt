@@ -20,7 +20,7 @@ object FocusModeManager {
     private const val PREFS_NAME = "pguard_focus_mode_prefs"
     private const val KEY_SCHEDULES = "focus_schedules_json"
 
-    const val MAX_FREE_SCHEDULES = 1
+    const val MAX_FREE_SCHEDULES = Int.MAX_VALUE
 
     private val json = Json {
         ignoreUnknownKeys = true

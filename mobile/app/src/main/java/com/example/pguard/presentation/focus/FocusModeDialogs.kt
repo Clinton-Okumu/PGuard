@@ -241,11 +241,15 @@ fun CreateScheduleDialog(
     onSaveSchedule: (FocusSchedule) -> Unit
 ) {
     val context = LocalContext.current
+    val nowCal = remember { Calendar.getInstance() }
+    val currentHour = nowCal.get(Calendar.HOUR_OF_DAY)
+    val currentMinute = nowCal.get(Calendar.MINUTE)
+    val defaultEndHour = (currentHour + 1) % 24
 
-    var startHour by remember { mutableIntStateOf(initialSchedule?.startHour ?: 0) }
-    var startMinute by remember { mutableIntStateOf(initialSchedule?.startMinute ?: 0) }
-    var endHour by remember { mutableIntStateOf(initialSchedule?.endHour ?: 5) }
-    var endMinute by remember { mutableIntStateOf(initialSchedule?.endMinute ?: 5) }
+    var startHour by remember { mutableIntStateOf(initialSchedule?.startHour ?: currentHour) }
+    var startMinute by remember { mutableIntStateOf(initialSchedule?.startMinute ?: currentMinute) }
+    var endHour by remember { mutableIntStateOf(initialSchedule?.endHour ?: defaultEndHour) }
+    var endMinute by remember { mutableIntStateOf(initialSchedule?.endMinute ?: currentMinute) }
     var repeatDaily by remember { mutableStateOf(initialSchedule?.repeatDaily ?: true) }
     var selectedDays by remember {
         mutableStateOf(

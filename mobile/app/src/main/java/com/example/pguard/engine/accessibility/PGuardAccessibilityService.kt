@@ -976,6 +976,9 @@ class PGuardAccessibilityService : AccessibilityService() {
     }
 
     private fun triggerFocusBlock(packageName: String, schedule: com.example.pguard.presentation.focus.FocusSchedule) {
+        // Instant neutralization: immediately boot back to Home so the unallowed app cannot even open
+        performGlobalAction(GLOBAL_ACTION_HOME)
+
         if (overlayManager.isFullScreenShowing) {
             return
         }
