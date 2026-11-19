@@ -252,20 +252,6 @@ fun CreateScheduleDialog(
     var startMinute by remember { mutableIntStateOf(initialSchedule?.startMinute ?: currentMinute) }
     var endHour by remember { mutableIntStateOf(initialSchedule?.endHour ?: defaultEndHour) }
     var endMinute by remember { mutableIntStateOf(initialSchedule?.endMinute ?: currentMinute) }
-    var repeatDaily by remember { mutableStateOf(initialSchedule?.repeatDaily ?: true) }
-    var selectedDays by remember {
-        mutableStateOf(
-            initialSchedule?.repeatDays ?: setOf(
-                Calendar.MONDAY,
-                Calendar.TUESDAY,
-                Calendar.WEDNESDAY,
-                Calendar.THURSDAY,
-                Calendar.FRIDAY,
-                Calendar.SATURDAY,
-                Calendar.SUNDAY
-            )
-        )
-    }
 
     val allDays = remember {
         setOf(
@@ -294,19 +280,25 @@ fun CreateScheduleDialog(
         )
     }
 
+    var selectedDays by remember {
+        mutableStateOf(
+            initialSchedule?.repeatDays ?: allDays
+        )
+    }
+
     fun showTimePicker(initialH: Int, initialM: Int, onTimeSet: (Int, Int) -> Unit) {
         TimePickerDialog(context, { _, h, m -> onTimeSet(h, m) }, initialH, initialM, true).show()
     }
 
-    val tempSchedule = remember(startHour, startMinute, endHour, endMinute, repeatDaily, selectedDays, selectedAllowedApps) {
+    val tempSchedule = remember(startHour, startMinute, endHour, endMinute, selectedDays, selectedAllowedApps) {
         FocusSchedule(
             id = initialSchedule?.id ?: java.util.UUID.randomUUID().toString(),
             startHour = startHour,
             startMinute = startMinute,
             endHour = endHour,
             endMinute = endMinute,
-            repeatDaily = repeatDaily,
-            repeatDays = if (repeatDaily) allDays else selectedDays,
+            repeatDaily = selectedDays.size >= 7,
+            repeatDays = selectedDays,
             allowedApps = selectedAllowedApps
         )
     }
@@ -321,233 +313,210 @@ fun CreateScheduleDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(24.dp)
-                    .verticalScroll(rememberScrollState())
+                    .padding(22.dp)
             ) {
+                // Header
                 Text(
-                    text = if (initialSchedule == null) "Create Focus Schedule" else "Edit Focus Schedule",
+                    text = if (initialSchedule == null) "New Focus Schedule" else "Edit Focus Schedule",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Set daily focus windows to silence app distractions.",
-                    fontSize = 12.5.sp,
-                    color = Color.White.copy(alpha = 0.6f)
-                )
 
-                Spacer(modifier = Modifier.height(20.dp))
+                Spacer(modifier = Modifier.height(18.dp))
 
-                // Time Pickers Row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    TimePickerChip(
-                        label = "START TIME",
-                        time = String.format("%02d:%02d", startHour, startMinute),
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            showTimePicker(startHour, startMinute) { h, m ->
-                                startHour = h
-                                startMinute = m
-                            }
-                        }
-                    )
-
-                    TimePickerChip(
-                        label = "END TIME",
-                        time = String.format("%02d:%02d", endHour, endMinute),
-                        modifier = Modifier.weight(1f),
-                        onClick = {
-                            showTimePicker(endHour, endMinute) { h, m ->
-                                endHour = h
-                                endMinute = m
-                            }
-                        }
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Duration indicator Pill
+                // Unified Time Selector Card
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = CoralPrimary.copy(alpha = 0.12f),
-                    border = BorderStroke(1.dp, CoralPrimary.copy(alpha = 0.25f)),
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.White.copy(alpha = 0.05f),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_focus_mode),
-                            contentDescription = null,
-                            tint = CoralPrimary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "Total Focus Time: ${tempSchedule.formattedDuration}",
-                            color = CoralPrimary,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Repeat Daily Switch
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Repeat Everyday",
-                            color = Color.White,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = if (repeatDaily) "Applies every day automatically" else "Pick custom scheduled days below",
-                            color = Color.White.copy(alpha = 0.6f),
-                            fontSize = 12.sp
-                        )
-                    }
-
-                    Switch(
-                        checked = repeatDaily,
-                        onCheckedChange = { isDaily ->
-                            repeatDaily = isDaily
-                            if (isDaily) {
-                                selectedDays = allDays
+                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Start Time
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        showTimePicker(startHour, startMinute) { h, m ->
+                                            startHour = h
+                                            startMinute = m
+                                        }
+                                    }
+                            ) {
+                                Text(
+                                    text = "START",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White.copy(alpha = 0.5f),
+                                    letterSpacing = 0.5.sp
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = String.format("%02d:%02d", startHour, startMinute),
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
                             }
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFF4CAF50),
-                            uncheckedThumbColor = Color.White,
-                            uncheckedTrackColor = Color.White.copy(alpha = 0.2f)
-                        )
-                    )
-                }
 
-                // Custom Scheduled Days (Calendar Weekday Selector)
-                if (!repeatDaily) {
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White.copy(alpha = 0.04f))
-                            .padding(14.dp)
-                    ) {
-                        Text(
-                            text = "Scheduled Days",
-                            color = Color.White.copy(alpha = 0.85f),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        val daysList = remember {
-                            listOf(
-                                Triple(Calendar.MONDAY, "M", "Mon"),
-                                Triple(Calendar.TUESDAY, "T", "Tue"),
-                                Triple(Calendar.WEDNESDAY, "W", "Wed"),
-                                Triple(Calendar.THURSDAY, "T", "Thu"),
-                                Triple(Calendar.FRIDAY, "F", "Fri"),
-                                Triple(Calendar.SATURDAY, "S", "Sat"),
-                                Triple(Calendar.SUNDAY, "S", "Sun")
+                            // Direction Arrow
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_chevron_right),
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.35f),
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .padding(horizontal = 4.dp)
                             )
-                        }
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            for (dayItem in daysList) {
-                                val dayInt = dayItem.first
-                                val letter = dayItem.second
-                                val isSelected = dayInt in selectedDays
-                                Box(
-                                    modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(if (isSelected) CoralPrimary else Color.White.copy(alpha = 0.08f))
-                                        .clickable {
-                                            selectedDays = if (isSelected) {
-                                                if (selectedDays.size > 1) selectedDays - dayInt else selectedDays
-                                            } else {
-                                                selectedDays + dayInt
-                                            }
-                                        },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = letter,
-                                        color = if (isSelected) Color.White else Color.White.copy(alpha = 0.5f),
-                                        fontSize = 13.5.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        // Quick Presets: Weekdays / Weekends
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            Box(
+                            // End Time
+                            Column(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (selectedDays == weekdays) CoralPrimary.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.06f))
-                                    .clickable { selectedDays = weekdays }
-                                    .padding(horizontal = 12.dp, vertical = 7.dp)
+                                    .weight(1f)
+                                    .clickable {
+                                        showTimePicker(endHour, endMinute) { h, m ->
+                                            endHour = h
+                                            endMinute = m
+                                        }
+                                    },
+                                horizontalAlignment = Alignment.End
                             ) {
                                 Text(
-                                    text = "Weekdays (Mon-Fri)",
-                                    fontSize = 12.sp,
-                                    color = if (selectedDays == weekdays) CoralPrimary else Color.White.copy(alpha = 0.7f),
-                                    fontWeight = FontWeight.Medium
+                                    text = "END",
+                                    fontSize = 10.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White.copy(alpha = 0.5f),
+                                    letterSpacing = 0.5.sp
                                 )
-                            }
-
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (selectedDays == weekends) CoralPrimary.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.06f))
-                                    .clickable { selectedDays = weekends }
-                                    .padding(horizontal = 12.dp, vertical = 7.dp)
-                            ) {
+                                Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = "Weekends (Sat-Sun)",
-                                    fontSize = 12.sp,
-                                    color = if (selectedDays == weekends) CoralPrimary else Color.White.copy(alpha = 0.7f),
-                                    fontWeight = FontWeight.Medium
+                                    text = String.format("%02d:%02d", endHour, endMinute),
+                                    fontSize = 22.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
                                 )
                             }
                         }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+                        HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // Duration text
+                        Text(
+                            text = "${tempSchedule.formattedDuration} focus window",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = CoralPrimary
+                        )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(18.dp))
 
-                // Allowed Apps Selection
-                Card(
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f)),
+                // Repeat Days Section
+                Text(
+                    text = "REPEAT",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White.copy(alpha = 0.5f),
+                    letterSpacing = 0.5.sp
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                val daysList = remember {
+                    listOf(
+                        Triple(Calendar.MONDAY, "M", "Mon"),
+                        Triple(Calendar.TUESDAY, "T", "Tue"),
+                        Triple(Calendar.WEDNESDAY, "W", "Wed"),
+                        Triple(Calendar.THURSDAY, "T", "Thu"),
+                        Triple(Calendar.FRIDAY, "F", "Fri"),
+                        Triple(Calendar.SATURDAY, "S", "Sat"),
+                        Triple(Calendar.SUNDAY, "S", "Sun")
+                    )
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    for (dayItem in daysList) {
+                        val dayInt = dayItem.first
+                        val letter = dayItem.second
+                        val isSelected = dayInt in selectedDays
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(CircleShape)
+                                .background(if (isSelected) CoralPrimary else Color.White.copy(alpha = 0.08f))
+                                .clickable {
+                                    selectedDays = if (isSelected) {
+                                        if (selectedDays.size > 1) selectedDays - dayInt else selectedDays
+                                    } else {
+                                        selectedDays + dayInt
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = letter,
+                                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.55f),
+                                fontSize = 13.5.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Quick Presets: Everyday / Weekdays / Weekends
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "Everyday",
+                        fontSize = 11.5.sp,
+                        color = if (selectedDays.size >= 7) CoralPrimary else Color.White.copy(alpha = 0.5f),
+                        fontWeight = if (selectedDays.size >= 7) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier
+                            .clickable { selectedDays = allDays }
+                            .padding(vertical = 4.dp, horizontal = 2.dp)
+                    )
+                    Text("•", color = Color.White.copy(alpha = 0.25f), fontSize = 11.5.sp, modifier = Modifier.align(Alignment.CenterVertically))
+                    Text(
+                        text = "Weekdays",
+                        fontSize = 11.5.sp,
+                        color = if (selectedDays == weekdays) CoralPrimary else Color.White.copy(alpha = 0.5f),
+                        fontWeight = if (selectedDays == weekdays) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier
+                            .clickable { selectedDays = weekdays }
+                            .padding(vertical = 4.dp, horizontal = 2.dp)
+                    )
+                    Text("•", color = Color.White.copy(alpha = 0.25f), fontSize = 11.5.sp, modifier = Modifier.align(Alignment.CenterVertically))
+                    Text(
+                        text = "Weekends",
+                        fontSize = 11.5.sp,
+                        color = if (selectedDays == weekends) CoralPrimary else Color.White.copy(alpha = 0.5f),
+                        fontWeight = if (selectedDays == weekends) FontWeight.Bold else FontWeight.Normal,
+                        modifier = Modifier
+                            .clickable { selectedDays = weekends }
+                            .padding(vertical = 4.dp, horizontal = 2.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Allowed Apps Row
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = Color.White.copy(alpha = 0.05f),
                     border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
                     modifier = Modifier
                         .fillMaxWidth()
@@ -556,39 +525,41 @@ fun CreateScheduleDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
+                            .padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = "Allowed Apps (${selectedAllowedApps.size})",
-                                color = Color.White,
-                                fontSize = 14.5.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "Messages, Calls, Contacts & PGuard are default allowed.",
-                                color = Color.White.copy(alpha = 0.6f),
-                                fontSize = 11.5.sp
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(CoralPrimary.copy(alpha = 0.15f)),
+                                contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     painter = painterResource(id = R.drawable.ic_feature_lock),
                                     contentDescription = null,
                                     tint = CoralPrimary,
-                                    modifier = Modifier.size(13.dp)
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+
+                            Column {
+                                Text(
+                                    text = if (selectedAllowedApps.isEmpty()) "Allowed Apps (0)" else "Allowed Apps (${selectedAllowedApps.size})",
+                                    color = Color.White,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold
                                 )
                                 Text(
-                                    text = "Allowed apps are locked once schedule is saved.",
-                                    color = CoralPrimary.copy(alpha = 0.9f),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium
+                                    text = "Calls, Messages & Contacts allowed by default",
+                                    color = Color.White.copy(alpha = 0.55f),
+                                    fontSize = 11.5.sp
                                 )
                             }
                         }
@@ -596,13 +567,13 @@ fun CreateScheduleDialog(
                         Icon(
                             painter = painterResource(id = R.drawable.ic_chevron_right),
                             contentDescription = null,
-                            tint = CoralPrimary,
-                            modifier = Modifier.size(20.dp)
+                            tint = Color.White.copy(alpha = 0.45f),
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(26.dp))
+                Spacer(modifier = Modifier.height(24.dp))
 
                 // Action Buttons
                 Row(
@@ -616,7 +587,7 @@ fun CreateScheduleDialog(
                     ) {
                         Text("Cancel", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
                     }
-                    Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
                     Button(
                         onClick = {
                             onSaveSchedule(tempSchedule)
@@ -624,7 +595,7 @@ fun CreateScheduleDialog(
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
                         shape = RoundedCornerShape(14.dp),
-                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
                     ) {
                         Text(
                             text = "Save Schedule",
@@ -635,41 +606,6 @@ fun CreateScheduleDialog(
                     }
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun TimePickerChip(
-    label: String,
-    time: String,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    Card(
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f)),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
-        modifier = modifier.clickable(onClick = onClick)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            horizontalAlignment = Alignment.Start
-        ) {
-            Text(
-                text = label,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White.copy(alpha = 0.5f),
-                letterSpacing = 0.5.sp
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = time,
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
-            )
         }
     }
 }

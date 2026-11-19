@@ -1,6 +1,7 @@
 package com.example.pguard.presentation.focus
 
 import android.content.Context
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -78,6 +79,9 @@ fun FocusModeScreen(
     onUpgradeClick: () -> Unit = {},
     blockingViewModel: BlockingViewModel? = null
 ) {
+    // Intercept system back gesture to navigate back to BlockingScreen instead of exiting app
+    BackHandler(onBack = onBackClick)
+
     val context = LocalContext.current
     val schedules = remember { mutableStateListOf<FocusSchedule>() }
 
