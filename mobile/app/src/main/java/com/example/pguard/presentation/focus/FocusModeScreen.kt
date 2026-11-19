@@ -528,15 +528,21 @@ private fun FocusScheduleCard(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(10.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_feature_lock),
+                        contentDescription = null,
+                        tint = CoralPrimary,
+                        modifier = Modifier.size(13.dp)
+                    )
                     Text(
-                        text = "🔒 Allowed apps are locked once scheduled to prevent bypass.",
-                        color = CoralPrimary.copy(alpha = 0.85f),
-                        fontSize = 11.sp,
+                        text = "Allowed apps are locked once scheduled to prevent bypass.",
+                        color = CoralPrimary.copy(alpha = 0.9f),
+                        fontSize = 11.5.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }

@@ -522,7 +522,7 @@ fun TimeDelayActiveBanner(
 
             OutlinedButton(
                 onClick = onCancel,
-                shape = CircleShape,
+                shape = RoundedCornerShape(12.dp),
                 border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f)),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 2.dp),

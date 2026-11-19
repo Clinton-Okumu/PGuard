@@ -56,7 +56,7 @@ internal fun BlockingHeader(
     ) {
         OutlinedButton(
             onClick = onPremiumClick,
-            shape = CircleShape,
+            shape = RoundedCornerShape(14.dp),
             border = BorderStroke(1.2.dp, GoldColor),
             colors = ButtonDefaults.outlinedButtonColors(
                 containerColor = GoldColor.copy(alpha = 0.08f),
@@ -82,7 +82,7 @@ internal fun BlockingHeader(
 
         OutlinedButton(
             onClick = onGuideClick,
-            shape = CircleShape,
+            shape = RoundedCornerShape(14.dp),
             border = BorderStroke(1.2.dp, CoralPrimary),
             colors = ButtonDefaults.outlinedButtonColors(
                 containerColor = CoralPrimary.copy(alpha = 0.08f),
@@ -154,7 +154,7 @@ internal fun AlertActionCard(
 
             OutlinedButton(
                 onClick = onAction,
-                shape = CircleShape,
+                shape = RoundedCornerShape(12.dp),
                 border = BorderStroke(1.dp, CoralPrimary),
                 colors = ButtonDefaults.outlinedButtonColors(
                     contentColor = CoralPrimary
@@ -363,7 +363,7 @@ internal fun AccountabilityCard(
                     if (mode == AccountabilityMode.FRIEND && partnerActionLabel != null) {
                         OutlinedButton(
                             onClick = onPartnerAction,
-                            shape = CircleShape,
+                            shape = RoundedCornerShape(12.dp),
                             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
                             colors = ButtonDefaults.outlinedButtonColors(
                                 contentColor = Color.White.copy(alpha = 0.85f)
@@ -381,7 +381,7 @@ internal fun AccountabilityCard(
 
                     OutlinedButton(
                         onClick = onManageMode,
-                        shape = CircleShape,
+                        shape = RoundedCornerShape(12.dp),
                         border = BorderStroke(1.dp, CoralPrimary.copy(alpha = 0.6f)),
                         colors = ButtonDefaults.outlinedButtonColors(
                             contentColor = CoralPrimary

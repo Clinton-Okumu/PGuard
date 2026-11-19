@@ -11,6 +11,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -26,6 +27,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
@@ -311,7 +313,7 @@ fun CreateScheduleDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(22.dp),
+            shape = RoundedCornerShape(24.dp),
             color = DialogBackground,
             border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
             modifier = Modifier.fillMaxWidth()
@@ -319,22 +321,28 @@ fun CreateScheduleDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(22.dp)
+                    .padding(24.dp)
                     .verticalScroll(rememberScrollState())
             ) {
                 Text(
                     text = if (initialSchedule == null) "Create Focus Schedule" else "Edit Focus Schedule",
-                    fontSize = 17.sp,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "Set daily focus windows to silence app distractions.",
+                    fontSize = 12.5.sp,
+                    color = Color.White.copy(alpha = 0.6f)
+                )
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(20.dp))
 
                 // Time Pickers Row
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     TimePickerChip(
                         label = "START TIME",
@@ -361,17 +369,38 @@ fun CreateScheduleDialog(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // Duration indicator
-                Text(
-                    text = "Total Focus Time: ${tempSchedule.formattedDuration}",
-                    color = CoralPrimary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+                // Duration indicator Pill
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = CoralPrimary.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, CoralPrimary.copy(alpha = 0.25f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_focus_mode),
+                            contentDescription = null,
+                            tint = CoralPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "Total Focus Time: ${tempSchedule.formattedDuration}",
+                            color = CoralPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(20.dp))
+                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                Spacer(modifier = Modifier.height(16.dp))
 
                 // Repeat Daily Switch
                 Row(
@@ -386,6 +415,7 @@ fun CreateScheduleDialog(
                             fontSize = 15.sp,
                             fontWeight = FontWeight.SemiBold
                         )
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = if (repeatDaily) "Applies every day automatically" else "Pick custom scheduled days below",
                             color = Color.White.copy(alpha = 0.6f),
@@ -416,17 +446,17 @@ fun CreateScheduleDialog(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
+                            .clip(RoundedCornerShape(16.dp))
                             .background(Color.White.copy(alpha = 0.04f))
-                            .padding(12.dp)
+                            .padding(14.dp)
                     ) {
                         Text(
                             text = "Scheduled Days",
-                            color = Color.White.copy(alpha = 0.8f),
-                            fontSize = 12.5.sp,
+                            color = Color.White.copy(alpha = 0.85f),
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold
                         )
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
 
                         val daysList = remember {
                             listOf(
@@ -450,8 +480,8 @@ fun CreateScheduleDialog(
                                 val isSelected = dayInt in selectedDays
                                 Box(
                                     modifier = Modifier
-                                        .size(36.dp)
-                                        .clip(CircleShape)
+                                        .size(38.dp)
+                                        .clip(RoundedCornerShape(12.dp))
                                         .background(if (isSelected) CoralPrimary else Color.White.copy(alpha = 0.08f))
                                         .clickable {
                                             selectedDays = if (isSelected) {
@@ -465,30 +495,30 @@ fun CreateScheduleDialog(
                                     Text(
                                         text = letter,
                                         color = if (isSelected) Color.White else Color.White.copy(alpha = 0.5f),
-                                        fontSize = 13.sp,
+                                        fontSize = 13.5.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                     )
                                 }
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(12.dp))
 
                         // Quick Presets: Weekdays / Weekends
                         Row(
                             modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(10.dp))
                                     .background(if (selectedDays == weekdays) CoralPrimary.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.06f))
                                     .clickable { selectedDays = weekdays }
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                                    .padding(horizontal = 12.dp, vertical = 7.dp)
                             ) {
                                 Text(
                                     text = "Weekdays (Mon-Fri)",
-                                    fontSize = 11.5.sp,
+                                    fontSize = 12.sp,
                                     color = if (selectedDays == weekdays) CoralPrimary else Color.White.copy(alpha = 0.7f),
                                     fontWeight = FontWeight.Medium
                                 )
@@ -496,14 +526,14 @@ fun CreateScheduleDialog(
 
                             Box(
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .clip(RoundedCornerShape(10.dp))
                                     .background(if (selectedDays == weekends) CoralPrimary.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.06f))
                                     .clickable { selectedDays = weekends }
-                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                                    .padding(horizontal = 12.dp, vertical = 7.dp)
                             ) {
                                 Text(
                                     text = "Weekends (Sat-Sun)",
-                                    fontSize = 11.5.sp,
+                                    fontSize = 12.sp,
                                     color = if (selectedDays == weekends) CoralPrimary else Color.White.copy(alpha = 0.7f),
                                     fontWeight = FontWeight.Medium
                                 )
@@ -516,8 +546,9 @@ fun CreateScheduleDialog(
 
                 // Allowed Apps Selection
                 Card(
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f)),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onPickAllowedAppsClick(selectedAllowedApps) }
@@ -525,7 +556,7 @@ fun CreateScheduleDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(14.dp),
+                            .padding(16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
@@ -536,18 +567,30 @@ fun CreateScheduleDialog(
                                 fontSize = 14.5.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
                                 text = "Messages, Calls, Contacts & PGuard are default allowed.",
                                 color = Color.White.copy(alpha = 0.6f),
                                 fontSize = 11.5.sp
                             )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "🔒 Allowed apps are locked once the schedule is saved.",
-                                color = CoralPrimary.copy(alpha = 0.85f),
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Medium
-                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_feature_lock),
+                                    contentDescription = null,
+                                    tint = CoralPrimary,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                                Text(
+                                    text = "Allowed apps are locked once schedule is saved.",
+                                    color = CoralPrimary.copy(alpha = 0.9f),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
                         }
 
                         Icon(
@@ -559,7 +602,7 @@ fun CreateScheduleDialog(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
+                Spacer(modifier = Modifier.height(26.dp))
 
                 // Action Buttons
                 Row(
@@ -567,22 +610,27 @@ fun CreateScheduleDialog(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    TextButton(onClick = onDismiss) {
-                        Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                    TextButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Cancel", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
                     }
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
                     Button(
                         onClick = {
                             onSaveSchedule(tempSchedule)
                             onDismiss()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(14.dp),
+                        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
                     ) {
                         Text(
                             text = "Save Schedule",
                             color = Color.White,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
                         )
                     }
                 }
@@ -599,26 +647,26 @@ private fun TimePickerChip(
     onClick: () -> Unit
 ) {
     Card(
-        shape = RoundedCornerShape(14.dp),
+        shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Color.White.copy(alpha = 0.05f)),
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
         modifier = modifier.clickable(onClick = onClick)
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.padding(16.dp),
             horizontalAlignment = Alignment.Start
         ) {
             Text(
                 text = label,
-                fontSize = 10.5.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White.copy(alpha = 0.5f),
                 letterSpacing = 0.5.sp
             )
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             Text(
                 text = time,
-                fontSize = 20.sp,
+                fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
