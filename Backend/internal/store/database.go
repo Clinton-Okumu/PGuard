@@ -2,11 +2,14 @@ package store
 
 import (
 	"fmt"
+	"log"
 	"os"
+	"time"
 
 	"github.com/joho/godotenv"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func Open() (*gorm.DB, error) {
@@ -34,7 +37,19 @@ func Open() (*gorm.DB, error) {
 		dsn = fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable", host, user, password, dbname, port)
 	}
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+	gormLogger := logger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags),
+		logger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  logger.Warn,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  true,
+		},
+	)
+
+	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
+		Logger: gormLogger,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("error connecting to postgres: %w", err)
 	}
