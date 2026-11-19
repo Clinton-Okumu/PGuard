@@ -34,6 +34,7 @@ import com.example.pguard.core.network.model.UserDto
 import com.example.pguard.data.repository.AccountabilityRepository
 import com.example.pguard.data.repository.SettingsRepository
 import com.example.pguard.presentation.blocklist.BlocklistScreen
+import com.example.pguard.presentation.focus.FocusModeScreen
 import com.example.pguard.presentation.habits.HabitsScreen
 import com.example.pguard.presentation.navigation.PGuardBottomBar
 import com.example.pguard.presentation.navigation.PGuardTab
@@ -68,6 +69,7 @@ fun HomeScreen(
     val tabs = remember { PGuardTab.entries }
     var currentTab by remember { mutableStateOf(PGuardTab.BLOCKING) }
     var showPremiumScreen by remember { mutableStateOf(false) }
+    var showFocusModeScreen by remember { mutableStateOf(false) }
 
     val pagerState = rememberPagerState(
         initialPage = PGuardTab.BLOCKING.ordinal,
@@ -107,7 +109,7 @@ fun HomeScreen(
                             viewModel = blockingViewModel,
                             onPremiumClick = { showPremiumScreen = true },
                             onGuideClick = { /* Guide/FAQ modal */ },
-                            onFocusModeClick = { /* Focus mode sheet */ }
+                            onFocusModeClick = { showFocusModeScreen = true }
                         )
                     }
                     PGuardTab.BLOCKLIST -> {
@@ -142,6 +144,27 @@ fun HomeScreen(
                 onBackClick = { showPremiumScreen = false },
                 onCheckoutClick = { plan ->
                     // Handle checkout flow
+                }
+            )
+        }
+
+        // Full Screen Focus Mode Screen overlay
+        AnimatedVisibility(
+            visible = showFocusModeScreen,
+            enter = fadeIn(tween(180)) + slideInVertically(
+                initialOffsetY = { it / 8 },
+                animationSpec = tween(200)
+            ),
+            exit = fadeOut(tween(150)) + slideOutVertically(
+                targetOffsetY = { it / 8 },
+                animationSpec = tween(150)
+            )
+        ) {
+            FocusModeScreen(
+                onBackClick = { showFocusModeScreen = false },
+                onUpgradeClick = {
+                    showFocusModeScreen = false
+                    showPremiumScreen = true
                 }
             )
         }

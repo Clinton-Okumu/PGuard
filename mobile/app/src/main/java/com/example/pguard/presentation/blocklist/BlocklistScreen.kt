@@ -687,7 +687,7 @@ private fun AddAppPickerDialog(
     )
 }
 
-private fun queryDeviceLauncherApps(context: Context): List<InstalledAppItem> {
+internal fun queryDeviceLauncherApps(context: Context): List<InstalledAppItem> {
     val pm = context.packageManager
     val intent = Intent(Intent.ACTION_MAIN, null).apply {
         addCategory(Intent.CATEGORY_LAUNCHER)

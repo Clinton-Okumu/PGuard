@@ -7,5 +7,6 @@ class PGuardApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         PGuardAccessibilityService.loadSettings(this)
+        com.example.pguard.presentation.focus.FocusModeManager.init(this)
     }
 }

@@ -321,6 +321,160 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
     }
 
     /**
+     * Focus Mode Overlay Window:
+     * Displayed when a user opens a restricted app during a scheduled Focus Mode session.
+     */
+    fun showFocusOverlay(
+        appName: String,
+        scheduleInfo: String,
+        onGoHome: () -> Unit = {
+            service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+        }
+    ) {
+        runOnMainThread {
+            try {
+                if (isFullScreenShowing) return@runOnMainThread
+
+                hideAllImmediate()
+
+                val root = object : FrameLayout(service) {
+                    init {
+                        isFocusable = true
+                        isFocusableInTouchMode = true
+                    }
+
+                    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                        if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                            dismissFullScreenAndExecute(onGoHome)
+                            return true
+                        }
+                        return super.dispatchKeyEvent(event)
+                    }
+                }
+
+                val hasBlur = isCrossWindowBlurSupported()
+                val bgColor = if (hasBlur) 0xDD0D0F14.toInt() else 0xFD0D0F14.toInt()
+                root.setBackgroundColor(bgColor)
+
+                val contentLayout = LinearLayout(service).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER_HORIZONTAL
+                    setPadding(dpToPx(24f), dpToPx(32f), dpToPx(24f), dpToPx(32f))
+                }
+
+                root.addView(
+                    contentLayout,
+                    FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
+                )
+
+                // 1. Focus Mode Icon Box
+                val iconBox = FrameLayout(service).apply {
+                    val bg = GradientDrawable().apply {
+                        cornerRadius = dpToPx(20f).toFloat()
+                        setColor(COLOR_CORAL)
+                    }
+                    background = bg
+                }
+                val iconBoxParams = LinearLayout.LayoutParams(dpToPx(88f), dpToPx(88f)).apply {
+                    bottomMargin = dpToPx(20f)
+                }
+                val focusIcon = ImageView(service).apply {
+                    setImageResource(R.drawable.ic_focus_mode)
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                }
+                iconBox.addView(focusIcon, FrameLayout.LayoutParams(dpToPx(52f), dpToPx(52f), Gravity.CENTER))
+                contentLayout.addView(iconBox, iconBoxParams)
+
+                // 2. Title
+                val titleView = TextView(service).apply {
+                    text = "Focus Mode Active"
+                    setTextColor(Color.WHITE)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                }
+                contentLayout.addView(titleView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dpToPx(8f)
+                })
+
+                // 3. Message
+                val messageView = TextView(service).apply {
+                    text = "This app is blocked during your scheduled focus time ($scheduleInfo). Stay focused on what matters."
+                    setTextColor(COLOR_TEXT_MUTED)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f)
+                    gravity = Gravity.CENTER
+                    setLineSpacing(dpToPx(2f).toFloat(), 1.1f)
+                }
+                contentLayout.addView(messageView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dpToPx(16f)
+                })
+
+                // 4. App Chip
+                val chipView = TextView(service).apply {
+                    text = appName
+                    setTextColor(COLOR_CORAL)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                    val chipBg = GradientDrawable().apply {
+                        cornerRadius = dpToPx(10f).toFloat()
+                        setColor(COLOR_CHIP_BG)
+                        setStroke(dpToPx(1f), 0x4DFF5252.toInt())
+                    }
+                    background = chipBg
+                    setPadding(dpToPx(14f), dpToPx(7f), dpToPx(14f), dpToPx(7f))
+                }
+                contentLayout.addView(chipView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dpToPx(28f)
+                })
+
+                // 5. Return to Home Button
+                val returnButton = Button(service).apply {
+                    text = "Return to Safety"
+                    setTextColor(Color.WHITE)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+                    typeface = Typeface.DEFAULT_BOLD
+                    isAllCaps = false
+                    val btnBg = GradientDrawable().apply {
+                        cornerRadius = dpToPx(14f).toFloat()
+                        setColor(COLOR_CORAL)
+                    }
+                    background = btnBg
+                    setOnClickListener {
+                        dismissFullScreenAndExecute(onGoHome)
+                    }
+                }
+                contentLayout.addView(returnButton, LinearLayout.LayoutParams(
+                    (service.resources.displayMetrics.widthPixels * 0.82f).toInt(),
+                    dpToPx(50f)
+                ))
+
+                val layoutParams = WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT
+                )
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    try {
+                        layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
+                        layoutParams.blurBehindRadius = dpToPx(40f)
+                    } catch (_: Exception) {}
+                }
+
+                windowManager.addView(root, layoutParams)
+                activeViews.add(root)
+                isFullScreenShowing = true
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to display focus overlay: ${e.message}")
+            }
+        }
+    }
+
+    /**
      * Tier 1: Container-Level Mask for Native Feed Items.
      * Uses synchronous tracking and immediate cleanup to ensure it NEVER sticks on screen.
      */

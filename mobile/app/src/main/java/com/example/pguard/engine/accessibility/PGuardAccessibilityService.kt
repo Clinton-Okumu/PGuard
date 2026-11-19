@@ -249,6 +249,7 @@ class PGuardAccessibilityService : AccessibilityService() {
         super.onServiceConnected()
         _isRunning.value = true
         loadSettings(this)
+        com.example.pguard.presentation.focus.FocusModeManager.init(this)
 
         val info = serviceInfo ?: android.accessibilityservice.AccessibilityServiceInfo()
         info.flags = info.flags or
@@ -284,7 +285,14 @@ class PGuardAccessibilityService : AccessibilityService() {
             overlayManager.hideContainerOverlay()
         }
 
-        // 0. App Blocking (Blocked apps from blocklist / auto-blocked newly installed apps)
+        // 0. Focus Mode Scheduled App Blocking
+        val activeFocusSchedule = com.example.pguard.presentation.focus.FocusModeManager.getActiveSchedule(this)
+        if (activeFocusSchedule != null && !com.example.pguard.presentation.focus.FocusModeManager.isPackageAllowed(this, packageName, activeFocusSchedule)) {
+            triggerFocusBlock(packageName, activeFocusSchedule)
+            return
+        }
+
+        // 1. App Blocking (Blocked apps from blocklist / auto-blocked newly installed apps)
         if (blockedAppPackages.contains(packageName) && packageName != applicationContext.packageName) {
             triggerAppBlock(packageName)
             return
@@ -963,6 +971,31 @@ class PGuardAccessibilityService : AccessibilityService() {
             redirectUrl = redirectUrl,
             onGoBack = {
                 performGlobalAction(GLOBAL_ACTION_BACK)
+            }
+        )
+    }
+
+    private fun triggerFocusBlock(packageName: String, schedule: com.example.pguard.presentation.focus.FocusSchedule) {
+        val now = System.currentTimeMillis()
+        if (now - lastAppBlockedTimestamp < 1500L) {
+            return
+        }
+        lastAppBlockedTimestamp = now
+
+        val appName = try {
+            val pm = packageManager
+            val info = pm.getApplicationInfo(packageName, 0)
+            pm.getApplicationLabel(info).toString()
+        } catch (_: Exception) {
+            packageName
+        }
+
+        Log.w(TAG, "BLOCKED: Focus Mode Active. App $appName is blocked during ${schedule.formattedTimeRange}")
+        overlayManager.showFocusOverlay(
+            appName = appName,
+            scheduleInfo = schedule.formattedDuration,
+            onGoHome = {
+                performGlobalAction(GLOBAL_ACTION_HOME)
             }
         )
     }
