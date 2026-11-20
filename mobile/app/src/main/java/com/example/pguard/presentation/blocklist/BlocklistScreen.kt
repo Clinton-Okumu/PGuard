@@ -15,6 +15,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -26,9 +27,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
@@ -58,6 +59,7 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -140,28 +142,30 @@ fun BlocklistScreen(
                 .fillMaxSize()
                 .padding(bottom = 96.dp)
         ) {
-            // 1. Top Mode Selector Pill (Blocklist vs Whitelist)
+            // 1. Top Mode Selector (Blocklist vs Whitelist)
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp)
                     .height(48.dp)
-                    .border(1.2.dp, CoralPrimary, CircleShape)
-                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(14.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
+                    .padding(4.dp)
             ) {
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
+                        .clip(RoundedCornerShape(11.dp))
                         .background(if (selectedListType == ListType.BLOCKLIST) CoralPrimary else Color.Transparent)
                         .clickable { selectedListType = ListType.BLOCKLIST },
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "Blocklist",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = if (selectedListType == ListType.BLOCKLIST) Color.White else CoralPrimary
+                        fontWeight = if (selectedListType == ListType.BLOCKLIST) FontWeight.Bold else FontWeight.Medium,
+                        fontSize = 14.5.sp,
+                        color = if (selectedListType == ListType.BLOCKLIST) Color.White else Color.White.copy(alpha = 0.65f)
                     )
                 }
 
@@ -169,57 +173,88 @@ fun BlocklistScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
+                        .clip(RoundedCornerShape(11.dp))
                         .background(if (selectedListType == ListType.WHITELIST) CoralPrimary else Color.Transparent)
                         .clickable { selectedListType = ListType.WHITELIST },
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "Whitelist",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = if (selectedListType == ListType.WHITELIST) Color.White else CoralPrimary
+                        fontWeight = if (selectedListType == ListType.WHITELIST) FontWeight.Bold else FontWeight.Medium,
+                        fontSize = 14.5.sp,
+                        color = if (selectedListType == ListType.WHITELIST) Color.White else Color.White.copy(alpha = 0.65f)
                     )
                 }
             }
 
-            // 2. Sub-category Selector Pill (Apps vs Keywords/websites)
+            // 2. Sub-category Selector (Apps vs Keywords/Websites)
             Row(
                 modifier = Modifier
-                    .padding(start = 16.dp, top = 2.dp, bottom = 12.dp)
-                    .height(34.dp)
-                    .border(1.dp, CoralPrimary, CircleShape)
-                    .clip(CircleShape)
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .background(if (selectedCategory == ContentCategory.APPS) CoralPrimary else Color.Transparent)
-                        .clickable { selectedCategory = ContentCategory.APPS }
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center
+                Surface(
+                    onClick = { selectedCategory = ContentCategory.APPS },
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (selectedCategory == ContentCategory.APPS) CoralPrimary else Color.White.copy(alpha = 0.06f),
+                    border = BorderStroke(
+                        1.dp,
+                        if (selectedCategory == ContentCategory.APPS) CoralPrimary else Color.White.copy(alpha = 0.12f)
+                    ),
+                    modifier = Modifier.height(36.dp)
                 ) {
-                    Text(
-                        text = "Apps (${currentApps.size})",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 12.5.sp,
-                        color = if (selectedCategory == ContentCategory.APPS) Color.White else CoralPrimary
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_nav_blocking),
+                            contentDescription = null,
+                            tint = if (selectedCategory == ContentCategory.APPS) Color.White else Color.White.copy(alpha = 0.7f),
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            text = "Apps (${currentApps.size})",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = if (selectedCategory == ContentCategory.APPS) Color.White else Color.White.copy(alpha = 0.75f)
+                        )
+                    }
                 }
 
-                Box(
-                    modifier = Modifier
-                        .background(if (selectedCategory == ContentCategory.KEYWORDS_WEBSITES) CoralPrimary else Color.Transparent)
-                        .clickable { selectedCategory = ContentCategory.KEYWORDS_WEBSITES }
-                        .padding(horizontal = 16.dp, vertical = 6.dp),
-                    contentAlignment = Alignment.Center
+                Surface(
+                    onClick = { selectedCategory = ContentCategory.KEYWORDS_WEBSITES },
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (selectedCategory == ContentCategory.KEYWORDS_WEBSITES) CoralPrimary else Color.White.copy(alpha = 0.06f),
+                    border = BorderStroke(
+                        1.dp,
+                        if (selectedCategory == ContentCategory.KEYWORDS_WEBSITES) CoralPrimary else Color.White.copy(alpha = 0.12f)
+                    ),
+                    modifier = Modifier.height(36.dp)
                 ) {
-                    Text(
-                        text = "Keywords/websites (${currentKeywords.size})",
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 12.5.sp,
-                        color = if (selectedCategory == ContentCategory.KEYWORDS_WEBSITES) Color.White else CoralPrimary
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_globe),
+                            contentDescription = null,
+                            tint = if (selectedCategory == ContentCategory.KEYWORDS_WEBSITES) Color.White else Color.White.copy(alpha = 0.7f),
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Text(
+                            text = "Keywords / Websites (${currentKeywords.size})",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp,
+                            color = if (selectedCategory == ContentCategory.KEYWORDS_WEBSITES) Color.White else Color.White.copy(alpha = 0.75f)
+                        )
+                    }
                 }
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
 
             // 3. Main Content: Empty State or Active List
             val isEmpty = if (selectedCategory == ContentCategory.APPS) currentApps.isEmpty() else currentKeywords.isEmpty()
@@ -231,14 +266,80 @@ fun BlocklistScreen(
                         .weight(1f),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "Empty List",
-                        style = MaterialTheme.typography.bodyLarge.copy(
-                            fontSize = 15.5.sp,
-                            fontWeight = FontWeight.Medium
-                        ),
-                        color = Color.White.copy(alpha = 0.8f)
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(32.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color.White.copy(alpha = 0.05f))
+                                .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(16.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                painter = painterResource(
+                                    id = if (selectedCategory == ContentCategory.APPS) R.drawable.ic_nav_blocking else R.drawable.ic_globe
+                                ),
+                                contentDescription = null,
+                                tint = CoralPrimary.copy(alpha = 0.8f),
+                                modifier = Modifier.size(28.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = if (selectedCategory == ContentCategory.APPS) {
+                                if (selectedListType == ListType.BLOCKLIST) "No Blocked Apps" else "No Whitelisted Apps"
+                            } else {
+                                if (selectedListType == ListType.BLOCKLIST) "No Blocked Keywords or Websites" else "No Whitelisted Keywords or Websites"
+                            },
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = if (selectedCategory == ContentCategory.APPS) {
+                                "Tap below to choose apps to ${if (selectedListType == ListType.BLOCKLIST) "block" else "whitelist"}."
+                            } else {
+                                "Add domains or keywords to prevent access."
+                            },
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                color = Color.White.copy(alpha = 0.55f),
+                                textAlign = TextAlign.Center
+                            )
+                        )
+                        Spacer(modifier = Modifier.height(20.dp))
+                        Button(
+                            onClick = {
+                                if (selectedCategory == ContentCategory.APPS) {
+                                    showAddAppDialog = true
+                                } else {
+                                    keywordInput = ""
+                                    showAddKeywordDialog = true
+                                }
+                            },
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
+                            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_add),
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = if (selectedCategory == ContentCategory.APPS) "Add Apps" else "Add Keyword",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp,
+                                color = Color.White
+                            )
+                        }
+                    }
                 }
             } else {
                 LazyColumn(
@@ -283,7 +384,7 @@ fun BlocklistScreen(
                     showAddKeywordDialog = true
                 }
             },
-            shape = RoundedCornerShape(18.dp),
+            shape = RoundedCornerShape(16.dp),
             containerColor = CoralPrimary,
             contentColor = Color.White,
             modifier = Modifier
@@ -318,22 +419,23 @@ fun BlocklistScreen(
                         fontSize = 13.sp,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                     )
-                    Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
                     OutlinedTextField(
                         value = keywordInput,
                         onValueChange = { keywordInput = it },
                         placeholder = { Text("domain.com or keyword") },
                         singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = CoralPrimary,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.25f)
                         )
                     )
                 }
             },
             confirmButton = {
-                TextButton(
+                Button(
                     onClick = {
                         val trimmed = keywordInput.trim().lowercase()
                         if (trimmed.isNotEmpty() && !currentKeywords.contains(trimmed)) {
@@ -341,18 +443,23 @@ fun BlocklistScreen(
                         }
                         showAddKeywordDialog = false
                     },
-                    colors = ButtonDefaults.textButtonColors(contentColor = CoralPrimary)
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
+                    contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
                 ) {
-                    Text("Add", fontWeight = FontWeight.Bold)
+                    Text("Add", fontWeight = FontWeight.Bold, color = Color.White)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showAddKeywordDialog = false }) {
+                TextButton(
+                    onClick = { showAddKeywordDialog = false },
+                    shape = RoundedCornerShape(12.dp)
+                ) {
                     Text("Cancel", color = Color.White.copy(alpha = 0.7f))
                 }
             },
             containerColor = Color(0xFF1E1E24),
-            shape = RoundedCornerShape(16.dp)
+            shape = RoundedCornerShape(20.dp)
         )
     }
 
@@ -565,6 +672,7 @@ private fun AddAppPickerDialog(
                         )
                     },
                     singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = CoralPrimary,
@@ -664,26 +772,32 @@ private fun AddAppPickerDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            Button(
                 onClick = {
                     val toAdd = installedApps.filter { selectedPackages.contains(it.packageName) }
                     onAddApps(toAdd)
                 },
-                colors = ButtonDefaults.textButtonColors(contentColor = CoralPrimary)
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
             ) {
                 Text(
                     text = "Add (${selectedPackages.size})",
-                    fontWeight = FontWeight.Bold
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
                 )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(12.dp)
+            ) {
                 Text("Cancel", color = Color.White.copy(alpha = 0.7f))
             }
         },
         containerColor = Color(0xFF1E1E24),
-        shape = RoundedCornerShape(16.dp)
+        shape = RoundedCornerShape(20.dp)
     )
 }
 
