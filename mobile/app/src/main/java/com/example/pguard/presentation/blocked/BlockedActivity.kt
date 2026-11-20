@@ -221,7 +221,7 @@ private fun BlockedScreenContent(
                     .height(50.dp)
             ) {
                 Text(
-                    text = if (timeLeft > 0) "Returning Home ($timeLeft)" else "Return to Safety",
+                    text = if (timeLeft > 0) "Go Back ($timeLeft s)" else "Go Back to Safety",
                     color = Color.White,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold

@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.Drawable
 import android.os.Build
+import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -45,6 +46,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +66,12 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.pguard.R
+import com.example.pguard.engine.accessibility.PGuardAccessibilityService
+import com.example.pguard.presentation.dashboard.AccountabilityMode
+import com.example.pguard.presentation.dashboard.BlockingViewModel
+import com.example.pguard.presentation.dashboard.FriendApprovalDialog
+import com.example.pguard.presentation.dashboard.TimeDelayConfirmDialog
+import com.example.pguard.presentation.dashboard.TypingChallengeDialog
 import com.example.pguard.presentation.theme.CoralPrimary
 import com.example.pguard.presentation.theme.PGuardTheme
 import kotlinx.coroutines.Dispatchers
@@ -87,9 +95,14 @@ data class InstalledAppItem(
 
 @Composable
 fun BlocklistScreen(
+    blockingViewModel: BlockingViewModel? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+
+    val blockingUiState = blockingViewModel?.uiState?.collectAsState()?.value
+    val activeFrictionMode = blockingUiState?.accountabilityMode
+        ?: AccountabilityMode.fromCode(PGuardAccessibilityService.accountabilityMode)
 
     var selectedListType by remember { mutableStateOf(ListType.BLOCKLIST) }
     var selectedCategory by remember { mutableStateOf(ContentCategory.APPS) }
@@ -107,13 +120,22 @@ fun BlocklistScreen(
     var showAddKeywordDialog by remember { mutableStateOf(false) }
     var keywordInput by remember { mutableStateOf("") }
 
+    // Friction Guard States
+    var showTypingChallenge by remember { mutableStateOf(false) }
+    var showTimeDelayConfirm by remember { mutableStateOf(false) }
+    var showFriendApproval by remember { mutableStateOf(false) }
+    var pendingFrictionAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var frictionTargetTitle by remember { mutableStateOf("Blocklist Item") }
+
     val currentApps = if (selectedListType == ListType.BLOCKLIST) blockedApps else whitelistedApps
     val currentKeywords = if (selectedListType == ListType.BLOCKLIST) blockedKeywords else whitelistedKeywords
 
     LaunchedEffect(Unit) {
-        val saved = com.example.pguard.engine.accessibility.PGuardAccessibilityService.getBlockedApps(context)
         val pm = context.packageManager
-        saved.forEach { pkg ->
+
+        // 1. Load Blocked Apps
+        val savedBlocked = PGuardAccessibilityService.getBlockedApps(context)
+        savedBlocked.forEach { pkg ->
             if (blockedApps.none { it.packageName == pkg }) {
                 val label = try {
                     val info = pm.getApplicationInfo(pkg, 0)
@@ -128,6 +150,76 @@ fun BlocklistScreen(
                     null
                 }
                 blockedApps.add(InstalledAppItem(pkg, label, icon))
+            }
+        }
+
+        // 2. Load Blocked Keywords / Websites
+        val savedKeywords = PGuardAccessibilityService.getCustomBlockedKeywords(context)
+        savedKeywords.forEach { kw ->
+            if (!blockedKeywords.contains(kw)) {
+                blockedKeywords.add(kw)
+            }
+        }
+
+        // 3. Load Whitelisted Apps
+        val savedWhitelistedApps = PGuardAccessibilityService.getWhitelistedApps(context)
+        savedWhitelistedApps.forEach { pkg ->
+            if (whitelistedApps.none { it.packageName == pkg }) {
+                val label = try {
+                    val info = pm.getApplicationInfo(pkg, 0)
+                    pm.getApplicationLabel(info).toString()
+                } catch (_: Exception) {
+                    pkg
+                }
+                val icon = try {
+                    val info = pm.getApplicationInfo(pkg, 0)
+                    pm.getApplicationIcon(info)
+                } catch (_: Exception) {
+                    null
+                }
+                whitelistedApps.add(InstalledAppItem(pkg, label, icon))
+            }
+        }
+
+        // 4. Load Whitelisted Keywords / Websites
+        val savedWhitelistedKeywords = PGuardAccessibilityService.getWhitelistedKeywords(context)
+        savedWhitelistedKeywords.forEach { kw ->
+            if (!whitelistedKeywords.contains(kw)) {
+                whitelistedKeywords.add(kw)
+            }
+        }
+    }
+
+    fun triggerProtectedRemove(itemTitle: String, action: () -> Unit) {
+        if (selectedListType == ListType.WHITELIST) {
+            // Whitelisting doesn't require any use of friction
+            action()
+            return
+        }
+
+        // Removing from Blocklist is guarded by the active friction method
+        frictionTargetTitle = itemTitle
+        when (activeFrictionMode) {
+            AccountabilityMode.NONE -> {
+                action()
+            }
+            AccountabilityMode.SELF -> {
+                pendingFrictionAction = action
+                showTypingChallenge = true
+            }
+            AccountabilityMode.TIME_DELAY -> {
+                pendingFrictionAction = action
+                showTimeDelayConfirm = true
+            }
+            AccountabilityMode.FRIEND -> {
+                val partner = blockingUiState?.partner
+                val isLinked = blockingUiState?.isPartnerLinked ?: false
+                if (partner != null && isLinked) {
+                    pendingFrictionAction = action
+                    showFriendApproval = true
+                } else {
+                    action()
+                }
             }
         }
     }
@@ -353,9 +445,14 @@ fun BlocklistScreen(
                             AppListItem(
                                 app = app,
                                 onRemove = {
-                                    currentApps.remove(app)
-                                    if (selectedListType == ListType.BLOCKLIST) {
-                                        com.example.pguard.engine.accessibility.PGuardAccessibilityService.removeBlockedApp(context, app.packageName)
+                                    triggerProtectedRemove(app.name) {
+                                        if (selectedListType == ListType.BLOCKLIST) {
+                                            blockedApps.remove(app)
+                                            PGuardAccessibilityService.removeBlockedApp(context, app.packageName)
+                                        } else {
+                                            whitelistedApps.remove(app)
+                                            PGuardAccessibilityService.removeWhitelistedApp(context, app.packageName)
+                                        }
                                     }
                                 }
                             )
@@ -365,7 +462,17 @@ fun BlocklistScreen(
                         items(currentKeywords, key = { it }) { keyword ->
                             KeywordListItem(
                                 keyword = keyword,
-                                onRemove = { currentKeywords.remove(keyword) }
+                                onRemove = {
+                                    triggerProtectedRemove(keyword) {
+                                        if (selectedListType == ListType.BLOCKLIST) {
+                                            blockedKeywords.remove(keyword)
+                                            PGuardAccessibilityService.removeCustomBlockedKeyword(context, keyword)
+                                        } else {
+                                            whitelistedKeywords.remove(keyword)
+                                            PGuardAccessibilityService.removeWhitelistedKeyword(context, keyword)
+                                        }
+                                    }
+                                }
                             )
                             HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
                         }
@@ -438,8 +545,33 @@ fun BlocklistScreen(
                 Button(
                     onClick = {
                         val trimmed = keywordInput.trim().lowercase()
-                        if (trimmed.isNotEmpty() && !currentKeywords.contains(trimmed)) {
-                            currentKeywords.add(trimmed)
+                        if (trimmed.isEmpty()) return@Button
+
+                        if (selectedListType == ListType.WHITELIST) {
+                            // Cannot whitelist keywords/websites that are currently in the Blocklist!
+                            val isBlocked = blockedKeywords.any { it.equals(trimmed, ignoreCase = true) }
+                            if (isBlocked) {
+                                Toast.makeText(
+                                    context,
+                                    "Cannot whitelist \"$trimmed\": it is currently in your Blocklist. Remove it from Blocklist first using friction.",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                                return@Button
+                            }
+                            if (!whitelistedKeywords.contains(trimmed)) {
+                                whitelistedKeywords.add(trimmed)
+                                PGuardAccessibilityService.addWhitelistedKeyword(context, trimmed)
+                            }
+                        } else {
+                            // Adding to Blocklist takes precedence over Whitelist
+                            if (whitelistedKeywords.contains(trimmed)) {
+                                whitelistedKeywords.remove(trimmed)
+                                PGuardAccessibilityService.removeWhitelistedKeyword(context, trimmed)
+                            }
+                            if (!blockedKeywords.contains(trimmed)) {
+                                blockedKeywords.add(trimmed)
+                                PGuardAccessibilityService.addCustomBlockedKeyword(context, trimmed)
+                            }
                         }
                         showAddKeywordDialog = false
                     },
@@ -468,19 +600,92 @@ fun BlocklistScreen(
         AddAppPickerDialog(
             context = context,
             alreadySelectedPackages = currentApps.map { it.packageName }.toSet(),
+            blockedPackages = blockedApps.map { it.packageName }.toSet(),
+            isWhitelistMode = selectedListType == ListType.WHITELIST,
             listTitle = if (selectedListType == ListType.BLOCKLIST) "Block Apps" else "Whitelist Apps",
             onDismiss = { showAddAppDialog = false },
             onAddApps = { selectedApps ->
                 selectedApps.forEach { app ->
-                    if (currentApps.none { it.packageName == app.packageName }) {
-                        currentApps.add(app)
-                        if (selectedListType == ListType.BLOCKLIST) {
-                            com.example.pguard.engine.accessibility.PGuardAccessibilityService.addBlockedApp(context, app.packageName, app.name)
+                    if (selectedListType == ListType.BLOCKLIST) {
+                        // If it was in whitelist, remove it because blocklist takes precedence
+                        val inWhitelist = whitelistedApps.find { it.packageName == app.packageName }
+                        if (inWhitelist != null) {
+                            whitelistedApps.remove(inWhitelist)
+                            PGuardAccessibilityService.removeWhitelistedApp(context, app.packageName)
+                        }
+                        if (blockedApps.none { it.packageName == app.packageName }) {
+                            blockedApps.add(app)
+                            PGuardAccessibilityService.addBlockedApp(context, app.packageName, app.name)
+                        }
+                    } else {
+                        // Whitelist mode: blocked apps are prohibited from being whitelisted
+                        val isBlocked = blockedApps.any { it.packageName == app.packageName }
+                        if (!isBlocked && whitelistedApps.none { it.packageName == app.packageName }) {
+                            whitelistedApps.add(app)
+                            PGuardAccessibilityService.addWhitelistedApp(context, app.packageName)
                         }
                     }
                 }
                 showAddAppDialog = false
             }
+        )
+    }
+
+    // Friction Guard Dialog 1: Myself Typing Challenge
+    if (showTypingChallenge) {
+        TypingChallengeDialog(
+            targetFeatureTitle = frictionTargetTitle,
+            onSuccess = {
+                showTypingChallenge = false
+                pendingFrictionAction?.invoke()
+                pendingFrictionAction = null
+            },
+            onDismiss = {
+                showTypingChallenge = false
+                pendingFrictionAction = null
+            }
+        )
+    }
+
+    // Friction Guard Dialog 2: 24-Hour Time Delay
+    if (showTimeDelayConfirm) {
+        TimeDelayConfirmDialog(
+            targetFeatureTitle = frictionTargetTitle,
+            onConfirm = {
+                showTimeDelayConfirm = false
+                pendingFrictionAction?.invoke()
+                pendingFrictionAction = null
+            },
+            onDismiss = {
+                showTimeDelayConfirm = false
+                pendingFrictionAction = null
+            }
+        )
+    }
+
+    // Friction Guard Dialog 3: Accountability Partner Approval
+    if (showFriendApproval) {
+        FriendApprovalDialog(
+            targetFeatureTitle = frictionTargetTitle,
+            partnerEmail = blockingUiState?.partner?.partnerEmail ?: "",
+            onRequestCode = {
+                blockingViewModel?.requestPartnerApprovalCode(frictionTargetTitle)
+            },
+            onSubmitCode = { code ->
+                val expected = blockingUiState?.devApprovalCode
+                if (!expected.isNullOrBlank() && code.trim() != expected.trim()) {
+                    // Mismatched code
+                } else {
+                    showFriendApproval = false
+                    pendingFrictionAction?.invoke()
+                    pendingFrictionAction = null
+                }
+            },
+            onDismiss = {
+                showFriendApproval = false
+                pendingFrictionAction = null
+            },
+            devCode = blockingUiState?.devApprovalCode
         )
     }
 }
@@ -620,6 +825,8 @@ private fun KeywordListItem(
 private fun AddAppPickerDialog(
     context: Context,
     alreadySelectedPackages: Set<String>,
+    blockedPackages: Set<String> = emptySet(),
+    isWhitelistMode: Boolean = false,
     listTitle: String,
     onDismiss: () -> Unit,
     onAddApps: (List<InstalledAppItem>) -> Unit
@@ -694,16 +901,25 @@ private fun AddAppPickerDialog(
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
                         items(filteredApps, key = { it.packageName }) { app ->
                             val isAlreadyAdded = alreadySelectedPackages.contains(app.packageName)
+                            val isBlockedConflict = isWhitelistMode && blockedPackages.contains(app.packageName)
                             val isChecked = selectedPackages.contains(app.packageName) || isAlreadyAdded
 
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable(enabled = !isAlreadyAdded) {
-                                        if (selectedPackages.contains(app.packageName)) {
-                                            selectedPackages.remove(app.packageName)
-                                        } else {
-                                            selectedPackages.add(app.packageName)
+                                    .clickable {
+                                        if (isBlockedConflict) {
+                                            Toast.makeText(
+                                                context,
+                                                "${app.name} is in your Blocklist. Remove it from Blocklist first using your friction method.",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        } else if (!isAlreadyAdded) {
+                                            if (selectedPackages.contains(app.packageName)) {
+                                                selectedPackages.remove(app.packageName)
+                                            } else {
+                                                selectedPackages.add(app.packageName)
+                                            }
                                         }
                                     }
                                     .padding(vertical = 8.dp),
@@ -743,21 +959,31 @@ private fun AddAppPickerDialog(
                                         text = app.name,
                                         fontWeight = FontWeight.Medium,
                                         fontSize = 14.sp,
-                                        color = if (isAlreadyAdded) Color.White.copy(alpha = 0.4f) else Color.White
+                                        color = if (isAlreadyAdded || isBlockedConflict) Color.White.copy(alpha = 0.4f) else Color.White
                                     )
                                     Text(
-                                        text = if (isAlreadyAdded) "Already in list" else app.packageName,
+                                        text = when {
+                                            isBlockedConflict -> "In Blocklist (cannot whitelist)"
+                                            isAlreadyAdded -> "Already in list"
+                                            else -> app.packageName
+                                        },
                                         fontSize = 11.5.sp,
-                                        color = if (isAlreadyAdded) CoralPrimary.copy(alpha = 0.8f) else Color.White.copy(alpha = 0.45f)
+                                        color = when {
+                                            isBlockedConflict -> CoralPrimary
+                                            isAlreadyAdded -> CoralPrimary.copy(alpha = 0.8f)
+                                            else -> Color.White.copy(alpha = 0.45f)
+                                        }
                                     )
                                 }
 
                                 Checkbox(
-                                    checked = isChecked,
-                                    enabled = !isAlreadyAdded,
+                                    checked = if (isBlockedConflict) false else isChecked,
+                                    enabled = !isAlreadyAdded && !isBlockedConflict,
                                     onCheckedChange = { checked ->
-                                        if (checked) selectedPackages.add(app.packageName)
-                                        else selectedPackages.remove(app.packageName)
+                                        if (!isBlockedConflict) {
+                                            if (checked) selectedPackages.add(app.packageName)
+                                            else selectedPackages.remove(app.packageName)
+                                        }
                                     },
                                     colors = CheckboxDefaults.colors(
                                         checkedColor = CoralPrimary,
@@ -774,7 +1000,9 @@ private fun AddAppPickerDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    val toAdd = installedApps.filter { selectedPackages.contains(it.packageName) }
+                    val toAdd = installedApps.filter {
+                        selectedPackages.contains(it.packageName) && (!isWhitelistMode || !blockedPackages.contains(it.packageName))
+                    }
                     onAddApps(toAdd)
                 },
                 shape = RoundedCornerShape(14.dp),

@@ -225,6 +225,9 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                 var currentCountdown = if (countdownSeconds > 0) countdownSeconds else 0
 
                 val goBackButton = Button(service).apply {
+                    isClickable = true
+                    isFocusable = true
+                    isEnabled = true
                     text = if (currentCountdown > 0) "Go Back ($currentCountdown s)" else "Go Back to Safety"
                     setTextColor(Color.WHITE)
                     setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)

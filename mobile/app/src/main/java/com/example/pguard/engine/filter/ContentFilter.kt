@@ -39,6 +39,13 @@ class ContentFilter(
         return blocklist.any { entry -> matchesEntry(target, entry) }
     }
 
+    fun matchesWhitelist(rawInput: String, whitelist: Collection<String>): Boolean {
+        if (whitelist.isEmpty()) return false
+        val target = Target.parse(rawInput)
+        if (target.isEmpty) return false
+        return whitelist.any { entry -> matchesEntry(target, entry) }
+    }
+
     private fun matchesEntry(target: Target, rawEntry: String): Boolean {
         val entry = normalizeEntry(rawEntry)
         if (entry.isEmpty()) return false

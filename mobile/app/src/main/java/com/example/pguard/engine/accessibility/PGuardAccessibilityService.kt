@@ -40,6 +40,9 @@ class PGuardAccessibilityService : AccessibilityService() {
         const val KEY_NEW_INSTALLED_APPS = "block_newly_installed_apps"
         const val KEY_NEW_APPS_ENABLED_AT = "new_apps_enabled_at"
         const val KEY_BLOCKED_PACKAGES = "blocked_app_packages"
+        const val KEY_CUSTOM_BLOCKLIST = "custom_blocklist"
+        const val KEY_WHITELISTED_PACKAGES = "whitelisted_app_packages"
+        const val KEY_WHITELISTED_KEYWORDS = "whitelisted_keywords"
         const val KEY_MESSAGE = "blocked_screen_message"
         const val KEY_COUNTDOWN = "blocked_screen_countdown"
         const val KEY_REDIRECT_URL = "redirect_url"
@@ -69,9 +72,18 @@ class PGuardAccessibilityService : AccessibilityService() {
 
         val customBlocklist: MutableSet<String> = ConcurrentHashMap.newKeySet()
         val blockedAppPackages: MutableSet<String> = ConcurrentHashMap.newKeySet()
+        val whitelistedAppPackages: MutableSet<String> = ConcurrentHashMap.newKeySet()
+        val whitelistedKeywords: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
         @Volatile
         var appContext: Context? = null
+
+        @Volatile
+        var blockSuppressionUntil: Long = 0L
+
+        fun suppressBlockingFor(durationMs: Long = 3000L) {
+            blockSuppressionUntil = System.currentTimeMillis() + durationMs
+        }
 
         fun loadSettings(context: Context) {
             appContext = context.applicationContext
@@ -95,6 +107,18 @@ class PGuardAccessibilityService : AccessibilityService() {
             val savedBlocked = prefs.getStringSet(KEY_BLOCKED_PACKAGES, emptySet()) ?: emptySet()
             blockedAppPackages.clear()
             blockedAppPackages.addAll(savedBlocked)
+
+            val savedCustomBlocklist = prefs.getStringSet(KEY_CUSTOM_BLOCKLIST, emptySet()) ?: emptySet()
+            customBlocklist.clear()
+            customBlocklist.addAll(savedCustomBlocklist)
+
+            val savedWhitelistedApps = prefs.getStringSet(KEY_WHITELISTED_PACKAGES, emptySet()) ?: emptySet()
+            whitelistedAppPackages.clear()
+            whitelistedAppPackages.addAll(savedWhitelistedApps)
+
+            val savedWhitelistedKeywords = prefs.getStringSet(KEY_WHITELISTED_KEYWORDS, emptySet()) ?: emptySet()
+            whitelistedKeywords.clear()
+            whitelistedKeywords.addAll(savedWhitelistedKeywords)
 
             Log.d(TAG, "Loaded settings: adult=$isAdultBlockingEnabled, shorts=$isShortsBlockingEnabled, whatsapp=$isWhatsAppChannelsBlockingEnabled, reels=$isInstagramReelsBlockingEnabled, tiktok=$isTikTokBlockingEnabled, unsupportedBrowsers=$isUnsupportedBrowsersBlockingEnabled, newApps=$isNewlyInstalledAppsBlockingEnabled, mode=$accountabilityMode")
         }
@@ -122,6 +146,90 @@ class PGuardAccessibilityService : AccessibilityService() {
             val set = prefs.getStringSet(KEY_BLOCKED_PACKAGES, emptySet()) ?: emptySet()
             blockedAppPackages.clear()
             blockedAppPackages.addAll(set)
+            return set
+        }
+
+        fun addCustomBlockedKeyword(context: Context, keyword: String) {
+            val trimmed = keyword.trim().lowercase()
+            if (trimmed.isBlank()) return
+            customBlocklist.add(trimmed)
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val set = prefs.getStringSet(KEY_CUSTOM_BLOCKLIST, emptySet())?.toMutableSet() ?: mutableSetOf()
+            set.add(trimmed)
+            prefs.edit().putStringSet(KEY_CUSTOM_BLOCKLIST, set).apply()
+            Log.i(TAG, "Added custom blocked keyword: $trimmed")
+        }
+
+        fun removeCustomBlockedKeyword(context: Context, keyword: String) {
+            val trimmed = keyword.trim().lowercase()
+            customBlocklist.remove(trimmed)
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val set = prefs.getStringSet(KEY_CUSTOM_BLOCKLIST, emptySet())?.toMutableSet() ?: mutableSetOf()
+            set.remove(trimmed)
+            prefs.edit().putStringSet(KEY_CUSTOM_BLOCKLIST, set).apply()
+            Log.i(TAG, "Removed custom blocked keyword: $trimmed")
+        }
+
+        fun getCustomBlockedKeywords(context: Context): Set<String> {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val set = prefs.getStringSet(KEY_CUSTOM_BLOCKLIST, emptySet()) ?: emptySet()
+            customBlocklist.clear()
+            customBlocklist.addAll(set)
+            return set
+        }
+
+        fun addWhitelistedApp(context: Context, packageName: String) {
+            whitelistedAppPackages.add(packageName)
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val set = prefs.getStringSet(KEY_WHITELISTED_PACKAGES, emptySet())?.toMutableSet() ?: mutableSetOf()
+            set.add(packageName)
+            prefs.edit().putStringSet(KEY_WHITELISTED_PACKAGES, set).apply()
+            Log.i(TAG, "Added whitelisted app: $packageName")
+        }
+
+        fun removeWhitelistedApp(context: Context, packageName: String) {
+            whitelistedAppPackages.remove(packageName)
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val set = prefs.getStringSet(KEY_WHITELISTED_PACKAGES, emptySet())?.toMutableSet() ?: mutableSetOf()
+            set.remove(packageName)
+            prefs.edit().putStringSet(KEY_WHITELISTED_PACKAGES, set).apply()
+            Log.i(TAG, "Removed whitelisted app: $packageName")
+        }
+
+        fun getWhitelistedApps(context: Context): Set<String> {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val set = prefs.getStringSet(KEY_WHITELISTED_PACKAGES, emptySet()) ?: emptySet()
+            whitelistedAppPackages.clear()
+            whitelistedAppPackages.addAll(set)
+            return set
+        }
+
+        fun addWhitelistedKeyword(context: Context, keyword: String) {
+            val trimmed = keyword.trim().lowercase()
+            if (trimmed.isBlank()) return
+            whitelistedKeywords.add(trimmed)
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val set = prefs.getStringSet(KEY_WHITELISTED_KEYWORDS, emptySet())?.toMutableSet() ?: mutableSetOf()
+            set.add(trimmed)
+            prefs.edit().putStringSet(KEY_WHITELISTED_KEYWORDS, set).apply()
+            Log.i(TAG, "Added whitelisted keyword: $trimmed")
+        }
+
+        fun removeWhitelistedKeyword(context: Context, keyword: String) {
+            val trimmed = keyword.trim().lowercase()
+            whitelistedKeywords.remove(trimmed)
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val set = prefs.getStringSet(KEY_WHITELISTED_KEYWORDS, emptySet())?.toMutableSet() ?: mutableSetOf()
+            set.remove(trimmed)
+            prefs.edit().putStringSet(KEY_WHITELISTED_KEYWORDS, set).apply()
+            Log.i(TAG, "Removed whitelisted keyword: $trimmed")
+        }
+
+        fun getWhitelistedKeywords(context: Context): Set<String> {
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            val set = prefs.getStringSet(KEY_WHITELISTED_KEYWORDS, emptySet()) ?: emptySet()
+            whitelistedKeywords.clear()
+            whitelistedKeywords.addAll(set)
             return set
         }
 
@@ -280,6 +388,11 @@ class PGuardAccessibilityService : AccessibilityService() {
         if (event == null) return
         val packageName = event.packageName?.toString() ?: return
 
+        // Skip event processing if a full-screen block overlay is already active or during escape suppression
+        if (overlayManager.isFullScreenShowing || System.currentTimeMillis() < blockSuppressionUntil) {
+            return
+        }
+
         // Dynamic State Reset / Scroll-Through Clearance (Feeds Only)
         if (event.eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED && overlayManager.isContainerShowing) {
             overlayManager.hideContainerOverlay()
@@ -293,26 +406,30 @@ class PGuardAccessibilityService : AccessibilityService() {
         }
 
         // 1. App Blocking (Blocked apps from blocklist / auto-blocked newly installed apps)
-        if (blockedAppPackages.contains(packageName) && packageName != applicationContext.packageName) {
-            triggerAppBlock(packageName)
-            return
-        }
+        // Check Whitelist: Whitelisted apps can never be blocked by app blocking or newly installed apps blocking
+        val isAppWhitelisted = whitelistedAppPackages.contains(packageName)
+        if (!isAppWhitelisted) {
+            if (blockedAppPackages.contains(packageName) && packageName != applicationContext.packageName) {
+                triggerAppBlock(packageName)
+                return
+            }
 
-        // Auto-detect and block newly installed apps upon launch
-        if (isNewlyInstalledAppsBlockingEnabled && newAppsEnabledAt > 0L && packageName != applicationContext.packageName && !isSystemOrLauncherPackage(packageName)) {
-            try {
-                val pkgInfo = packageManager.getPackageInfo(packageName, 0)
-                if (pkgInfo.firstInstallTime >= newAppsEnabledAt) {
-                    val appName = try {
-                        packageManager.getApplicationLabel(pkgInfo.applicationInfo ?: applicationInfo).toString()
-                    } catch (_: Exception) {
-                        packageName
+            // Auto-detect and block newly installed apps upon launch
+            if (isNewlyInstalledAppsBlockingEnabled && newAppsEnabledAt > 0L && packageName != applicationContext.packageName && !isSystemOrLauncherPackage(packageName)) {
+                try {
+                    val pkgInfo = packageManager.getPackageInfo(packageName, 0)
+                    if (pkgInfo.firstInstallTime >= newAppsEnabledAt) {
+                        val appName = try {
+                            packageManager.getApplicationLabel(pkgInfo.applicationInfo ?: applicationInfo).toString()
+                        } catch (_: Exception) {
+                            packageName
+                        }
+                        addBlockedApp(applicationContext, packageName, appName)
+                        triggerAppBlock(packageName)
+                        return
                     }
-                    addBlockedApp(applicationContext, packageName, appName)
-                    triggerAppBlock(packageName)
-                    return
-                }
-            } catch (_: Exception) {}
+                } catch (_: Exception) {}
+            }
         }
 
         // 1. Unsupported Browsers Blocking (when toggle is enabled)
@@ -359,6 +476,15 @@ class PGuardAccessibilityService : AccessibilityService() {
     }
 
     private fun inspectBrowserActivity(event: AccessibilityEvent) {
+        val rootNode = findRootNode(event)
+
+        // Fast Path 0: Check if current browser address bar URL is whitelisted
+        val detectedUrl = BrowserInspector.extractUrl(rootNode, event)
+        if (detectedUrl != null && contentFilter.matchesWhitelist(detectedUrl, whitelistedKeywords)) {
+            Log.d(TAG, "Browser activity URL is whitelisted, skipping blocking: $detectedUrl")
+            return
+        }
+
         // Fast Path 1 (0ms latency, zero IPC): Check incoming event text & event source text immediately
         val eventText = extractEventText(event)
         if (eventText.isNotBlank() && shouldBlock(eventText)) {
@@ -367,10 +493,7 @@ class PGuardAccessibilityService : AccessibilityService() {
             return
         }
 
-        val rootNode = findRootNode(event)
-
         // Fast Path 2: Extract from address bar / search input / navigation URL
-        val detectedUrl = BrowserInspector.extractUrl(rootNode, event)
         if (detectedUrl != null && shouldBlock(detectedUrl)) {
             Log.w(TAG, "Instant block triggered by address bar URL: $detectedUrl")
             triggerBlock(detectedUrl, isBrowserContext = true)
@@ -463,6 +586,11 @@ class PGuardAccessibilityService : AccessibilityService() {
     }
 
     private fun shouldBlock(input: String): Boolean {
+        // Whitelist check: If URL, domain, or content matches user Whitelist, NEVER block it!
+        if (contentFilter.matchesWhitelist(input, whitelistedKeywords)) {
+            return false
+        }
+
         if (isAdultBlockingEnabled && contentFilter.isAdultContent(input)) {
             return true
         }
@@ -541,7 +669,22 @@ class PGuardAccessibilityService : AccessibilityService() {
             countdownSeconds = blockedScreenCountdown,
             redirectUrl = redirectUrl,
             onGoBack = {
-                performGlobalAction(GLOBAL_ACTION_BACK)
+                suppressBlockingFor(3000L)
+                val backHandled = performGlobalAction(GLOBAL_ACTION_BACK)
+                if (!backHandled) {
+                    performGlobalAction(GLOBAL_ACTION_HOME)
+                } else {
+                    mainHandler.postDelayed({
+                        val currentPkg = rootInActiveWindow?.packageName?.toString()
+                        if (currentPkg != null && BrowserInspector.isBrowser(currentPkg, applicationContext)) {
+                            val root = rootInActiveWindow
+                            val url = BrowserInspector.extractUrl(root, null)
+                            if (url != null && shouldBlock(url)) {
+                                performGlobalAction(GLOBAL_ACTION_HOME)
+                            }
+                        }
+                    }, 400L)
+                }
             }
         )
     }
@@ -689,7 +832,9 @@ class PGuardAccessibilityService : AccessibilityService() {
             countdownSeconds = blockedScreenCountdown,
             redirectUrl = redirectUrl,
             onGoBack = {
-                performGlobalAction(GLOBAL_ACTION_BACK)
+                suppressBlockingFor(3000L)
+                val backHandled = performGlobalAction(GLOBAL_ACTION_BACK)
+                if (!backHandled) performGlobalAction(GLOBAL_ACTION_HOME)
             }
         )
     }
@@ -820,7 +965,9 @@ class PGuardAccessibilityService : AccessibilityService() {
             countdownSeconds = blockedScreenCountdown,
             redirectUrl = redirectUrl,
             onGoBack = {
-                performGlobalAction(GLOBAL_ACTION_BACK)
+                suppressBlockingFor(3000L)
+                val backHandled = performGlobalAction(GLOBAL_ACTION_BACK)
+                if (!backHandled) performGlobalAction(GLOBAL_ACTION_HOME)
             }
         )
     }
@@ -852,6 +999,7 @@ class PGuardAccessibilityService : AccessibilityService() {
             countdownSeconds = blockedScreenCountdown,
             redirectUrl = redirectUrl,
             onGoBack = {
+                suppressBlockingFor(3000L)
                 performGlobalAction(GLOBAL_ACTION_HOME)
             }
         )
@@ -970,7 +1118,9 @@ class PGuardAccessibilityService : AccessibilityService() {
             countdownSeconds = blockedScreenCountdown,
             redirectUrl = redirectUrl,
             onGoBack = {
-                performGlobalAction(GLOBAL_ACTION_BACK)
+                suppressBlockingFor(3000L)
+                val backHandled = performGlobalAction(GLOBAL_ACTION_BACK)
+                if (!backHandled) performGlobalAction(GLOBAL_ACTION_HOME)
             }
         )
     }
@@ -1023,6 +1173,7 @@ class PGuardAccessibilityService : AccessibilityService() {
             countdownSeconds = blockedScreenCountdown,
             redirectUrl = redirectUrl,
             onGoBack = {
+                suppressBlockingFor(3000L)
                 performGlobalAction(GLOBAL_ACTION_HOME)
             }
         )
@@ -1045,6 +1196,7 @@ class PGuardAccessibilityService : AccessibilityService() {
             countdownSeconds = blockedScreenCountdown,
             redirectUrl = redirectUrl,
             onGoBack = {
+                suppressBlockingFor(3000L)
                 performGlobalAction(GLOBAL_ACTION_HOME)
             }
         )

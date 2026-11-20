@@ -113,7 +113,7 @@ fun HomeScreen(
                         )
                     }
                     PGuardTab.BLOCKLIST -> {
-                        BlocklistScreen()
+                        BlocklistScreen(blockingViewModel = blockingViewModel)
                     }
                     PGuardTab.HABITS -> {
                         HabitsScreen()
