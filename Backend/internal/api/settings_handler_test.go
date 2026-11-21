@@ -134,4 +134,52 @@ func TestSettingsHandler_HandleUpdateSettings(t *testing.T) {
 
 		assert.Equal(t, http.StatusBadRequest, rr.Code)
 	})
+
+	t.Run("returns bad request for countdown exceeding 300", func(t *testing.T) {
+		tooHigh := 301
+		payload := updateSettingsRequest{
+			BlockedScreenCountdown: &tooHigh,
+		}
+		body, _ := json.Marshal(payload)
+
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+		req = middleware.SetUser(req, user)
+		rr := httptest.NewRecorder()
+
+		handler.HandleUpdateSettings(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("returns bad request for message exceeding 300 chars", func(t *testing.T) {
+		longMsg := string(bytes.Repeat([]byte("a"), 301))
+		payload := updateSettingsRequest{
+			BlockedScreenMessage: &longMsg,
+		}
+		body, _ := json.Marshal(payload)
+
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+		req = middleware.SetUser(req, user)
+		rr := httptest.NewRecorder()
+
+		handler.HandleUpdateSettings(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("returns bad request for unsafe redirect_url scheme", func(t *testing.T) {
+		unsafe := "javascript:alert(1)"
+		payload := updateSettingsRequest{
+			RedirectURL: &unsafe,
+		}
+		body, _ := json.Marshal(payload)
+
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+		req = middleware.SetUser(req, user)
+		rr := httptest.NewRecorder()
+
+		handler.HandleUpdateSettings(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
 }

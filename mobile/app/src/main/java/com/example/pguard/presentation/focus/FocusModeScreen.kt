@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,20 +24,24 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -47,7 +50,6 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -56,22 +58,23 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import com.example.pguard.R
+import com.example.pguard.engine.accessibility.BlockingPreferences
 import com.example.pguard.engine.accessibility.PGuardAccessibilityService
 import com.example.pguard.presentation.blocklist.InstalledAppItem
 import com.example.pguard.presentation.blocklist.queryDeviceLauncherApps
 import com.example.pguard.presentation.dashboard.AccountabilityMode
 import com.example.pguard.presentation.dashboard.BlockingViewModel
 import com.example.pguard.presentation.dashboard.FriendApprovalDialog
+import com.example.pguard.presentation.dashboard.TimeDelayActiveBanner
 import com.example.pguard.presentation.dashboard.TimeDelayConfirmDialog
 import com.example.pguard.presentation.dashboard.TypingChallengeDialog
-import com.example.pguard.presentation.theme.CoralPrimary
+import com.example.pguard.presentation.dashboard.targetDisplayName
+import com.example.pguard.presentation.theme.pguardColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-
-private val ScreenBackground = Color(0xFF101014)
-private val CardBackground = Color(0xFF1E1E24)
 
 @Composable
 fun FocusModeScreen(
@@ -79,7 +82,6 @@ fun FocusModeScreen(
     onUpgradeClick: () -> Unit = {},
     blockingViewModel: BlockingViewModel? = null
 ) {
-    // Intercept system back gesture to navigate back to BlockingScreen instead of exiting app
     BackHandler(onBack = onBackClick)
 
     val context = LocalContext.current
@@ -97,6 +99,8 @@ fun FocusModeScreen(
     var showTimeDelayConfirm by remember { mutableStateOf(false) }
     var showFriendApproval by remember { mutableStateOf(false) }
     var pendingFrictionAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var pendingTimeDelayTargetId by remember { mutableStateOf("") }
+    var localUnlockError by remember { mutableStateOf<String?>(null) }
 
     var showAppPickerDialog by remember { mutableStateOf(false) }
     var currentAllowedAppsTarget by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -111,7 +115,6 @@ fun FocusModeScreen(
         refreshSchedules()
     }
 
-    // Auto-dismiss limit toast after 3.5s
     LaunchedEffect(showLimitToast) {
         if (showLimitToast) {
             delay(3500L)
@@ -119,7 +122,7 @@ fun FocusModeScreen(
         }
     }
 
-    fun triggerProtectedScheduleAction(action: () -> Unit) {
+    fun triggerProtectedScheduleAction(targetId: String, action: () -> Unit) {
         when (activeFrictionMode) {
             AccountabilityMode.NONE -> {
                 action()
@@ -129,13 +132,21 @@ fun FocusModeScreen(
                 showTypingChallenge = true
             }
             AccountabilityMode.TIME_DELAY -> {
-                pendingFrictionAction = action
-                showTimeDelayConfirm = true
+                if (BlockingPreferences.isTimeDelayElapsed(context, targetId)) {
+                    blockingViewModel?.cancelTimeDelay(context) ?: BlockingPreferences.clearTimeDelay(context)
+                    action()
+                } else {
+                    pendingTimeDelayTargetId = targetId
+                    pendingFrictionAction = null
+                    showTimeDelayConfirm = true
+                }
             }
             AccountabilityMode.FRIEND -> {
                 val partner = blockingUiState?.partner
                 val isLinked = blockingUiState?.isPartnerLinked ?: false
                 if (partner != null && isLinked) {
+                    localUnlockError = null
+                    blockingViewModel?.clearUnlockErrors()
                     pendingFrictionAction = action
                     showFriendApproval = true
                 } else {
@@ -146,7 +157,7 @@ fun FocusModeScreen(
     }
 
     Scaffold(
-        containerColor = ScreenBackground,
+        containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             FocusModeTopBar(
                 onBackClick = onBackClick,
@@ -159,9 +170,9 @@ fun FocusModeScreen(
                     currentAllowedAppsTarget = emptySet()
                     showCreateDialog = true
                 },
-                containerColor = CoralPrimary,
-                contentColor = Color.White,
-                shape = RoundedCornerShape(16.dp),
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                shape = MaterialTheme.shapes.medium,
                 elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
                 modifier = Modifier
                     .navigationBarsPadding()
@@ -175,9 +186,8 @@ fun FocusModeScreen(
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = "SCHEDULE",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                    letterSpacing = 0.5.sp
+                    style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 0.5.sp),
+                    fontWeight = FontWeight.Bold
                 )
             }
         }
@@ -188,55 +198,65 @@ fun FocusModeScreen(
                 .padding(innerPadding)
         ) {
             if (schedules.isEmpty()) {
-                // Empty state matching Image 4
                 Box(
                     modifier = Modifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "Empty List",
-                        color = Color.White.copy(alpha = 0.55f),
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Normal
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodyLarge
                     )
                 }
             } else {
-                // Schedules List matching Image 1
-                LazyColumn(
+                Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
-                    items(schedules, key = { it.id }) { schedule ->
-                        FocusScheduleCard(
-                            schedule = schedule,
-                            onToggle = { isEnabled ->
-                                if (!isEnabled) {
-                                    // Turning OFF uses picked friction method
-                                    triggerProtectedScheduleAction {
-                                        FocusModeManager.toggleSchedule(context, schedule.id, false)
-                                        refreshSchedules()
-                                    }
-                                } else {
-                                    // Turning ON is friction-free
-                                    FocusModeManager.toggleSchedule(context, schedule.id, true)
-                                    refreshSchedules()
-                                }
-                            },
-                            onDelete = {
-                                // Deleting schedule uses picked friction method
-                                triggerProtectedScheduleAction {
-                                    FocusModeManager.deleteSchedule(context, schedule.id)
-                                    refreshSchedules()
-                                }
+                    val pendingTarget = blockingUiState?.timeDelayTarget ?: BlockingPreferences.timeDelayTarget
+                    val pendingUnlockAt = blockingUiState?.timeDelayUnlockAt ?: BlockingPreferences.timeDelayUnlockAt
+                    if (pendingUnlockAt > 0L && pendingTarget.startsWith("FOCUS_SCHEDULE:")) {
+                        TimeDelayActiveBanner(
+                            targetFeatureTitle = targetDisplayName(pendingTarget),
+                            unlockAt = pendingUnlockAt,
+                            onCancel = {
+                                blockingViewModel?.cancelTimeDelay(context) ?: BlockingPreferences.clearTimeDelay(context)
                             }
                         )
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
+
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(schedules, key = { it.id }) { schedule ->
+                            FocusScheduleCard(
+                                schedule = schedule,
+                                onToggle = { isEnabled ->
+                                    if (!isEnabled) {
+                                        triggerProtectedScheduleAction("FOCUS_SCHEDULE:${schedule.id}") {
+                                            FocusModeManager.toggleSchedule(context, schedule.id, false)
+                                            refreshSchedules()
+                                        }
+                                    } else {
+                                        FocusModeManager.toggleSchedule(context, schedule.id, true)
+                                        refreshSchedules()
+                                    }
+                                },
+                                onDelete = {
+                                    triggerProtectedScheduleAction("FOCUS_SCHEDULE:${schedule.id}") {
+                                        FocusModeManager.deleteSchedule(context, schedule.id)
+                                        refreshSchedules()
+                                    }
+                                }
+                            )
+                        }
                     }
                 }
             }
 
-            // Bottom Toast Pill
             AnimatedVisibility(
                 visible = showLimitToast,
                 enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
@@ -254,12 +274,10 @@ fun FocusModeScreen(
         }
     }
 
-    // Help Dialog matching Image 1
     if (showHelpDialog) {
         FocusHelpDialog(onDismiss = { showHelpDialog = false })
     }
 
-    // Friction Guard Dialog 1: Myself Typing Challenge
     if (showTypingChallenge) {
         TypingChallengeDialog(
             targetFeatureTitle = "Focus Schedule",
@@ -275,49 +293,68 @@ fun FocusModeScreen(
         )
     }
 
-    // Friction Guard Dialog 2: 24-Hour Time Delay
     if (showTimeDelayConfirm) {
         TimeDelayConfirmDialog(
             targetFeatureTitle = "Focus Schedule",
             onConfirm = {
                 showTimeDelayConfirm = false
-                pendingFrictionAction?.invoke()
+                if (pendingTimeDelayTargetId.isNotBlank()) {
+                    if (blockingViewModel != null) {
+                        blockingViewModel.startTimeDelayForTarget(pendingTimeDelayTargetId, context)
+                    } else {
+                        val duration = BlockingPreferences.DEFAULT_TIME_DELAY_MS
+                        BlockingPreferences.setTimeDelay(context, System.currentTimeMillis() + duration, pendingTimeDelayTargetId, duration)
+                    }
+                }
+                pendingTimeDelayTargetId = ""
                 pendingFrictionAction = null
             },
             onDismiss = {
                 showTimeDelayConfirm = false
+                pendingTimeDelayTargetId = ""
                 pendingFrictionAction = null
             }
         )
     }
 
-    // Friction Guard Dialog 3: Accountability Partner Approval
     if (showFriendApproval) {
         FriendApprovalDialog(
             targetFeatureTitle = "Focus Schedule",
             partnerEmail = blockingUiState?.partner?.partnerEmail ?: "",
             onRequestCode = {
+                localUnlockError = null
                 blockingViewModel?.requestPartnerApprovalCode("Focus Schedule")
             },
             onSubmitCode = { code ->
-                val expected = blockingUiState?.devApprovalCode
-                if (!expected.isNullOrBlank() && code.trim() != expected.trim()) {
-                    // Mismatched code
+                if (blockingViewModel != null) {
+                    blockingViewModel.verifyExternalUnlockCode(
+                        enteredCode = code,
+                        onSuccess = {
+                            showFriendApproval = false
+                            localUnlockError = null
+                            pendingFrictionAction?.invoke()
+                            pendingFrictionAction = null
+                        },
+                        onError = { err ->
+                            localUnlockError = err
+                        }
+                    )
                 } else {
-                    showFriendApproval = false
-                    pendingFrictionAction?.invoke()
-                    pendingFrictionAction = null
+                    localUnlockError = "Accountability verification service is unavailable."
                 }
             },
             onDismiss = {
                 showFriendApproval = false
+                localUnlockError = null
+                blockingViewModel?.clearUnlockErrors()
                 pendingFrictionAction = null
             },
-            devCode = blockingUiState?.devApprovalCode
+            isVerifying = blockingUiState?.isVerifyingUnlockCode ?: false,
+            errorMessage = localUnlockError ?: blockingUiState?.unlockCodeError,
+            requestError = blockingUiState?.unlockRequestError
         )
     }
 
-    // Create Schedule Dialog
     if (showCreateDialog) {
         CreateScheduleDialog(
             initialSchedule = null,
@@ -338,7 +375,6 @@ fun FocusModeScreen(
         )
     }
 
-    // Allowed Apps Picker Dialog
     if (showAppPickerDialog) {
         AllowedAppsPickerDialog(
             context = context,
@@ -375,16 +411,15 @@ private fun FocusModeTopBar(
                     Icon(
                         painter = painterResource(id = R.drawable.ic_arrow_back),
                         contentDescription = "Back",
-                        tint = Color.White,
+                        tint = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.size(22.dp)
                     )
                 }
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
                     text = "Focus Mode",
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
+                    color = MaterialTheme.colorScheme.onBackground,
+                    style = MaterialTheme.typography.titleLarge
                 )
             }
 
@@ -392,7 +427,7 @@ private fun FocusModeTopBar(
                 Icon(
                     painter = painterResource(id = R.drawable.ic_help_circle),
                     contentDescription = "Help",
-                    tint = Color.White.copy(alpha = 0.7f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(22.dp)
                 )
             }
@@ -400,13 +435,6 @@ private fun FocusModeTopBar(
     }
 }
 
-/**
- * Schedule Card matching Image 1:
- * - Time Range with duration: 00:00 - 05:05 (5 hr 5 min)
- * - Switch & Delete Trash icon
- * - Daily pill badge
- * - Allowed Apps (0) accordion
- */
 @Composable
 private fun FocusScheduleCard(
     schedule: FocusSchedule,
@@ -414,11 +442,13 @@ private fun FocusScheduleCard(
     onDelete: () -> Unit
 ) {
     var isAccordionExpanded by remember { mutableStateOf(false) }
+    val primary = MaterialTheme.colorScheme.primary
+    val extendedColors = MaterialTheme.pguardColors
 
     Card(
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(containerColor = CardBackground),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -426,7 +456,6 @@ private fun FocusScheduleCard(
                 .fillMaxWidth()
                 .padding(18.dp)
         ) {
-            // Row 1: Time Range + Toggle + Delete
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -434,35 +463,33 @@ private fun FocusScheduleCard(
             ) {
                 Text(
                     text = schedule.formattedTimeRange,
-                    color = CoralPrimary,
-                    fontSize = 15.sp,
+                    color = primary,
+                    style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f)
                 )
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Switch(
                         checked = schedule.isEnabled,
                         onCheckedChange = onToggle,
                         colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFF4CAF50),
-                            uncheckedThumbColor = Color.White,
-                            uncheckedTrackColor = Color.White.copy(alpha = 0.2f)
+                            checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
+                            checkedTrackColor = extendedColors.success,
+                            uncheckedThumbColor = extendedColors.switchThumbOff,
+                            uncheckedTrackColor = extendedColors.switchTrackOff,
+                            uncheckedBorderColor = Color.Transparent
                         )
                     )
 
-                    IconButton(
-                        onClick = onDelete,
-                        modifier = Modifier.size(28.dp)
-                    ) {
+                    IconButton(onClick = onDelete) {
                         Icon(
                             painter = painterResource(id = R.drawable.ic_delete),
                             contentDescription = "Delete",
-                            tint = Color.White.copy(alpha = 0.45f),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(19.dp)
                         )
                     }
@@ -471,64 +498,58 @@ private fun FocusScheduleCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Row 2: Recurrence Day Pill badge (Daily, Weekdays, Weekends, Custom)
             Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = Color(0xFF2A2A32)
+                shape = MaterialTheme.shapes.extraSmall,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh
             ) {
                 Text(
                     text = schedule.formattedDaysBadge,
-                    color = Color.White.copy(alpha = 0.85f),
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                 )
             }
 
             Spacer(modifier = Modifier.height(14.dp))
-            HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Row 3: Allowed Apps accordion dropdown
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { isAccordionExpanded = !isAccordionExpanded },
+                    .clickable { isAccordionExpanded = !isAccordionExpanded }
+                    .padding(vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
                     text = "Allowed Apps (${schedule.allowedApps.size})",
-                    color = Color.White.copy(alpha = 0.8f),
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold
+                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.labelLarge
                 )
 
                 Icon(
                     painter = painterResource(id = R.drawable.ic_chevron_right),
                     contentDescription = null,
-                    tint = Color.White.copy(alpha = 0.45f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(16.dp)
                 )
             }
 
-            // Expanded Accordion details: Locked once scheduled
             if (isAccordionExpanded) {
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
                     text = "Messages, Calls, Contacts & PGuard are default allowed.",
-                    color = Color.White.copy(alpha = 0.7f),
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodySmall
                 )
 
                 if (schedule.allowedApps.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
                         text = "Additional allowed: ${schedule.allowedApps.joinToString(", ")}",
-                        color = Color.White.copy(alpha = 0.5f),
-                        fontSize = 11.5.sp,
-                        lineHeight = 15.sp
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
                     )
                 }
 
@@ -540,14 +561,13 @@ private fun FocusScheduleCard(
                     Icon(
                         painter = painterResource(id = R.drawable.ic_feature_lock),
                         contentDescription = null,
-                        tint = CoralPrimary,
+                        tint = primary,
                         modifier = Modifier.size(13.dp)
                     )
                     Text(
                         text = "Allowed apps are locked once scheduled to prevent bypass.",
-                        color = CoralPrimary.copy(alpha = 0.9f),
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Medium
+                        color = primary.copy(alpha = 0.9f),
+                        style = MaterialTheme.typography.labelMedium
                     )
                 }
             }
@@ -555,9 +575,6 @@ private fun FocusScheduleCard(
     }
 }
 
-/**
- * Picker dialog allowing user to search and check allowed apps for the schedule.
- */
 @Composable
 private fun AllowedAppsPickerDialog(
     context: Context,
@@ -568,6 +585,7 @@ private fun AllowedAppsPickerDialog(
     val selected = remember { mutableStateListOf<String>().apply { addAll(alreadySelectedPackages) } }
     var apps by remember { mutableStateOf<List<InstalledAppItem>>(emptyList()) }
     var searchQuery by remember { mutableStateOf("") }
+    val primary = MaterialTheme.colorScheme.primary
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
@@ -582,9 +600,9 @@ private fun AllowedAppsPickerDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = CardBackground,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(480.dp)
@@ -596,14 +614,13 @@ private fun AllowedAppsPickerDialog(
             ) {
                 Text(
                     text = "Allowed Apps (${selected.size})",
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
                     text = "These apps will bypass blocking during focus time.",
-                    fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.6f)
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -627,19 +644,19 @@ private fun AllowedAppsPickerDialog(
                         ) {
                             Text(
                                 text = app.name,
-                                color = Color.White,
-                                fontSize = 14.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.weight(1f)
                             )
-                            androidx.compose.material3.Checkbox(
+                            Checkbox(
                                 checked = isChecked,
                                 onCheckedChange = { check ->
                                     if (check) selected.add(app.packageName)
                                     else selected.remove(app.packageName)
                                 },
-                                colors = androidx.compose.material3.CheckboxDefaults.colors(
-                                    checkedColor = CoralPrimary,
-                                    uncheckedColor = Color.White.copy(alpha = 0.3f)
+                                colors = CheckboxDefaults.colors(
+                                    checkedColor = primary,
+                                    uncheckedColor = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             )
                         }
@@ -652,16 +669,16 @@ private fun AllowedAppsPickerDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    androidx.compose.material3.TextButton(onClick = onDismiss) {
-                        Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
-                    androidx.compose.material3.Button(
+                    Button(
                         onClick = { onSaveSelection(selected.toSet()) },
-                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = CoralPrimary),
-                        shape = RoundedCornerShape(12.dp)
+                        colors = ButtonDefaults.buttonColors(containerColor = primary),
+                        shape = MaterialTheme.shapes.small
                     ) {
-                        Text("Apply", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("Apply", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
                     }
                 }
             }

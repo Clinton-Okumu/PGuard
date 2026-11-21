@@ -177,6 +177,9 @@ func (h *HabitsHandler) HandleGetHabits(w http.ResponseWriter, r *http.Request) 
 	dateStr := strings.TrimSpace(r.URL.Query().Get("date"))
 	if dateStr == "" {
 		dateStr = time.Now().UTC().Format("2006-01-02")
+	} else if _, err := time.Parse("2006-01-02", dateStr); err != nil {
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Invalid date format. Expected YYYY-MM-DD"})
+		return
 	}
 
 	habits, err := h.habitsStore.GetHabitsWithStatus(user.ID, dateStr)
@@ -241,6 +244,9 @@ func (h *HabitsHandler) HandleToggleHabit(w http.ResponseWriter, r *http.Request
 	dateStr := strings.TrimSpace(r.URL.Query().Get("date"))
 	if dateStr == "" {
 		dateStr = time.Now().UTC().Format("2006-01-02")
+	} else if _, err := time.Parse("2006-01-02", dateStr); err != nil {
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Invalid date format. Expected YYYY-MM-DD"})
+		return
 	}
 
 	completed, err := h.habitsStore.ToggleHabitCheckIn(user.ID, uint(habitID), dateStr)

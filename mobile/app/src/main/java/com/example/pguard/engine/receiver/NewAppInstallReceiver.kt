@@ -13,6 +13,7 @@ import com.example.pguard.engine.accessibility.PGuardAccessibilityService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 
 class NewAppInstallReceiver : BroadcastReceiver() {
 
@@ -61,20 +62,25 @@ class NewAppInstallReceiver : BroadcastReceiver() {
         }
 
         // 3. Sync to backend blocklist API asynchronously if network/auth is available
+        val pendingResult = goAsync()
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val api = NetworkClient.getBlocklistApiService(context)
-                api.createItem(
-                    CreateBlocklistRequest(
-                        type = "app",
-                        value = packageName,
-                        label = appLabel,
-                        isEnabled = true
+                withTimeoutOrNull(8_000L) {
+                    val api = NetworkClient.getBlocklistApiService(context)
+                    api.createItem(
+                        CreateBlocklistRequest(
+                            type = "app",
+                            value = packageName,
+                            label = appLabel,
+                            isEnabled = true
+                        )
                     )
-                )
-                Log.i(TAG, "Successfully synced $packageName to backend blocklist")
+                    Log.i(TAG, "Successfully synced $packageName to backend blocklist")
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to sync $packageName to backend blocklist (offline or unauthorized): ${e.message}")
+            } finally {
+                pendingResult.finish()
             }
         }
     }

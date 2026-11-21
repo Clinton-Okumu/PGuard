@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,26 +33,31 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.pguard.R
-import com.example.pguard.presentation.theme.CoralPrimary
+import com.example.pguard.presentation.settings.PrivacyPolicyDialog
+import com.example.pguard.presentation.settings.TermsOfServiceDialog
 import com.example.pguard.presentation.theme.PGuardTheme
-import com.example.pguard.presentation.theme.SurfaceDark
 import kotlinx.coroutines.launch
 
 @Composable
@@ -69,6 +73,8 @@ fun LoginScreen(
 ) {
     val contentAlpha = remember { Animatable(0f) }
     val contentOffsetY = remember { Animatable(16f) }
+    var showTermsDialog by remember { mutableStateOf(false) }
+    var showPrivacyPolicyDialog by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         launch {
@@ -92,7 +98,6 @@ fun LoginScreen(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        // Main Layout distributing Top, Middle, and Bottom
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -102,7 +107,6 @@ fun LoginScreen(
             verticalArrangement = Arrangement.SpaceBetween,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // 1. TOP BAR: Skip Button
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -112,38 +116,32 @@ fun LoginScreen(
                 OutlinedButton(
                     onClick = onSkipClick,
                     shape = CircleShape,
-                    border = BorderStroke(1.dp, CoralPrimary.copy(alpha = 0.85f)),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.85f)),
                     colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = CoralPrimary
+                        contentColor = MaterialTheme.colorScheme.primary
                     ),
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 6.dp),
                     modifier = Modifier.height(36.dp)
                 ) {
                     Text(
                         text = "SKIP",
-                        style = MaterialTheme.typography.labelMedium.copy(
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            letterSpacing = 1.sp
-                        ),
-                        color = CoralPrimary
+                        style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 1.sp),
+                        color = MaterialTheme.colorScheme.primary
                     )
                 }
             }
 
-            // 2. MIDDLE CONTENT: Globe Shield Logo, Headline & Trust Card
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Coral Rounded Card with Globe & Shield Logo (matching wireframe)
                 Box(
                     modifier = Modifier
                         .size(96.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(CoralPrimary),
+                        .clip(MaterialTheme.shapes.large)
+                        .background(MaterialTheme.colorScheme.primary),
                     contentAlignment = Alignment.Center
                 ) {
                     Image(
@@ -155,39 +153,29 @@ fun LoginScreen(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Headline
                 Text(
                     text = "Take Control of Your Focus",
-                    style = MaterialTheme.typography.headlineSmall.copy(
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.5).sp
-                    ),
+                    style = MaterialTheme.typography.headlineSmall,
                     color = MaterialTheme.colorScheme.onBackground,
                     textAlign = TextAlign.Center
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Subtitle
                 Text(
                     text = "Block adult content across all browsers & apps.\nStay accountable to what truly matters.",
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 13.5.sp,
-                        lineHeight = 19.sp
-                    ),
-                    color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.65f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // Feature Highlights Card
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(SurfaceDark.copy(alpha = 0.7f))
+                        .clip(MaterialTheme.shapes.medium)
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
                         .padding(vertical = 14.dp, horizontal = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
@@ -204,34 +192,32 @@ fun LoginScreen(
                     FeatureHighlightRow(
                         iconRes = R.drawable.ic_feature_bolt,
                         title = "Fast & Battery Friendly",
-                        subtitle = "Local DNS engine ensures zero lag and zero battery drain"
+                        subtitle = "Local engine ensures zero lag and minimal battery drain"
                     )
                 }
             }
 
-            // 3. BOTTOM SECTION: Google Button & Disclaimer
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(bottom = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Error Message Banner (if any)
                 AnimatedVisibility(visible = errorMessage != null) {
                     if (errorMessage != null) {
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(bottom = 12.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(CoralPrimary.copy(alpha = 0.15f))
+                                .clip(MaterialTheme.shapes.extraSmall)
+                                .background(MaterialTheme.colorScheme.primaryContainer)
                                 .clickable { onErrorDismiss() }
                                 .padding(horizontal = 14.dp, vertical = 8.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = errorMessage,
-                                color = CoralPrimary,
+                                color = MaterialTheme.colorScheme.error,
                                 style = MaterialTheme.typography.bodySmall,
                                 textAlign = TextAlign.Center
                             )
@@ -239,7 +225,6 @@ fun LoginScreen(
                     }
                 }
 
-                // Google Login Button
                 Button(
                     onClick = onGoogleLoginClick,
                     enabled = !isLoading,
@@ -248,14 +233,14 @@ fun LoginScreen(
                         .height(54.dp),
                     shape = CircleShape,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = CoralPrimary,
-                        contentColor = Color.White
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
                     ),
                     elevation = ButtonDefaults.buttonElevation(defaultElevation = 2.dp)
                 ) {
                     if (isLoading) {
                         CircularProgressIndicator(
-                            color = Color.White,
+                            color = MaterialTheme.colorScheme.onPrimary,
                             strokeWidth = 2.5.dp,
                             modifier = Modifier.size(24.dp)
                         )
@@ -263,86 +248,80 @@ fun LoginScreen(
                         Icon(
                             painter = painterResource(id = R.drawable.ic_google_logo),
                             contentDescription = "Google Logo",
-                            tint = Color.White,
+                            tint = MaterialTheme.colorScheme.onPrimary,
                             modifier = Modifier.size(22.dp)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
                             text = "Login with Google",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.SemiBold
-                            ),
-                            color = Color.White
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onPrimary
                         )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Terms & Privacy Policy Disclaimer
+                val mutedStyle = SpanStyle(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 12.sp
+                )
+                val linkStyles = TextLinkStyles(
+                    style = SpanStyle(
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        textDecoration = TextDecoration.Underline
+                    )
+                )
                 val termsAnnotatedString = buildAnnotatedString {
-                    withStyle(
-                        style = SpanStyle(
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
-                            fontSize = 11.5.sp
-                        )
-                    ) {
+                    withStyle(style = mutedStyle) {
                         append("By continuing, you agree to our\n")
                     }
-                    pushStringAnnotation(tag = "terms", annotation = "terms")
-                    withStyle(
-                        style = SpanStyle(
-                            color = CoralPrimary.copy(alpha = 0.9f),
-                            fontSize = 11.5.sp,
-                            textDecoration = TextDecoration.Underline
-                        )
+                    withLink(
+                        LinkAnnotation.Clickable(
+                            tag = "terms",
+                            styles = linkStyles
+                        ) {
+                            onTermsClick()
+                            showTermsDialog = true
+                        }
                     ) {
                         append("Terms of Service")
                     }
-                    pop()
-
-                    withStyle(
-                        style = SpanStyle(
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
-                            fontSize = 11.5.sp
-                        )
-                    ) {
+                    withStyle(style = mutedStyle) {
                         append(" and ")
                     }
-
-                    pushStringAnnotation(tag = "privacy", annotation = "privacy")
-                    withStyle(
-                        style = SpanStyle(
-                            color = CoralPrimary.copy(alpha = 0.9f),
-                            fontSize = 11.5.sp,
-                            textDecoration = TextDecoration.Underline
-                        )
+                    withLink(
+                        LinkAnnotation.Clickable(
+                            tag = "privacy",
+                            styles = linkStyles
+                        ) {
+                            onPrivacyClick()
+                            showPrivacyPolicyDialog = true
+                        }
                     ) {
                         append("Privacy Policy")
                     }
-                    pop()
-
-                    withStyle(
-                        style = SpanStyle(
-                            color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.55f),
-                            fontSize = 11.5.sp
-                        )
-                    ) {
+                    withStyle(style = mutedStyle) {
                         append(".")
                     }
                 }
 
                 Text(
                     text = termsAnnotatedString,
-                    textAlign = TextAlign.Center,
-                    lineHeight = 16.sp,
-                    modifier = Modifier.clickable {
-                        // Future handler for links
-                    }
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center
                 )
             }
         }
+    }
+
+    if (showTermsDialog) {
+        TermsOfServiceDialog(onDismiss = { showTermsDialog = false })
+    }
+    if (showPrivacyPolicyDialog) {
+        PrivacyPolicyDialog(onDismiss = { showPrivacyPolicyDialog = false })
     }
 }
 
@@ -361,45 +340,38 @@ private fun FeatureHighlightRow(
             modifier = Modifier
                 .size(34.dp)
                 .clip(CircleShape)
-                .background(CoralPrimary.copy(alpha = 0.14f)),
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)),
             contentAlignment = Alignment.Center
         ) {
             Icon(
                 painter = painterResource(id = iconRes),
                 contentDescription = null,
-                tint = CoralPrimary,
+                tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(18.dp)
             )
         }
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        Column(
-            modifier = Modifier.weight(1f)
-        ) {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 13.5.sp,
-                    fontWeight = FontWeight.SemiBold
-                ),
-                color = MaterialTheme.colorScheme.onBackground
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface
             )
             Text(
                 text = subtitle,
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontSize = 11.5.sp
-                ),
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF121212)
+@Preview(showBackground = true)
 @Composable
 private fun LoginScreenPreview() {
-    PGuardTheme(darkTheme = true) {
+    PGuardTheme {
         LoginScreen()
     }
 }

@@ -8,7 +8,6 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -125,6 +124,26 @@ func (m *MockTokenStore) GetValidRefreshToken(tokenHash string) (*store.RefreshT
 	return token, nil
 }
 
+func (m *MockTokenStore) RotateRefreshToken(oldTokenHash, newTokenHash, deviceInfo string, newExpiresAt time.Time) (*store.RefreshToken, error) {
+	existing, exists := m.tokens[oldTokenHash]
+	if !exists {
+		return nil, store.ErrInvalidRefreshToken
+	}
+	if existing.Revoked {
+		_ = m.RevokeAllUserTokens(existing.UserID)
+		return nil, store.ErrRefreshTokenReused
+	}
+	if existing.ExpiresAt.Before(time.Now()) {
+		return nil, store.ErrInvalidRefreshToken
+	}
+	existing.Revoked = true
+	resolvedDevice := deviceInfo
+	if resolvedDevice == "" {
+		resolvedDevice = existing.DeviceInfo
+	}
+	return m.CreateRefreshToken(existing.UserID, newTokenHash, resolvedDevice, newExpiresAt)
+}
+
 func (m *MockTokenStore) RevokeRefreshToken(tokenHash string) error {
 	token, exists := m.tokens[tokenHash]
 	if !exists {
@@ -143,14 +162,16 @@ func (m *MockTokenStore) RevokeAllUserTokens(userID uint) error {
 	return nil
 }
 
-func setupTestHandler() (*AuthHandler, *MockUserStore, *MockTokenStore, *tokens.TokenService) {
-	os.Setenv("DEV_MOCK_AUTH", "true")
-	os.Setenv("JWT_SECRET", "test-secret-key-min-32-chars-long")
+func setupTestHandler(t *testing.T) (*AuthHandler, *MockUserStore, *MockTokenStore, *tokens.TokenService) {
+	t.Helper()
+	t.Setenv("DEV_MOCK_AUTH", "true")
+	t.Setenv("JWT_SECRET", "test-secret-key-min-32-chars-long")
 
 	userStore := NewMockUserStore()
 	tokenStore := NewMockTokenStore()
 	googleVerifier := auth.NewGoogleVerifier()
-	tokenService := tokens.NewTokenService()
+	tokenService, err := tokens.NewTokenService()
+	require.NoError(t, err)
 	logger := log.New(io.Discard, "", 0)
 
 	handler := NewAuthHandler(userStore, tokenStore, googleVerifier, tokenService, logger)
@@ -158,7 +179,7 @@ func setupTestHandler() (*AuthHandler, *MockUserStore, *MockTokenStore, *tokens.
 }
 
 func TestHandleGoogleAuth(t *testing.T) {
-	handler, _, _, _ := setupTestHandler()
+	handler, _, _, _ := setupTestHandler(t)
 
 	t.Run("successful google auth with mock token", func(t *testing.T) {
 		payload := map[string]string{
@@ -207,7 +228,7 @@ func TestHandleGoogleAuth(t *testing.T) {
 }
 
 func TestHandleRefreshToken(t *testing.T) {
-	handler, userStore, tokenStore, tokenService := setupTestHandler()
+	handler, userStore, tokenStore, tokenService := setupTestHandler(t)
 
 	// Seed user & refresh token
 	user, err := userStore.FindOrCreateGoogleUser("seed_gid", "seed@example.com", "Seed User", "")
@@ -218,6 +239,8 @@ func TestHandleRefreshToken(t *testing.T) {
 
 	_, err = tokenStore.CreateRefreshToken(user.ID, hash, "device_test", expiry)
 	require.NoError(t, err)
+
+	var rotatedRefresh string
 
 	t.Run("successful token refresh with rotation", func(t *testing.T) {
 		payload := map[string]string{
@@ -243,10 +266,30 @@ func TestHandleRefreshToken(t *testing.T) {
 		newRefresh := resBody["refresh_token"].(string)
 		assert.NotEmpty(t, newRefresh)
 		assert.NotEqual(t, plainRefresh, newRefresh, "refresh token must be rotated")
+		rotatedRefresh = newRefresh
 
 		// Old token must now be revoked
 		revoked, _ := tokenStore.GetValidRefreshToken(hash)
 		assert.Nil(t, revoked, "old refresh token should be revoked")
+	})
+
+	t.Run("refresh token reuse revokes all user tokens and returns 401", func(t *testing.T) {
+		payload := map[string]string{
+			"refresh_token": plainRefresh, // already rotated/revoked
+		}
+		body, _ := json.Marshal(payload)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/refresh", bytes.NewReader(body))
+		w := httptest.NewRecorder()
+
+		handler.HandleRefreshToken(w, req)
+
+		res := w.Result()
+		defer res.Body.Close()
+
+		assert.Equal(t, http.StatusUnauthorized, res.StatusCode)
+		// The rotated token must also have been revoked!
+		rotatedValid, _ := tokenStore.GetValidRefreshToken(tokens.HashToken(rotatedRefresh))
+		assert.Nil(t, rotatedValid, "all user tokens must be revoked on reuse")
 	})
 
 	t.Run("invalid refresh token returns 401", func(t *testing.T) {
@@ -267,7 +310,7 @@ func TestHandleRefreshToken(t *testing.T) {
 }
 
 func TestHandleLogout(t *testing.T) {
-	handler, userStore, tokenStore, tokenService := setupTestHandler()
+	handler, userStore, tokenStore, tokenService := setupTestHandler(t)
 
 	user, err := userStore.FindOrCreateGoogleUser("logout_gid", "logout@example.com", "Logout User", "")
 	require.NoError(t, err)

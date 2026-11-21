@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -116,33 +117,53 @@ func (s *PostgresHabitsStore) GetOrCreateStreak(userID uint) (*Streak, error) {
 }
 
 func (s *PostgresHabitsStore) ResetStreak(userID uint, trigger, notes string) (*Streak, *RelapseLog, error) {
-	streak, err := s.GetOrCreateStreak(userID)
-	if err != nil {
-		return nil, nil, err
-	}
+	var resultStreak *Streak
+	var relapse *RelapseLog
 
-	daysAchieved := streak.CalculateCurrentDays()
-	if daysAchieved > streak.LongestStreakDays {
-		streak.LongestStreakDays = daysAchieved
-	}
-	streak.TotalRelapses++
-	streak.CurrentStreakStart = time.Now()
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var streak Streak
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ?", userID).
+			First(&streak).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				streak = Streak{
+					UserID:             userID,
+					CurrentStreakStart: time.Now(),
+					LongestStreakDays:  0,
+					TotalRelapses:      0,
+				}
+				if err := tx.Create(&streak).Error; err != nil {
+					return err
+				}
+			} else {
+				return err
+			}
+		}
 
-	relapse := &RelapseLog{
-		UserID:             userID,
-		StreakDaysAchieved: daysAchieved,
-		Trigger:            strings.TrimSpace(trigger),
-		Notes:              strings.TrimSpace(notes),
-		RelapsedAt:         time.Now(),
-	}
+		daysAchieved := streak.CalculateCurrentDays()
+		if daysAchieved > streak.LongestStreakDays {
+			streak.LongestStreakDays = daysAchieved
+		}
+		streak.TotalRelapses++
+		streak.CurrentStreakStart = time.Now()
 
-	err = s.db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Save(streak).Error; err != nil {
+		if err := tx.Save(&streak).Error; err != nil {
 			return err
+		}
+
+		relapse = &RelapseLog{
+			UserID:             userID,
+			StreakDaysAchieved: daysAchieved,
+			Trigger:            strings.TrimSpace(trigger),
+			Notes:              strings.TrimSpace(notes),
+			RelapsedAt:         time.Now(),
 		}
 		if err := tx.Create(relapse).Error; err != nil {
 			return err
 		}
+
+		resultStreak = &streak
 		return nil
 	})
 
@@ -150,7 +171,7 @@ func (s *PostgresHabitsStore) ResetStreak(userID uint, trigger, notes string) (*
 		return nil, nil, err
 	}
 
-	return streak, relapse, nil
+	return resultStreak, relapse, nil
 }
 
 func (s *PostgresHabitsStore) GetRelapseHistory(userID uint, limit int) ([]RelapseLog, error) {
@@ -186,23 +207,47 @@ func (s *PostgresHabitsStore) GetHabitsWithStatus(userID uint, dateStr string) (
 		habitIDs = append(habitIDs, h.ID)
 	}
 
-	// Fetch completion logs for target date
+	// Fetch completion logs up to target date to determine status and consecutive streak days
 	var logs []HabitLog
-	_ = s.db.Where("habit_id IN ? AND date = ? AND completed = true", habitIDs, dateStr).Find(&logs).Error
-
-	completedMap := make(map[uint]bool)
-	for _, l := range logs {
-		completedMap[l.HabitID] = true
+	if err := s.db.Where("habit_id IN ? AND date <= ? AND completed = true", habitIDs, dateStr).
+		Find(&logs).Error; err != nil {
+		return nil, err
 	}
+
+	completedDates := make(map[uint]map[string]bool)
+	for _, l := range logs {
+		if completedDates[l.HabitID] == nil {
+			completedDates[l.HabitID] = make(map[string]bool)
+		}
+		completedDates[l.HabitID][l.Date] = true
+	}
+
+	targetDate, parseErr := time.Parse("2006-01-02", dateStr)
 
 	result := make([]HabitWithStatus, len(habits))
 	for i, h := range habits {
+		dates := completedDates[h.ID]
+		completedToday := dates[dateStr]
+
+		streakDays := 0
+		if parseErr == nil && len(dates) > 0 {
+			cursor := targetDate
+			if !completedToday {
+				cursor = targetDate.AddDate(0, 0, -1)
+			}
+			for dates[cursor.Format("2006-01-02")] {
+				streakDays++
+				cursor = cursor.AddDate(0, 0, -1)
+			}
+		}
+
 		result[i] = HabitWithStatus{
-			ID:        h.ID,
-			Title:     h.Title,
-			Icon:      h.Icon,
-			Completed: completedMap[h.ID],
-			CreatedAt: h.CreatedAt,
+			ID:         h.ID,
+			Title:      h.Title,
+			Icon:       h.Icon,
+			Completed:  completedToday,
+			StreakDays: streakDays,
+			CreatedAt:  h.CreatedAt,
 		}
 	}
 
@@ -271,14 +316,17 @@ func (s *PostgresHabitsStore) ToggleHabitCheckIn(userID uint, habitID uint, date
 }
 
 func (s *PostgresHabitsStore) DeleteHabit(userID uint, habitID uint) error {
-	result := s.db.Where("id = ? AND user_id = ?", habitID, userID).Delete(&Habit{})
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return ErrHabitNotFound
-	}
-	// Cascade delete logs
-	_ = s.db.Where("habit_id = ?", habitID).Delete(&HabitLog{})
-	return nil
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		result := tx.Where("id = ? AND user_id = ?", habitID, userID).Delete(&Habit{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return ErrHabitNotFound
+		}
+		if err := tx.Where("habit_id = ?", habitID).Delete(&HabitLog{}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }

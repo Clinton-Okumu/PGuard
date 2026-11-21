@@ -1,67 +1,100 @@
 package com.example.pguard.presentation.theme
 
 import android.app.Activity
-import android.os.Build
-import androidx.compose.foundation.isSystemInDarkTheme
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.SideEffect
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-private val DarkColorScheme = darkColorScheme(
-    primary = CoralPrimary,
-    secondary = CoralSecondary,
-    tertiary = CoralTertiary,
-    background = BackgroundDark,
-    surface = SurfaceDark,
-    onPrimary = TextPrimaryDark,
-    onBackground = TextPrimaryDark,
-    onSurface = TextPrimaryDark
+@Immutable
+data class PGuardExtendedColors(
+    val success: Color,
+    val gold: Color,
+    val info: Color,
+    val switchThumbOff: Color,
+    val switchTrackOff: Color,
+    val coralDeep: Color
 )
 
-private val LightColorScheme = lightColorScheme(
-    primary = CoralPrimary,
-    secondary = CoralSecondary,
-    tertiary = CoralTertiary,
-    background = BackgroundLight,
-    surface = SurfaceLight,
-    onPrimary = SurfaceLight,
-    onBackground = TextPrimaryLight,
-    onSurface = TextPrimaryLight
+private val DarkExtendedColors = PGuardExtendedColors(
+    success = SuccessGreen,
+    gold = PremiumGold,
+    info = InfoBlue,
+    switchThumbOff = SwitchThumbOffDark,
+    switchTrackOff = SwitchTrackOffDark,
+    coralDeep = CoralDeep
 )
+
+val LocalPGuardColors = staticCompositionLocalOf { DarkExtendedColors }
+
+val MaterialTheme.pguardColors: PGuardExtendedColors
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalPGuardColors.current
+
+private val DarkColorScheme = darkColorScheme(
+    primary = CoralPrimary,
+    onPrimary = Color.White,
+    primaryContainer = CoralContainer,
+    onPrimaryContainer = OnCoralContainer,
+    secondary = CoralSecondary,
+    onSecondary = Color.White,
+    tertiary = CoralTertiary,
+    onTertiary = Color.White,
+    background = BackgroundDark,
+    onBackground = TextPrimaryDark,
+    surface = SurfaceDark,
+    onSurface = TextPrimaryDark,
+    surfaceVariant = SurfaceHighDark,
+    onSurfaceVariant = TextSecondaryDark,
+    surfaceContainerLowest = SurfaceLowestDark,
+    surfaceContainerLow = SurfaceLowDark,
+    surfaceContainer = SurfaceDark,
+    surfaceContainerHigh = SurfaceHighDark,
+    surfaceContainerHighest = SurfaceHighestDark,
+    outline = OutlineDark,
+    outlineVariant = OutlineVariantDark,
+    error = ErrorDark,
+    onError = Color.White
+)
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
+}
 
 @Composable
 fun PGuardTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    // Disable dynamic color to enforce our Reddish-Coral brand identity
-    dynamicColor: Boolean = false,
+    @Suppress("UNUSED_PARAMETER") darkTheme: Boolean = true,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
-            val window = (view.context as Activity).window
-            WindowCompat.getInsetsController(window, view).isAppearanceLightStatusBars = !darkTheme
+            val window = view.context.findActivity()?.window ?: return@SideEffect
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = false
+                isAppearanceLightNavigationBars = false
+            }
         }
     }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = Typography,
-        content = content
-    )
+    CompositionLocalProvider(LocalPGuardColors provides DarkExtendedColors) {
+        MaterialTheme(
+            colorScheme = DarkColorScheme,
+            typography = Typography,
+            shapes = PGuardShapes,
+            content = content
+        )
+    }
 }

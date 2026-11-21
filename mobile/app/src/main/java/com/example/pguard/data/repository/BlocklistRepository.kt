@@ -1,5 +1,6 @@
 package com.example.pguard.data.repository
 
+import com.example.pguard.core.common.runSuspendCatching
 import com.example.pguard.core.network.api.BlocklistApiService
 import com.example.pguard.core.network.model.BlocklistItemDto
 import com.example.pguard.core.network.model.CreateBlocklistRequest
@@ -10,7 +11,7 @@ class BlocklistRepository(
 ) {
 
     suspend fun fetchBlocklist(type: String? = null): Result<List<BlocklistItemDto>> {
-        return runCatching {
+        return runSuspendCatching {
             val response = blocklistApiService.getBlocklist(type)
             response.items
         }
@@ -22,7 +23,7 @@ class BlocklistRepository(
         label: String? = null,
         isEnabled: Boolean = true
     ): Result<BlocklistItemDto> {
-        return runCatching {
+        return runSuspendCatching {
             val response = blocklistApiService.createItem(
                 CreateBlocklistRequest(
                     type = type,
@@ -36,14 +37,14 @@ class BlocklistRepository(
     }
 
     suspend fun toggleItem(id: Long, isEnabled: Boolean): Result<BlocklistItemDto> {
-        return runCatching {
+        return runSuspendCatching {
             val response = blocklistApiService.toggleItem(id, ToggleBlocklistRequest(isEnabled))
             response.item ?: throw IllegalStateException(response.error ?: "Failed to update item")
         }
     }
 
     suspend fun deleteItem(id: Long): Result<Unit> {
-        return runCatching {
+        return runSuspendCatching {
             blocklistApiService.deleteItem(id)
             Unit
         }

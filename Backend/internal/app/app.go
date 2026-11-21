@@ -55,7 +55,10 @@ func NewApplication() (*Application, error) {
 
 	// Services
 	googleVerifier := auth.NewGoogleVerifier()
-	tokenService := tokens.NewTokenService()
+	tokenService, err := tokens.NewTokenService()
+	if err != nil {
+		return nil, fmt.Errorf("token service initialization failed: %w", err)
+	}
 	resendMailer := mailer.NewResendMailer(logger)
 
 	// Handlers
@@ -84,6 +87,16 @@ func NewApplication() (*Application, error) {
 }
 
 func (a *Application) HealthChecker(w http.ResponseWriter, r *http.Request) {
+	if a.DB != nil {
+		if err := a.DB.PingContext(r.Context()); err != nil {
+			_ = utils.WriteJSON(w, http.StatusServiceUnavailable, utils.Envelope{
+				"status":  "unhealthy",
+				"service": "PGuard API",
+				"error":   "database unavailable",
+			})
+			return
+		}
+	}
 	_ = utils.WriteJSON(w, http.StatusOK, utils.Envelope{
 		"status":  "ok",
 		"service": "PGuard API",

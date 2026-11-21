@@ -1,8 +1,6 @@
 package com.example.pguard.presentation.dashboard
 
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -11,7 +9,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -24,11 +23,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.example.pguard.presentation.theme.CoralPrimary
 
 @Composable
 internal fun BlockedScreenMessageDialog(
@@ -42,16 +38,16 @@ internal fun BlockedScreenMessageDialog(
         title = {
             Text(
                 text = "Blocked screen message",
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface
             )
         },
         text = {
             Column {
                 Text(
                     text = "Enter the message to display when content is blocked:",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(
@@ -59,8 +55,8 @@ internal fun BlockedScreenMessageDialog(
                     onValueChange = onTextChange,
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CoralPrimary,
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
                     )
                 )
             }
@@ -68,18 +64,18 @@ internal fun BlockedScreenMessageDialog(
         confirmButton = {
             TextButton(
                 onClick = onSave,
-                colors = ButtonDefaults.textButtonColors(contentColor = CoralPrimary)
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
             ) {
-                Text("Save", fontWeight = FontWeight.Bold)
+                Text("Save", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                Text("Cancel", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
-        containerColor = DialogContainerColor,
-        shape = RoundedCornerShape(16.dp)
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium
     )
 }
 
@@ -101,8 +97,8 @@ internal fun BlockedScreenCountdownDialog(
         title = {
             Text(
                 text = "Blocked screen countdown",
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface
             )
         },
         text = {
@@ -118,10 +114,14 @@ internal fun BlockedScreenCountdownDialog(
                         RadioButton(
                             selected = selectedSeconds == seconds,
                             onClick = { onSelect(seconds) },
-                            colors = RadioButtonDefaults.colors(selectedColor = CoralPrimary)
+                            colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(text = label, fontSize = 15.sp, color = Color.White)
+                        Text(
+                            text = label,
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
             }
@@ -129,11 +129,11 @@ internal fun BlockedScreenCountdownDialog(
         confirmButton = {},
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                Text("Cancel", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
-        containerColor = DialogContainerColor,
-        shape = RoundedCornerShape(16.dp)
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium
     )
 }
 
@@ -149,16 +149,16 @@ internal fun RedirectUrlDialog(
         title = {
             Text(
                 text = "Redirect after closing",
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface
             )
         },
         text = {
             Column {
                 Text(
                     text = "Enter a URL to open after the blocked screen closes (leave empty for Not set):",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(
@@ -167,8 +167,8 @@ internal fun RedirectUrlDialog(
                     placeholder = { Text("https://example.com") },
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CoralPrimary,
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f)
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
                     )
                 )
             }
@@ -176,18 +176,18 @@ internal fun RedirectUrlDialog(
         confirmButton = {
             TextButton(
                 onClick = onSave,
-                colors = ButtonDefaults.textButtonColors(contentColor = CoralPrimary)
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
             ) {
-                Text("Save", fontWeight = FontWeight.Bold)
+                Text("Save", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                Text("Cancel", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
-        containerColor = DialogContainerColor,
-        shape = RoundedCornerShape(16.dp)
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium
     )
 }
 
@@ -202,8 +202,8 @@ internal fun InfoDialog(
         title = {
             Text(
                 text = title,
-                fontWeight = FontWeight.Bold,
-                fontSize = 17.sp
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface
             )
         },
         text = {
@@ -214,22 +214,21 @@ internal fun InfoDialog(
             ) {
                 Text(
                     text = message,
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
-                    lineHeight = 20.sp
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
                 )
             }
         },
         confirmButton = {
             TextButton(
                 onClick = onDismiss,
-                colors = ButtonDefaults.textButtonColors(contentColor = CoralPrimary)
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
             ) {
-                Text("Got it", fontWeight = FontWeight.Bold)
+                Text("Got it", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
             }
         },
-        containerColor = DialogContainerColor,
-        shape = RoundedCornerShape(16.dp)
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium
     )
 }
 
@@ -246,16 +245,16 @@ internal fun InvitePartnerDialog(
         title = {
             Text(
                 text = "Invite accountability partner",
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface
             )
         },
         text = {
             Column {
                 Text(
                     text = "Enter the email address of the person who will support you.",
-                    fontSize = 13.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 OutlinedTextField(
@@ -269,8 +268,8 @@ internal fun InvitePartnerDialog(
                     } else null,
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CoralPrimary,
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.3f),
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
                         errorBorderColor = MaterialTheme.colorScheme.error
                     )
                 )
@@ -279,17 +278,17 @@ internal fun InvitePartnerDialog(
         confirmButton = {
             TextButton(
                 onClick = onSubmit,
-                colors = ButtonDefaults.textButtonColors(contentColor = CoralPrimary)
+                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary)
             ) {
-                Text("Invite", fontWeight = FontWeight.Bold)
+                Text("Invite", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                Text("Cancel", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
-        containerColor = DialogContainerColor,
-        shape = RoundedCornerShape(16.dp)
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.medium
     )
 }

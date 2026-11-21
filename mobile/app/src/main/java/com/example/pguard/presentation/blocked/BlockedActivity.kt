@@ -18,31 +18,26 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.pguard.R
-import com.example.pguard.presentation.theme.BackgroundDark
-import com.example.pguard.presentation.theme.CoralPrimary
 import com.example.pguard.presentation.theme.PGuardTheme
 import kotlinx.coroutines.delay
 
@@ -72,29 +67,43 @@ class BlockedActivity : ComponentActivity() {
         }
     }
 
+    private var blockedUrlState by mutableStateOf("Restricted content")
+    private var messageState by mutableStateOf("This page is blocked.")
+    private var countdownState by mutableIntStateOf(3)
+    private var redirectUrlState by mutableStateOf("")
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-
-        val blockedUrl = intent.getStringExtra(EXTRA_BLOCKED_URL) ?: "Restricted content"
-        val message = intent.getStringExtra(EXTRA_MESSAGE) ?: "This page is blocked."
-        val countdown = intent.getIntExtra(EXTRA_COUNTDOWN, 3)
-        val redirectUrl = intent.getStringExtra(EXTRA_REDIRECT_URL) ?: ""
+        applyIntentExtras(intent)
 
         setContent {
             PGuardTheme {
                 BackHandler {
-                    handleDismiss(redirectUrl)
+                    handleDismiss(redirectUrlState)
                 }
 
                 BlockedScreenContent(
-                    blockedUrl = blockedUrl,
-                    message = message,
-                    initialCountdown = countdown,
-                    onGoHome = { handleDismiss(redirectUrl) }
+                    blockedUrl = blockedUrlState,
+                    message = messageState,
+                    initialCountdown = countdownState,
+                    onGoHome = { handleDismiss(redirectUrlState) }
                 )
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        applyIntentExtras(intent)
+    }
+
+    private fun applyIntentExtras(intent: Intent?) {
+        blockedUrlState = intent?.getStringExtra(EXTRA_BLOCKED_URL) ?: "Restricted content"
+        messageState = intent?.getStringExtra(EXTRA_MESSAGE) ?: "This page is blocked."
+        countdownState = intent?.getIntExtra(EXTRA_COUNTDOWN, 3) ?: 3
+        redirectUrlState = intent?.getStringExtra(EXTRA_REDIRECT_URL) ?: ""
     }
 
     private fun handleDismiss(redirectUrl: String) {
@@ -135,9 +144,11 @@ private fun BlockedScreenContent(
     initialCountdown: Int,
     onGoHome: () -> Unit
 ) {
-    var timeLeft by remember { mutableIntStateOf(if (initialCountdown <= 0) 0 else initialCountdown) }
+    var timeLeft by remember(blockedUrl, initialCountdown) {
+        mutableIntStateOf(if (initialCountdown <= 0) 0 else initialCountdown)
+    }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(blockedUrl, initialCountdown) {
         if (timeLeft > 0) {
             while (timeLeft > 0) {
                 delay(1000L)
@@ -147,10 +158,12 @@ private fun BlockedScreenContent(
         }
     }
 
+    val primary = MaterialTheme.colorScheme.primary
+
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(BackgroundDark)
+            .background(MaterialTheme.colorScheme.background)
             .padding(24.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -163,8 +176,8 @@ private fun BlockedScreenContent(
             Box(
                 modifier = Modifier
                     .size(96.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(CoralPrimary),
+                    .clip(MaterialTheme.shapes.large)
+                    .background(primary),
                 contentAlignment = Alignment.Center
             ) {
                 Image(
@@ -178,17 +191,16 @@ private fun BlockedScreenContent(
 
             Text(
                 text = "Access Blocked",
-                color = Color.White,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold
+                color = MaterialTheme.colorScheme.onBackground,
+                style = MaterialTheme.typography.headlineSmall
             )
 
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
                 text = message,
-                color = Color.White.copy(alpha = 0.7f),
-                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyLarge,
                 textAlign = TextAlign.Center
             )
 
@@ -196,15 +208,14 @@ private fun BlockedScreenContent(
 
             // Blocked item chip
             Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = Color.White.copy(alpha = 0.08f),
+                shape = MaterialTheme.shapes.small,
+                color = MaterialTheme.colorScheme.surfaceContainerHigh,
                 modifier = Modifier.padding(horizontal = 16.dp)
             ) {
                 Text(
                     text = blockedUrl,
-                    color = CoralPrimary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
+                    color = primary,
+                    style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
                 )
             }
@@ -214,16 +225,16 @@ private fun BlockedScreenContent(
             // Action button
             Button(
                 onClick = onGoHome,
-                colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
-                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = primary),
+                shape = MaterialTheme.shapes.small,
                 modifier = Modifier
                     .fillMaxWidth(0.85f)
                     .height(50.dp)
             ) {
                 Text(
                     text = if (timeLeft > 0) "Go Back ($timeLeft s)" else "Go Back to Safety",
-                    color = Color.White,
-                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onPrimary,
+                    style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.SemiBold
                 )
             }

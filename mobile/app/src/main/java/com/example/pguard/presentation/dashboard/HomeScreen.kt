@@ -1,5 +1,7 @@
 package com.example.pguard.presentation.dashboard
 
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -14,7 +16,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -22,17 +23,20 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.tooling.preview.Preview
-import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.findViewTreeViewModelStoreOwner
 import com.example.pguard.core.datastore.AuthDataStore
 import com.example.pguard.core.network.NetworkClient
 import com.example.pguard.core.network.model.UserDto
 import com.example.pguard.data.repository.AccountabilityRepository
 import com.example.pguard.data.repository.SettingsRepository
+import com.example.pguard.engine.accessibility.BlockingPreferences
 import com.example.pguard.presentation.blocklist.BlocklistScreen
 import com.example.pguard.presentation.focus.FocusModeScreen
 import com.example.pguard.presentation.habits.HabitsScreen
@@ -43,6 +47,12 @@ import com.example.pguard.presentation.settings.SettingsScreen
 import com.example.pguard.presentation.theme.PGuardTheme
 import kotlinx.coroutines.launch
 
+private tailrec fun Context.findViewModelStoreOwner(): ViewModelStoreOwner? = when (this) {
+    is ViewModelStoreOwner -> this
+    is ContextWrapper -> baseContext.findViewModelStoreOwner()
+    else -> null
+}
+
 @Composable
 fun HomeScreen(
     user: UserDto?,
@@ -50,16 +60,33 @@ fun HomeScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val view = LocalView.current
+    val storeOwner = remember(view, context) {
+        view.findViewTreeViewModelStoreOwner() ?: context.findViewModelStoreOwner()
+    }
+
     val settingsRepository = remember {
-        com.example.pguard.engine.accessibility.PGuardAccessibilityService.loadSettings(context)
+        BlockingPreferences.loadSettings(context)
         SettingsRepository(NetworkClient.getSettingsApiService(context))
     }
     val accountabilityRepository = remember {
         AccountabilityRepository(NetworkClient.getAccountabilityApiService(context))
     }
     val authDataStore = remember { AuthDataStore(context.applicationContext) }
-    val blockingViewModel = remember {
-        BlockingViewModel(settingsRepository, accountabilityRepository, authDataStore)
+    val blockingViewModel = remember(storeOwner) {
+        if (storeOwner != null) {
+            ViewModelProvider(
+                storeOwner,
+                object : ViewModelProvider.Factory {
+                    @Suppress("UNCHECKED_CAST")
+                    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                        return BlockingViewModel(settingsRepository, accountabilityRepository, authDataStore) as T
+                    }
+                }
+            )[BlockingViewModel::class.java]
+        } else {
+            BlockingViewModel(settingsRepository, accountabilityRepository, authDataStore)
+        }
     }
 
     LaunchedEffect(user?.email) {
@@ -116,12 +143,17 @@ fun HomeScreen(
                         BlocklistScreen(blockingViewModel = blockingViewModel)
                     }
                     PGuardTab.HABITS -> {
-                        HabitsScreen()
+                        HabitsScreen(
+                            user = user,
+                            blockingViewModel = blockingViewModel,
+                            isActiveTab = currentTab == PGuardTab.HABITS
+                        )
                     }
                     PGuardTab.SETTINGS -> {
                         SettingsScreen(
                             user = user,
-                            onLogout = onLogout
+                            onLogout = onLogout,
+                            blockingViewModel = blockingViewModel
                         )
                     }
                 }
@@ -172,10 +204,10 @@ fun HomeScreen(
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF121212)
+@Preview(showBackground = true)
 @Composable
 private fun HomeScreenPreview() {
-    PGuardTheme(darkTheme = true) {
+    PGuardTheme {
         HomeScreen(
             user = null,
             onLogout = {}

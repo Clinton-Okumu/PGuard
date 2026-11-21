@@ -6,21 +6,23 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
+import com.example.pguard.BuildConfig
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 
 class GoogleAuthManager(
     private val context: Context,
-    // Google Cloud OAuth Web Client ID.
-    // Replace with your real client ID when configured in Google Cloud Console.
-    private val webClientId: String = ""
+    private val webClientId: String = BuildConfig.GOOGLE_WEB_CLIENT_ID
 ) {
     private val credentialManager = CredentialManager.create(context)
 
     suspend fun signInWithGoogle(): Result<String> {
-        // If webClientId is empty or dev mock is requested, return mock token supported by Go backend
         if (webClientId.isBlank()) {
-            return Result.success("mock:clinton@pguard.local")
+            return if (BuildConfig.DEBUG) {
+                Result.success("mock:clinton@pguard.local")
+            } else {
+                Result.failure(IllegalStateException("Google Sign-In is not configured for this build."))
+            }
         }
 
         return try {

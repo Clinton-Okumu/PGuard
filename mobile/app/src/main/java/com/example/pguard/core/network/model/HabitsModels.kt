@@ -38,6 +38,7 @@ data class RelapseLogDto(
     @SerialName("trigger") val trigger: String = "",
     @SerialName("notes") val notes: String = "",
     @SerialName("streak_days_lost") val streakDaysLost: Int = 0,
+    @SerialName("relapsed_at") val relapsedAt: String? = null,
     @SerialName("created_at") val createdAt: String? = null
 )
 

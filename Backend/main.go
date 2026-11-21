@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"Backend/internal/app"
@@ -80,8 +83,21 @@ func main() {
 		application.Logger.Printf("API URL: http://%s:%s/api/v1", ip, port)
 	}
 
-	err = server.ListenAndServe()
-	if err != nil && err != http.ErrServerClosed {
-		application.Logger.Fatal(err)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			application.Logger.Fatal(err)
+		}
+	}()
+
+	<-ctx.Done()
+	application.Logger.Println("Shutting down PGuard Backend gracefully...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		application.Logger.Printf("ERROR: graceful server shutdown failed: %v", err)
 	}
 }

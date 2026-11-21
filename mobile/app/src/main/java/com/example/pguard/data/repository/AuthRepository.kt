@@ -1,6 +1,7 @@
 package com.example.pguard.data.repository
 
 import android.os.Build
+import com.example.pguard.core.common.runSuspendCatching
 import com.example.pguard.core.datastore.AuthDataStore
 import com.example.pguard.core.network.api.AuthApiService
 import com.example.pguard.core.network.model.GoogleAuthRequest
@@ -23,7 +24,7 @@ class AuthRepository(
         idToken: String,
         deviceInfo: String = "${Build.MANUFACTURER} ${Build.MODEL} (Android ${Build.VERSION.RELEASE})"
     ): Result<UserDto> {
-        return runCatching {
+        return runSuspendCatching {
             val response = authApiService.authenticateWithGoogle(
                 GoogleAuthRequest(
                     idToken = idToken,
@@ -40,7 +41,7 @@ class AuthRepository(
     }
 
     suspend fun refreshToken(): Result<Unit> {
-        return runCatching {
+        return runSuspendCatching {
             val currentRefreshToken = authDataStore.refreshTokenFlow.firstOrNull()
                 ?: throw IllegalStateException("No refresh token available")
 
@@ -58,10 +59,10 @@ class AuthRepository(
     }
 
     suspend fun logout(): Result<Unit> {
-        return runCatching {
+        return runSuspendCatching {
             val currentRefreshToken = authDataStore.refreshTokenFlow.firstOrNull()
             if (!currentRefreshToken.isNullOrBlank()) {
-                runCatching {
+                runSuspendCatching {
                     authApiService.logout(LogoutRequest(currentRefreshToken))
                 }
             }

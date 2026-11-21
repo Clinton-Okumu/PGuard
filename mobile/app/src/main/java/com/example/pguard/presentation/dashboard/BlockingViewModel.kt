@@ -8,13 +8,14 @@ import com.example.pguard.core.network.model.UpdateSettingsRequest
 import com.example.pguard.core.network.model.UserSettingsDto
 import com.example.pguard.data.repository.AccountabilityRepository
 import com.example.pguard.data.repository.SettingsRepository
-import com.example.pguard.engine.accessibility.PGuardAccessibilityService
+import com.example.pguard.engine.accessibility.BlockingPreferences
 import com.example.pguard.engine.admin.DeviceAdminManager
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -50,7 +51,9 @@ data class BlockingUiState(
     val timeDelayUnlockAt: Long = 0L,
     val timeDelayTarget: String = "",
     val inviteEmailError: String? = null,
-    val devApprovalCode: String? = null,
+    val isVerifyingUnlockCode: Boolean = false,
+    val unlockCodeError: String? = null,
+    val unlockRequestError: String? = null,
     val isDeviceAdminDialogVisible: Boolean = false
 )
 
@@ -62,37 +65,49 @@ class BlockingViewModel(
 
     private var currentUserEmail: String? = null
     private var partnerPollingJob: Job? = null
+    private var loadDataJob: Job? = null
 
     private val _uiState = MutableStateFlow(
         BlockingUiState(
             settings = UserSettingsDto(
-                blockAdultContent = PGuardAccessibilityService.isAdultBlockingEnabled,
-                blockShorts = PGuardAccessibilityService.isShortsBlockingEnabled,
-                blockWhatsAppChannels = PGuardAccessibilityService.isWhatsAppChannelsBlockingEnabled,
-                blockInstagramReels = PGuardAccessibilityService.isInstagramReelsBlockingEnabled,
-                blockTikTok = PGuardAccessibilityService.isTikTokBlockingEnabled,
-                uninstallProtection = PGuardAccessibilityService.isUninstallProtectionEnabled,
-                blockUnsupportedBrowsers = PGuardAccessibilityService.isUnsupportedBrowsersBlockingEnabled,
-                blockNewlyInstalledApps = PGuardAccessibilityService.isNewlyInstalledAppsBlockingEnabled,
-                blockedScreenMessage = PGuardAccessibilityService.blockedScreenMessage,
-                blockedScreenCountdown = PGuardAccessibilityService.blockedScreenCountdown,
-                redirectUrl = PGuardAccessibilityService.redirectUrl
+                blockAdultContent = BlockingPreferences.isAdultBlockingEnabled,
+                blockShorts = BlockingPreferences.isShortsBlockingEnabled,
+                blockWhatsAppChannels = BlockingPreferences.isWhatsAppChannelsBlockingEnabled,
+                blockInstagramReels = BlockingPreferences.isInstagramReelsBlockingEnabled,
+                blockTikTok = BlockingPreferences.isTikTokBlockingEnabled,
+                uninstallProtection = BlockingPreferences.isUninstallProtectionEnabled,
+                blockUnsupportedBrowsers = BlockingPreferences.isUnsupportedBrowsersBlockingEnabled,
+                blockNewlyInstalledApps = BlockingPreferences.isNewlyInstalledAppsBlockingEnabled,
+                blockedScreenMessage = BlockingPreferences.blockedScreenMessage,
+                blockedScreenCountdown = BlockingPreferences.blockedScreenCountdown,
+                redirectUrl = BlockingPreferences.redirectUrl
             ),
-            accountabilityMode = AccountabilityMode.fromCode(PGuardAccessibilityService.accountabilityMode),
-            timeDelayUnlockAt = PGuardAccessibilityService.timeDelayUnlockAt,
-            timeDelayTarget = PGuardAccessibilityService.timeDelayTarget
+            accountabilityMode = AccountabilityMode.fromCode(BlockingPreferences.accountabilityMode),
+            timeDelayUnlockAt = BlockingPreferences.timeDelayUnlockAt,
+            timeDelayTarget = BlockingPreferences.timeDelayTarget
         )
     )
     val uiState: StateFlow<BlockingUiState> = _uiState.asStateFlow()
 
     init {
-        loadData()
-        authDataStore?.let { store ->
+        if (authDataStore != null) {
             viewModelScope.launch {
-                store.userFlow.collect { user ->
-                    currentUserEmail = user?.email
-                }
+                authDataStore.userFlow
+                    .distinctUntilChangedBy { it?.id }
+                    .collect { user ->
+                        currentUserEmail = user?.email
+                        if (user != null) {
+                            loadData()
+                        } else {
+                            stopPartnerPolling()
+                            loadDataJob?.cancel()
+                            loadDataJob = null
+                            _uiState.update { it.copy(isLoading = false, partner = null, isPartnerLinked = false) }
+                        }
+                    }
             }
+        } else {
+            loadData()
         }
     }
 
@@ -123,32 +138,33 @@ class BlockingViewModel(
 
     fun refreshFromLocalPreferences(context: android.content.Context? = null) {
         if (context != null) {
-            PGuardAccessibilityService.loadSettings(context)
+            BlockingPreferences.loadSettings(context)
         }
         _uiState.update { current ->
             current.copy(
                 settings = current.settings.copy(
-                    blockAdultContent = PGuardAccessibilityService.isAdultBlockingEnabled,
-                    blockShorts = PGuardAccessibilityService.isShortsBlockingEnabled,
-                    blockWhatsAppChannels = PGuardAccessibilityService.isWhatsAppChannelsBlockingEnabled,
-                    blockInstagramReels = PGuardAccessibilityService.isInstagramReelsBlockingEnabled,
-                    blockTikTok = PGuardAccessibilityService.isTikTokBlockingEnabled,
-                    uninstallProtection = PGuardAccessibilityService.isUninstallProtectionEnabled,
-                    blockUnsupportedBrowsers = PGuardAccessibilityService.isUnsupportedBrowsersBlockingEnabled,
-                    blockNewlyInstalledApps = PGuardAccessibilityService.isNewlyInstalledAppsBlockingEnabled,
-                    blockedScreenMessage = PGuardAccessibilityService.blockedScreenMessage,
-                    blockedScreenCountdown = PGuardAccessibilityService.blockedScreenCountdown,
-                    redirectUrl = PGuardAccessibilityService.redirectUrl
+                    blockAdultContent = BlockingPreferences.isAdultBlockingEnabled,
+                    blockShorts = BlockingPreferences.isShortsBlockingEnabled,
+                    blockWhatsAppChannels = BlockingPreferences.isWhatsAppChannelsBlockingEnabled,
+                    blockInstagramReels = BlockingPreferences.isInstagramReelsBlockingEnabled,
+                    blockTikTok = BlockingPreferences.isTikTokBlockingEnabled,
+                    uninstallProtection = BlockingPreferences.isUninstallProtectionEnabled,
+                    blockUnsupportedBrowsers = BlockingPreferences.isUnsupportedBrowsersBlockingEnabled,
+                    blockNewlyInstalledApps = BlockingPreferences.isNewlyInstalledAppsBlockingEnabled,
+                    blockedScreenMessage = BlockingPreferences.blockedScreenMessage,
+                    blockedScreenCountdown = BlockingPreferences.blockedScreenCountdown,
+                    redirectUrl = BlockingPreferences.redirectUrl
                 ),
-                accountabilityMode = AccountabilityMode.fromCode(PGuardAccessibilityService.accountabilityMode),
-                timeDelayUnlockAt = PGuardAccessibilityService.timeDelayUnlockAt,
-                timeDelayTarget = PGuardAccessibilityService.timeDelayTarget
+                accountabilityMode = AccountabilityMode.fromCode(BlockingPreferences.accountabilityMode),
+                timeDelayUnlockAt = BlockingPreferences.timeDelayUnlockAt,
+                timeDelayTarget = BlockingPreferences.timeDelayTarget
             )
         }
     }
 
     fun loadData() {
-        viewModelScope.launch {
+        loadDataJob?.cancel()
+        loadDataJob = viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, errorMessage = null) }
 
             val settingsResult = settingsRepository.fetchSettings()
@@ -157,31 +173,22 @@ class BlockingViewModel(
             val partnerDto = partnerResult.getOrNull()?.partner
             val isLinked = partnerResult.getOrNull()?.isLinked ?: false || (partnerDto != null && partnerDto.status == "accepted")
 
+            var shouldPushLocal = false
+            var settingsToPush: UserSettingsDto? = null
+
             _uiState.update { current ->
                 val serverSettings = settingsResult.getOrNull()
                 val finalSettings = if (serverSettings != null) {
-                    // Smart merge: Do not let unconfigured/default server flags override
-                    // active protections the user already enabled locally on their phone!
-                    val merged = current.settings.copy(
-                        blockAdultContent = current.settings.blockAdultContent || serverSettings.blockAdultContent,
-                        blockShorts = current.settings.blockShorts || serverSettings.blockShorts,
-                        blockWhatsAppChannels = current.settings.blockWhatsAppChannels || serverSettings.blockWhatsAppChannels,
-                        blockInstagramReels = current.settings.blockInstagramReels || serverSettings.blockInstagramReels,
-                        blockTikTok = current.settings.blockTikTok || serverSettings.blockTikTok,
-                        uninstallProtection = current.settings.uninstallProtection || serverSettings.uninstallProtection,
-                        blockUnsupportedBrowsers = current.settings.blockUnsupportedBrowsers || serverSettings.blockUnsupportedBrowsers,
-                        blockNewlyInstalledApps = current.settings.blockNewlyInstalledApps || serverSettings.blockNewlyInstalledApps,
-                        blockedScreenMessage = if (serverSettings.blockedScreenMessage.isNotBlank() && serverSettings.blockedScreenMessage != "This page is blocked.") serverSettings.blockedScreenMessage else current.settings.blockedScreenMessage,
-                        blockedScreenCountdown = if (serverSettings.blockedScreenCountdown > 0) serverSettings.blockedScreenCountdown else current.settings.blockedScreenCountdown,
-                        redirectUrl = if (serverSettings.redirectUrl.isNotBlank()) serverSettings.redirectUrl else current.settings.redirectUrl
-                    )
-                    syncSettingsToAccessibilityService(merged)
-                    if (merged != serverSettings) {
-                        pushSettingsToServer(merged)
+                    if (BlockingPreferences.isLocalDirty) {
+                        // Local changes haven't synced to server yet; preserve local state and push to server
+                        shouldPushLocal = true
+                        settingsToPush = current.settings
+                        current.settings
+                    } else {
+                        syncSettingsToAccessibilityService(serverSettings, markDirty = false)
+                        serverSettings
                     }
-                    merged
                 } else {
-                    // Keep current local settings if offline/server unreachable
                     current.settings
                 }
 
@@ -192,6 +199,10 @@ class BlockingViewModel(
                     isPartnerLinked = isLinked,
                     errorMessage = null
                 )
+            }
+
+            if (shouldPushLocal && settingsToPush != null) {
+                pushSettingsToServer(settingsToPush!!)
             }
 
             if (partnerDto != null && !isLinked && partnerDto.status == "pending") {
@@ -221,7 +232,7 @@ class BlockingViewModel(
     fun updateSetting(block: (UserSettingsDto) -> UserSettingsDto) {
         val currentSettings = _uiState.value.settings
         val updatedLocal = block(currentSettings)
-        syncSettingsToAccessibilityService(updatedLocal)
+        syncSettingsToAccessibilityService(updatedLocal, markDirty = true)
         _uiState.update { it.copy(settings = updatedLocal) }
 
         val request = UpdateSettingsRequest(
@@ -241,7 +252,8 @@ class BlockingViewModel(
         viewModelScope.launch {
             settingsRepository.updateSettings(request).fold(
                 onSuccess = { updatedServer ->
-                    syncSettingsToAccessibilityService(updatedServer)
+                    BlockingPreferences.markLocalDirty(null, false)
+                    syncSettingsToAccessibilityService(updatedServer, markDirty = false)
                     _uiState.update { it.copy(settings = updatedServer) }
                 },
                 onFailure = { error ->
@@ -464,7 +476,7 @@ class BlockingViewModel(
     }
 
     fun applyAccountabilityMode(mode: AccountabilityMode, context: android.content.Context) {
-        PGuardAccessibilityService.saveAccountabilityMode(context, mode.code)
+        BlockingPreferences.saveAccountabilityMode(context, mode.code)
         _uiState.update { it.copy(accountabilityMode = mode) }
         if (mode == AccountabilityMode.FRIEND && _uiState.value.partner == null) {
             showInviteDialog()
@@ -571,12 +583,7 @@ class BlockingViewModel(
                 _uiState.update { it.copy(typingChallengeTarget = action) }
             }
             AccountabilityMode.TIME_DELAY -> {
-                val state = _uiState.value
-                val isDelayedForThis = state.timeDelayTarget == action.identifier &&
-                        state.timeDelayUnlockAt > 0L &&
-                        System.currentTimeMillis() >= state.timeDelayUnlockAt
-
-                if (isDelayedForThis) {
+                if (BlockingPreferences.isTimeDelayElapsed(context, action.identifier)) {
                     cancelTimeDelay(context)
                     executeProtectedAction(action, context)
                 } else {
@@ -587,7 +594,13 @@ class BlockingViewModel(
                 val partner = _uiState.value.partner
                 val isLinked = _uiState.value.isPartnerLinked
                 if (partner != null && isLinked) {
-                    _uiState.update { it.copy(friendApprovalTarget = action) }
+                    _uiState.update {
+                        it.copy(
+                            friendApprovalTarget = action,
+                            unlockCodeError = null,
+                            unlockRequestError = null
+                        )
+                    }
                 } else {
                     // No active partner linked yet -> allow changing mode or action directly without trapping user
                     executeProtectedAction(action, context)
@@ -627,19 +640,24 @@ class BlockingViewModel(
 
     fun onStartTimeDelay(context: android.content.Context) {
         val action = _uiState.value.timeDelayConfirmTarget ?: return
-        val unlockAt = System.currentTimeMillis() + (24 * 60 * 60 * 1000L)
-        PGuardAccessibilityService.setTimeDelay(context, unlockAt, action.identifier)
+        startTimeDelayForTarget(action.identifier, context)
+    }
+
+    fun startTimeDelayForTarget(targetId: String, context: android.content.Context) {
+        val durationMs = BlockingPreferences.DEFAULT_TIME_DELAY_MS
+        val unlockAt = System.currentTimeMillis() + durationMs
+        BlockingPreferences.setTimeDelay(context, unlockAt, targetId, durationMs)
         _uiState.update {
             it.copy(
                 timeDelayConfirmTarget = null,
                 timeDelayUnlockAt = unlockAt,
-                timeDelayTarget = action.identifier
+                timeDelayTarget = targetId
             )
         }
     }
 
     fun cancelTimeDelay(context: android.content.Context) {
-        PGuardAccessibilityService.clearTimeDelay(context)
+        BlockingPreferences.clearTimeDelay(context)
         _uiState.update {
             it.copy(
                 timeDelayUnlockAt = 0L,
@@ -652,91 +670,132 @@ class BlockingViewModel(
         _uiState.update { it.copy(timeDelayConfirmTarget = null) }
     }
 
-    fun onFriendApprovalSuccess(context: android.content.Context) {
-        val action = _uiState.value.friendApprovalTarget
-        _uiState.update { it.copy(friendApprovalTarget = null, devApprovalCode = null) }
-        if (action != null) {
-            executeProtectedAction(action, context)
-        }
-    }
-
     fun verifyFriendApprovalCode(enteredCode: String, context: android.content.Context) {
         val action = _uiState.value.friendApprovalTarget ?: return
-        val expected = _uiState.value.devApprovalCode
+        if (_uiState.value.isVerifyingUnlockCode) return
 
-        if (!expected.isNullOrBlank() && enteredCode.trim() != expected.trim()) {
-            _uiState.update {
-                it.copy(
-                    infoDialog = InfoDialogState(
-                        title = "Invalid Code",
-                        message = "The 6-digit approval code is incorrect. Please check the code sent to your partner."
-                    )
-                )
-            }
+        val trimmed = enteredCode.trim()
+        if (trimmed.length != 6) {
+            _uiState.update { it.copy(unlockCodeError = "Please enter the 6-digit approval code.") }
             return
         }
 
-        _uiState.update { it.copy(friendApprovalTarget = null, devApprovalCode = null) }
-        executeProtectedAction(action, context)
+        _uiState.update { it.copy(isVerifyingUnlockCode = true, unlockCodeError = null) }
+        viewModelScope.launch {
+            accountabilityRepository.verifyUnlockCode(trimmed).fold(
+                onSuccess = {
+                    _uiState.update {
+                        it.copy(
+                            friendApprovalTarget = null,
+                            isVerifyingUnlockCode = false,
+                            unlockCodeError = null,
+                            unlockRequestError = null
+                        )
+                    }
+                    executeProtectedAction(action, context)
+                },
+                onFailure = { err ->
+                    _uiState.update {
+                        it.copy(
+                            isVerifyingUnlockCode = false,
+                            unlockCodeError = err.message ?: "Verification failed. Please check the code and connection."
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun verifyExternalUnlockCode(
+        enteredCode: String,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        if (_uiState.value.isVerifyingUnlockCode) return
+
+        val trimmed = enteredCode.trim()
+        if (trimmed.length != 6) {
+            val msg = "Please enter the 6-digit approval code."
+            _uiState.update { it.copy(unlockCodeError = msg) }
+            onError(msg)
+            return
+        }
+
+        _uiState.update { it.copy(isVerifyingUnlockCode = true, unlockCodeError = null) }
+        viewModelScope.launch {
+            accountabilityRepository.verifyUnlockCode(trimmed).fold(
+                onSuccess = {
+                    _uiState.update {
+                        it.copy(
+                            isVerifyingUnlockCode = false,
+                            unlockCodeError = null,
+                            unlockRequestError = null
+                        )
+                    }
+                    onSuccess()
+                },
+                onFailure = { err ->
+                    val msg = err.message ?: "Verification failed. Please check the code and connection."
+                    _uiState.update {
+                        it.copy(
+                            isVerifyingUnlockCode = false,
+                            unlockCodeError = msg
+                        )
+                    }
+                    onError(msg)
+                }
+            )
+        }
+    }
+
+    fun clearUnlockErrors() {
+        _uiState.update { it.copy(unlockCodeError = null, unlockRequestError = null, isVerifyingUnlockCode = false) }
     }
 
     fun dismissFriendApproval() {
-        _uiState.update { it.copy(friendApprovalTarget = null, devApprovalCode = null) }
+        _uiState.update {
+            it.copy(
+                friendApprovalTarget = null,
+                isVerifyingUnlockCode = false,
+                unlockCodeError = null,
+                unlockRequestError = null
+            )
+        }
     }
 
     fun requestPartnerApprovalCode(featureName: String) {
+        _uiState.update { it.copy(unlockRequestError = null, unlockCodeError = null) }
         viewModelScope.launch {
-            accountabilityRepository.requestUnlockCode(featureName).onSuccess { res ->
-                android.util.Log.d("BlockingViewModel", "Unlock approval email requested. Code generated: ${res.code}")
-                _uiState.update { it.copy(devApprovalCode = res.code) }
-            }.onFailure { err ->
+            accountabilityRepository.requestUnlockCode(featureName).onFailure { err ->
                 android.util.Log.w("BlockingViewModel", "Failed to dispatch unlock request: ${err.message}")
+                _uiState.update {
+                    it.copy(unlockRequestError = err.message ?: "Could not reach server")
+                }
             }
         }
     }
 
     fun executeToggle(toggle: BlockingToggle, enabled: Boolean, context: android.content.Context) {
+        BlockingPreferences.ensureContext(context)
         when (toggle) {
-            BlockingToggle.ADULT_CONTENT -> {
-                PGuardAccessibilityService.saveSettings(context, adult = enabled)
-                setAdultBlocking(enabled)
-            }
-            BlockingToggle.SHORTS -> {
-                PGuardAccessibilityService.saveSettings(context, shorts = enabled)
-                setShortsBlocking(enabled)
-            }
-            BlockingToggle.WHATSAPP_CHANNELS -> {
-                PGuardAccessibilityService.saveSettings(context, whatsapp = enabled)
-                setWhatsAppChannelsBlocking(enabled)
-            }
-            BlockingToggle.INSTAGRAM_REELS -> {
-                PGuardAccessibilityService.saveSettings(context, instagramReels = enabled)
-                setInstagramReelsBlocking(enabled)
-            }
-            BlockingToggle.TIKTOK -> {
-                PGuardAccessibilityService.saveSettings(context, tiktok = enabled)
-                setTikTokBlocking(enabled)
-            }
+            BlockingToggle.ADULT_CONTENT -> setAdultBlocking(enabled)
+            BlockingToggle.SHORTS -> setShortsBlocking(enabled)
+            BlockingToggle.WHATSAPP_CHANNELS -> setWhatsAppChannelsBlocking(enabled)
+            BlockingToggle.INSTAGRAM_REELS -> setInstagramReelsBlocking(enabled)
+            BlockingToggle.TIKTOK -> setTikTokBlocking(enabled)
             BlockingToggle.UNINSTALL_PROTECTION -> {
-                PGuardAccessibilityService.saveSettings(context, uninstall = enabled)
                 setUninstallProtection(enabled)
                 if (!enabled) {
                     DeviceAdminManager.deactivateDeviceAdmin(context)
                 }
             }
-            BlockingToggle.UNSUPPORTED_BROWSERS -> {
-                PGuardAccessibilityService.saveSettings(context, unsupportedBrowsers = enabled)
-                setUnsupportedBrowsersBlocking(enabled)
-            }
-            BlockingToggle.NEW_INSTALLED_APPS -> {
-                PGuardAccessibilityService.saveSettings(context, newInstalledApps = enabled)
-                setNewlyInstalledAppsBlocking(enabled)
-            }
+            BlockingToggle.UNSUPPORTED_BROWSERS -> setUnsupportedBrowsersBlocking(enabled)
+            BlockingToggle.NEW_INSTALLED_APPS -> setNewlyInstalledAppsBlocking(enabled)
         }
     }
 
-    private fun syncSettingsToAccessibilityService(settings: UserSettingsDto) {
-        PGuardAccessibilityService.saveSettings(
+    private fun syncSettingsToAccessibilityService(settings: UserSettingsDto, markDirty: Boolean = false) {
+        BlockingPreferences.saveSettings(
             adult = settings.blockAdultContent,
             shorts = settings.blockShorts,
             whatsapp = settings.blockWhatsAppChannels,
@@ -747,7 +806,8 @@ class BlockingViewModel(
             newInstalledApps = settings.blockNewlyInstalledApps,
             message = settings.blockedScreenMessage,
             countdown = settings.blockedScreenCountdown,
-            redirect = settings.redirectUrl
+            redirect = settings.redirectUrl,
+            markDirty = markDirty
         )
     }
 
@@ -766,7 +826,9 @@ class BlockingViewModel(
             redirectUrl = settings.redirectUrl
         )
         viewModelScope.launch {
-            settingsRepository.updateSettings(request).onFailure { err ->
+            settingsRepository.updateSettings(request).onSuccess {
+                BlockingPreferences.markLocalDirty(null, false)
+            }.onFailure { err ->
                 android.util.Log.w("BlockingViewModel", "Failed to sync local protections to server: ${err.message}")
             }
         }

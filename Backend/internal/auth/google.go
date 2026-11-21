@@ -79,6 +79,9 @@ func (v *GoogleVerifier) VerifyToken(ctx context.Context, rawToken string) (*Goo
 	var err error
 
 	if len(v.allowedClientIDs) == 0 {
+		if !v.devMockAuth {
+			return nil, fmt.Errorf("%w: GOOGLE_CLIENT_IDS is not configured", ErrInvalidGoogleToken)
+		}
 		payload, err = idtoken.Validate(ctx, rawToken, "")
 		if err != nil {
 			return nil, fmt.Errorf("%w: %v", ErrInvalidGoogleToken, err)
@@ -95,6 +98,11 @@ func (v *GoogleVerifier) VerifyToken(ctx context.Context, rawToken string) (*Goo
 		if !valid {
 			return nil, fmt.Errorf("%w: token audience does not match allowed client IDs", ErrInvalidGoogleToken)
 		}
+	}
+
+	emailVerified, _ := payload.Claims["email_verified"].(bool)
+	if !emailVerified {
+		return nil, fmt.Errorf("%w: google email is not verified", ErrInvalidGoogleToken)
 	}
 
 	email, _ := payload.Claims["email"].(string)

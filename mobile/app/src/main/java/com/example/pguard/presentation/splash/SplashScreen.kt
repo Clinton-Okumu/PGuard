@@ -1,5 +1,6 @@
 package com.example.pguard.presentation.splash
 
+import android.provider.Settings
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -14,80 +15,109 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.pguard.R
-import com.example.pguard.presentation.theme.CoralPrimary
+import com.example.pguard.presentation.theme.PGuardTheme
+import com.example.pguard.presentation.theme.pguardColors
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 @Composable
 fun SplashScreen(
+    isReady: Boolean = true,
+    isProtectionActive: Boolean = true,
     onSplashFinished: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // 1. Globe entrance
+    val context = LocalContext.current
+    val currentIsReady by rememberUpdatedState(isReady)
+    val currentOnSplashFinished by rememberUpdatedState(onSplashFinished)
+
     val globeScale = remember { Animatable(0.75f) }
     val globeAlpha = remember { Animatable(0f) }
 
-    // 2. Shield Snap entrance
     val shieldScale = remember { Animatable(0.35f) }
     val shieldAlpha = remember { Animatable(0f) }
 
-    // 3. Radar ping / firewall pulse
     val radarScale = remember { Animatable(0.9f) }
     val radarAlpha = remember { Animatable(0f) }
 
-    // 4. Status Dot illumination
     val statusDotScale = remember { Animatable(0f) }
     val statusDotGlowAlpha = remember { Animatable(0f) }
 
-    // 5. Staggered typography
     val titleAlpha = remember { Animatable(0f) }
     val titleOffsetY = remember { Animatable(14f) }
     val subtitleAlpha = remember { Animatable(0f) }
     val subtitleOffsetY = remember { Animatable(10f) }
     val footerAlpha = remember { Animatable(0f) }
 
-    // 6. Smooth exit
     val screenExitAlpha = remember { Animatable(1f) }
 
     LaunchedEffect(Unit) {
-        // --- Stage 1: Globe fades and scales in (0ms - 200ms) ---
-        launch {
-            globeAlpha.animateTo(1f, tween(200, easing = FastOutSlowInEasing))
-        }
-        launch {
-            globeScale.animateTo(1f, tween(220, easing = FastOutSlowInEasing))
+        val animationsDisabled = try {
+            Settings.Global.getFloat(
+                context.contentResolver,
+                Settings.Global.ANIMATOR_DURATION_SCALE,
+                1f
+            ) == 0f
+        } catch (_: Exception) {
+            false
         }
 
+        if (animationsDisabled) {
+            globeScale.snapTo(1f)
+            globeAlpha.snapTo(1f)
+            shieldScale.snapTo(1f)
+            shieldAlpha.snapTo(1f)
+            radarAlpha.snapTo(0f)
+            statusDotScale.snapTo(1f)
+            statusDotGlowAlpha.snapTo(0f)
+            titleAlpha.snapTo(1f)
+            titleOffsetY.snapTo(0f)
+            subtitleAlpha.snapTo(1f)
+            subtitleOffsetY.snapTo(0f)
+            footerAlpha.snapTo(1f)
+
+            if (!currentIsReady) {
+                snapshotFlow { currentIsReady }.first { it }
+            }
+            currentOnSplashFinished()
+            return@LaunchedEffect
+        }
+
+        // Stage 1: Globe fades and scales in
+        launch { globeAlpha.animateTo(1f, tween(200, easing = FastOutSlowInEasing)) }
+        launch { globeScale.animateTo(1f, tween(220, easing = FastOutSlowInEasing)) }
         delay(160)
 
-        // --- Stage 2: The Shield Snap with bouncy spring physics (160ms - 340ms) ---
-        launch {
-            shieldAlpha.animateTo(1f, tween(140, easing = FastOutSlowInEasing))
-        }
+        // Stage 2: Shield snap with bouncy spring physics
+        launch { shieldAlpha.animateTo(1f, tween(140, easing = FastOutSlowInEasing)) }
         launch {
             shieldScale.animateTo(
                 targetValue = 1f,
@@ -97,21 +127,15 @@ fun SplashScreen(
                 )
             )
         }
-
         delay(120)
 
-        // --- Stage 3: Radar Ping & Green Status Dot pop (280ms - 650ms) ---
+        // Stage 3: Radar ping & status dot pop
         launch {
             radarAlpha.snapTo(0.65f)
             radarScale.snapTo(0.9f)
-            launch {
-                radarScale.animateTo(1.6f, tween(420, easing = FastOutSlowInEasing))
-            }
-            launch {
-                radarAlpha.animateTo(0f, tween(420, easing = FastOutSlowInEasing))
-            }
+            launch { radarScale.animateTo(1.6f, tween(420, easing = FastOutSlowInEasing)) }
+            launch { radarAlpha.animateTo(0f, tween(420, easing = FastOutSlowInEasing)) }
         }
-
         launch {
             statusDotGlowAlpha.snapTo(0.7f)
             launch {
@@ -123,50 +147,39 @@ fun SplashScreen(
                     )
                 )
             }
-            launch {
-                statusDotGlowAlpha.animateTo(0f, tween(350, easing = FastOutSlowInEasing))
-            }
+            launch { statusDotGlowAlpha.animateTo(0f, tween(350, easing = FastOutSlowInEasing)) }
         }
-
         delay(100)
 
-        // --- Stage 4: Staggered Brand Text Reveal (~380ms - 620ms) ---
-        launch {
-            titleAlpha.animateTo(1f, tween(240, easing = FastOutSlowInEasing))
-        }
-        launch {
-            titleOffsetY.animateTo(0f, tween(240, easing = FastOutSlowInEasing))
-        }
-
+        // Stage 4: Staggered brand text reveal
+        launch { titleAlpha.animateTo(1f, tween(240, easing = FastOutSlowInEasing)) }
+        launch { titleOffsetY.animateTo(0f, tween(240, easing = FastOutSlowInEasing)) }
         delay(80)
+        launch { subtitleAlpha.animateTo(1f, tween(240, easing = FastOutSlowInEasing)) }
+        launch { subtitleOffsetY.animateTo(0f, tween(240, easing = FastOutSlowInEasing)) }
+        launch { footerAlpha.animateTo(1f, tween(280, easing = FastOutSlowInEasing)) }
 
-        launch {
-            subtitleAlpha.animateTo(1f, tween(240, easing = FastOutSlowInEasing))
-        }
-        launch {
-            subtitleOffsetY.animateTo(0f, tween(240, easing = FastOutSlowInEasing))
-        }
-
-        launch {
-            footerAlpha.animateTo(1f, tween(280, easing = FastOutSlowInEasing))
-        }
-
-        // --- Stage 5: Hold briefly for brand perception (Total active: ~780ms) ---
+        // Stage 5: Brief hold + wait until initial auth state has loaded
         delay(320)
+        if (!currentIsReady) {
+            snapshotFlow { currentIsReady }.first { it }
+        }
 
-        // --- Stage 6: Snappy, seamless exit transition (780ms - 940ms) ---
+        // Stage 6: Exit fade
         screenExitAlpha.animateTo(0f, tween(160, easing = FastOutSlowInEasing))
-
-        onSplashFinished()
+        currentOnSplashFinished()
     }
+
+    val primary = MaterialTheme.colorScheme.primary
+    val statusColor = if (isProtectionActive) MaterialTheme.pguardColors.success else MaterialTheme.pguardColors.gold
+    val statusText = if (isProtectionActive) "Always-On Content Shield" else "Shield Inactive"
 
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFF121212))
-            .alpha(screenExitAlpha.value)
+            .background(MaterialTheme.colorScheme.background)
+            .graphicsLayer { alpha = screenExitAlpha.value }
     ) {
-        // Centered Emblem and Typography
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
@@ -176,159 +189,165 @@ fun SplashScreen(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier.size(140.dp)
             ) {
-                // Outward Radar Ping / Active Firewall Pulse
-                if (radarAlpha.value > 0f) {
-                    Box(
-                        modifier = Modifier
-                            .size(112.dp)
-                            .scale(radarScale.value)
-                            .background(
-                                Brush.radialGradient(
-                                    colors = listOf(
-                                        CoralPrimary.copy(alpha = radarAlpha.value),
-                                        CoralPrimary.copy(alpha = radarAlpha.value * 0.4f),
-                                        Color.Transparent
-                                    )
-                                ),
-                                shape = CircleShape
-                            )
-                    )
-                }
+                Box(
+                    modifier = Modifier
+                        .size(112.dp)
+                        .drawBehind {
+                            val currentAlpha = radarAlpha.value
+                            if (currentAlpha > 0f) {
+                                val radius = (size.minDimension / 2f) * radarScale.value
+                                drawCircle(
+                                    brush = Brush.radialGradient(
+                                        colors = listOf(
+                                            primary.copy(alpha = currentAlpha),
+                                            primary.copy(alpha = currentAlpha * 0.4f),
+                                            Color.Transparent
+                                        ),
+                                        center = center,
+                                        radius = radius.coerceAtLeast(1f)
+                                    ),
+                                    radius = radius
+                                )
+                            }
+                        }
+                )
 
-                // Ambient soft shadow glow behind squircle
                 Box(
                     modifier = Modifier
                         .size(108.dp)
                         .shadow(
                             elevation = 20.dp,
-                            shape = RoundedCornerShape(26.dp),
-                            spotColor = CoralPrimary,
-                            ambientColor = CoralPrimary
+                            shape = MaterialTheme.shapes.extraLarge,
+                            spotColor = primary,
+                            ambientColor = primary
                         )
                 )
 
-                // Branded Squircle Container with Gradient
+                // Flat primary fill matches the cutout mask in ic_pguard_shield_only without gradient seams
                 Box(
                     modifier = Modifier
                         .size(108.dp)
-                        .clip(RoundedCornerShape(26.dp))
-                        .background(
-                            Brush.verticalGradient(
-                                colors = listOf(
-                                    CoralPrimary,
-                                    Color(0xFFE64A19)
-                                )
-                            )
-                        ),
+                        .clip(MaterialTheme.shapes.extraLarge)
+                        .background(primary),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Layer 1: Globe (scales and fades in first)
                     Image(
                         painter = painterResource(id = R.drawable.ic_pguard_globe_only),
                         contentDescription = null,
                         modifier = Modifier
                             .size(72.dp)
-                            .scale(globeScale.value)
-                            .alpha(globeAlpha.value)
+                            .graphicsLayer {
+                                scaleX = globeScale.value
+                                scaleY = globeScale.value
+                                alpha = globeAlpha.value
+                            }
                     )
 
-                    // Layer 2: The Shield Snap (snaps in over globe with spring bounce and clean cutout mask)
                     Image(
                         painter = painterResource(id = R.drawable.ic_pguard_shield_only),
                         contentDescription = "PGuard Shield",
                         modifier = Modifier
                             .size(72.dp)
-                            .scale(shieldScale.value)
-                            .alpha(shieldAlpha.value)
+                            .graphicsLayer {
+                                scaleX = shieldScale.value
+                                scaleY = shieldScale.value
+                                alpha = shieldAlpha.value
+                            }
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(24.dp))
 
-            // Brand Title ("PGuard")
             Text(
                 text = "PGuard",
-                style = MaterialTheme.typography.headlineLarge.copy(
-                    fontSize = 32.sp,
-                    letterSpacing = 1.2.sp
-                ),
-                color = Color.White,
-                fontWeight = FontWeight.ExtraBold,
-                modifier = Modifier
-                    .offset(y = titleOffsetY.value.dp)
-                    .alpha(titleAlpha.value)
+                style = MaterialTheme.typography.headlineLarge.copy(letterSpacing = 1.2.sp),
+                color = MaterialTheme.colorScheme.onBackground,
+                modifier = Modifier.graphicsLayer {
+                    translationY = titleOffsetY.value * density
+                    alpha = titleAlpha.value
+                }
             )
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Pill Badge with Illuminating Green Status Dot
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
-                    .offset(y = subtitleOffsetY.value.dp)
-                    .alpha(subtitleAlpha.value)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color.White.copy(alpha = 0.08f))
+                    .graphicsLayer {
+                        translationY = subtitleOffsetY.value * density
+                        alpha = subtitleAlpha.value
+                    }
+                    .clip(MaterialTheme.shapes.large)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     .padding(horizontal = 14.dp, vertical = 6.dp)
             ) {
                 Box(
                     contentAlignment = Alignment.Center,
-                    modifier = Modifier.size(14.dp)
-                ) {
-                    // Status dot pulse glow ring
-                    if (statusDotGlowAlpha.value > 0f) {
-                        Box(
-                            modifier = Modifier
-                                .size(14.dp)
-                                .background(
-                                    Color(0xFF4CAF50).copy(alpha = statusDotGlowAlpha.value),
-                                    CircleShape
+                    modifier = Modifier
+                        .size(14.dp)
+                        .drawBehind {
+                            val glowAlpha = statusDotGlowAlpha.value
+                            if (glowAlpha > 0f) {
+                                drawCircle(
+                                    color = statusColor.copy(alpha = glowAlpha),
+                                    radius = size.minDimension / 2f
                                 )
-                        )
-                    }
-                    // Status dot
+                            }
+                        }
+                ) {
                     Box(
                         modifier = Modifier
                             .size(7.dp)
-                            .scale(statusDotScale.value)
-                            .background(Color(0xFF4CAF50), CircleShape)
+                            .graphicsLayer {
+                                scaleX = statusDotScale.value
+                                scaleY = statusDotScale.value
+                            }
+                            .background(statusColor, CircleShape)
                     )
                 }
 
                 Text(
-                    text = "Always-On Content Shield",
+                    text = statusText,
                     style = MaterialTheme.typography.labelMedium,
-                    color = Color.White.copy(alpha = 0.88f),
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 12.5.sp
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             }
         }
 
-        // Bottom Security Watermark
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 34.dp)
-                .alpha(footerAlpha.value)
+                .navigationBarsPadding()
+                .padding(bottom = 24.dp)
+                .graphicsLayer { alpha = footerAlpha.value }
         ) {
             Icon(
                 painter = painterResource(id = R.drawable.ic_feature_shield),
                 contentDescription = null,
-                tint = CoralPrimary.copy(alpha = 0.65f),
+                tint = primary.copy(alpha = 0.7f),
                 modifier = Modifier.size(13.dp)
             )
             Text(
                 text = "SECURE  •  PRIVATE  •  ACCOUNTABLE",
-                fontSize = 10.5.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White.copy(alpha = 0.45f),
-                letterSpacing = 1.4.sp
+                style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.4.sp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun SplashScreenPreview() {
+    PGuardTheme {
+        SplashScreen(
+            isReady = true,
+            isProtectionActive = true,
+            onSplashFinished = {}
+        )
     }
 }

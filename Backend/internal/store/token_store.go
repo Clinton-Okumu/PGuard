@@ -5,6 +5,12 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+var (
+	ErrInvalidRefreshToken = errors.New("invalid or expired refresh token")
+	ErrRefreshTokenReused  = errors.New("refresh token reuse detected")
 )
 
 type RefreshToken struct {
@@ -21,6 +27,7 @@ type RefreshToken struct {
 type TokenStore interface {
 	CreateRefreshToken(userID uint, tokenHash string, deviceInfo string, expiresAt time.Time) (*RefreshToken, error)
 	GetValidRefreshToken(tokenHash string) (*RefreshToken, error)
+	RotateRefreshToken(oldTokenHash, newTokenHash, deviceInfo string, newExpiresAt time.Time) (*RefreshToken, error)
 	RevokeRefreshToken(tokenHash string) error
 	RevokeAllUserTokens(userID uint) error
 }
@@ -60,6 +67,73 @@ func (s *PostgresTokenStore) GetValidRefreshToken(tokenHash string) (*RefreshTok
 		return nil, err
 	}
 	return &token, nil
+}
+
+func (s *PostgresTokenStore) RotateRefreshToken(oldTokenHash, newTokenHash, deviceInfo string, newExpiresAt time.Time) (*RefreshToken, error) {
+	var newToken *RefreshToken
+	var domainErr error
+
+	txErr := s.db.Transaction(func(tx *gorm.DB) error {
+		var existing RefreshToken
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("token_hash = ?", oldTokenHash).
+			First(&existing).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				domainErr = ErrInvalidRefreshToken
+				return nil
+			}
+			return err
+		}
+
+		if existing.Revoked {
+			// Possible token theft/reuse: revoke all refresh tokens for this user and commit.
+			if err := tx.Model(&RefreshToken{}).
+				Where("user_id = ?", existing.UserID).
+				Update("revoked", true).Error; err != nil {
+				return err
+			}
+			domainErr = ErrRefreshTokenReused
+			return nil
+		}
+
+		if existing.ExpiresAt.Before(time.Now()) {
+			domainErr = ErrInvalidRefreshToken
+			return nil
+		}
+
+		if err := tx.Model(&RefreshToken{}).
+			Where("id = ?", existing.ID).
+			Update("revoked", true).Error; err != nil {
+			return err
+		}
+
+		resolvedDevice := deviceInfo
+		if resolvedDevice == "" {
+			resolvedDevice = existing.DeviceInfo
+		}
+
+		created := &RefreshToken{
+			UserID:     existing.UserID,
+			TokenHash:  newTokenHash,
+			DeviceInfo: resolvedDevice,
+			ExpiresAt:  newExpiresAt,
+			Revoked:    false,
+		}
+		if err := tx.Create(created).Error; err != nil {
+			return err
+		}
+		newToken = created
+		return nil
+	})
+
+	if txErr != nil {
+		return nil, txErr
+	}
+	if domainErr != nil {
+		return nil, domainErr
+	}
+	return newToken, nil
 }
 
 func (s *PostgresTokenStore) RevokeRefreshToken(tokenHash string) error {

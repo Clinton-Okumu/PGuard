@@ -5,7 +5,6 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
-import android.graphics.Rect
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
@@ -27,16 +26,11 @@ import com.example.pguard.R
 import java.util.Collections
 
 /**
- * Manages non-destructive UI state transitions when restricted content is detected:
+ * Manages system-level TYPE_ACCESSIBILITY_OVERLAY windows when restricted content,
+ * Focus Mode schedules, or emergency urge lockdowns are triggered.
  *
- * Tier 2: System-level overlay window attached via WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
- *         with true cross-window hardware Gaussian blur (FLAG_BLUR_BEHIND + blurBehindRadius) on Android 12+,
- *         and opaque frosted obsidian fallback on pre-Android 12 so content is NEVER see-through or transparent.
- *
- * Tier 1: Targeted container-level frosted blur overlay for feed items in supported native lists.
- *
- * Guaranteed cleanup: Synchronous immediate removal (removeViewImmediate), single active overlay enforcement,
- * and zero sticky ghost views.
+ * Applies cross-window hardware Gaussian blur on Android 12+ and an opaque frosted obsidian
+ * fallback on older versions so sensitive content is never visible behind the overlay.
  */
 class AccessibilityOverlayManager(private val service: AccessibilityService) {
 
@@ -49,18 +43,11 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
 
     private val windowManager = service.getSystemService(Context.WINDOW_SERVICE) as WindowManager
     private val mainHandler = Handler(Looper.getMainLooper())
-
     private val activeViews = Collections.synchronizedSet(mutableSetOf<View>())
-
     private var countdownRunnable: Runnable? = null
-    private var autoDismissRunnable: Runnable? = null
 
     @Volatile
     var isFullScreenShowing: Boolean = false
-        private set
-
-    @Volatile
-    var isContainerShowing: Boolean = false
         private set
 
     private fun isCrossWindowBlurSupported(): Boolean {
@@ -83,12 +70,6 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
         }
     }
 
-    /**
-     * Tier 2: Full-Screen Display Overlay Window.
-     * Features authentic hardware Gaussian blur (FLAG_BLUR_BEHIND + blurBehindRadius)
-     * on Android 12+, and solid frosted obsidian on pre-Android 12 so that sensitive
-     * content is NEVER see-through or transparent.
-     */
     fun showFullScreenOverlay(
         target: String,
         message: String = "This page is blocked.",
@@ -100,158 +81,52 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
     ) {
         runOnMainThread {
             try {
-                if (isFullScreenShowing) {
-                    Log.d(TAG, "Full-screen overlay already showing, ignoring duplicate call.")
-                    return@runOnMainThread
-                }
-
-                // Clean up ANY existing overlays immediately to prevent sticking
+                if (isFullScreenShowing) return@runOnMainThread
                 hideAllImmediate()
 
-                val root = object : FrameLayout(service) {
-                    init {
-                        isFocusable = true
-                        isFocusableInTouchMode = true
-                    }
-
-                    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-                        if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
-                            Log.i(TAG, "Back key intercepted in overlay, navigating back.")
-                            dismissFullScreenAndExecute(onGoBack)
-                            return true
-                        }
-                        return super.dispatchKeyEvent(event)
-                    }
-                }
-
-                val hasBlur = isCrossWindowBlurSupported()
-                // If device supports hardware cross-window blur: frosted translucent obsidian.
-                // If not supported: opaque solid obsidian so content is never visible through glass.
-                val bgColor = if (hasBlur) 0xDD0D0F14.toInt() else 0xFD0D0F14.toInt()
-                root.setBackgroundColor(bgColor)
-
-                val contentLayout = LinearLayout(service).apply {
-                    orientation = LinearLayout.VERTICAL
-                    gravity = Gravity.CENTER_HORIZONTAL
-                    setPadding(dpToPx(24f), dpToPx(32f), dpToPx(24f), dpToPx(32f))
-                }
-
-                val frameParams = FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT,
-                    FrameLayout.LayoutParams.WRAP_CONTENT,
-                    Gravity.CENTER
+                val root = createOverlayContainer(
+                    bgBlurColor = 0xDD0D0F14.toInt(),
+                    bgSolidColor = 0xFD0D0F14.toInt(),
+                    onBack = { dismissFullScreenAndExecute(onGoBack) }
                 )
-                root.addView(contentLayout, frameParams)
+                val contentLayout = createOverlayContentColumn()
+                root.addView(
+                    contentLayout,
+                    FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        Gravity.CENTER
+                    )
+                )
 
-                // 1. PGuard Squircle Brand Icon
-                val iconBox = FrameLayout(service).apply {
-                    val bg = GradientDrawable().apply {
-                        cornerRadius = dpToPx(20f).toFloat()
-                        setColor(COLOR_CORAL)
-                    }
-                    background = bg
-                }
-                val iconBoxParams = LinearLayout.LayoutParams(dpToPx(88f), dpToPx(88f)).apply {
-                    bottomMargin = dpToPx(20f)
-                }
+                addBrandHeader(
+                    contentLayout = contentLayout,
+                    iconRes = R.drawable.ic_pguard_globe_shield,
+                    boxSizeDp = 88f,
+                    iconSizeDp = 56f,
+                    cornerRadiusDp = 20f,
+                    boxBottomMarginDp = 20f,
+                    titleText = "Access Blocked",
+                    titleSizeSp = 22f,
+                    messageText = message,
+                    messageSizeSp = 14.5f,
+                    messageBottomMarginDp = 16f
+                )
 
-                val brandIcon = ImageView(service).apply {
-                    setImageResource(R.drawable.ic_pguard_globe_shield)
-                    scaleType = ImageView.ScaleType.FIT_CENTER
-                }
-                val brandIconParams = FrameLayout.LayoutParams(dpToPx(56f), dpToPx(56f), Gravity.CENTER)
-                iconBox.addView(brandIcon, brandIconParams)
-                contentLayout.addView(iconBox, iconBoxParams)
-
-                // 2. Title
-                val titleView = TextView(service).apply {
-                    text = "Access Blocked"
-                    setTextColor(Color.WHITE)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
-                    typeface = Typeface.DEFAULT_BOLD
-                    gravity = Gravity.CENTER
-                }
-                val titleParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    bottomMargin = dpToPx(8f)
-                }
-                contentLayout.addView(titleView, titleParams)
-
-                // 3. Subtitle / Message
-                val messageView = TextView(service).apply {
-                    text = message
-                    setTextColor(COLOR_TEXT_MUTED)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f)
-                    gravity = Gravity.CENTER
-                    setLineSpacing(dpToPx(2f).toFloat(), 1.1f)
-                }
-                val messageParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply {
-                    bottomMargin = dpToPx(16f)
-                }
-                contentLayout.addView(messageView, messageParams)
-
-                // 4. Blocked Target Chip
                 if (target.isNotBlank()) {
-                    val chipView = TextView(service).apply {
-                        text = target
-                        setTextColor(COLOR_CORAL)
-                        setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-                        typeface = Typeface.DEFAULT_BOLD
-                        gravity = Gravity.CENTER
-                        val chipBg = GradientDrawable().apply {
-                            cornerRadius = dpToPx(10f).toFloat()
-                            setColor(COLOR_CHIP_BG)
-                            setStroke(dpToPx(1f), 0x4DFF5252.toInt())
-                        }
-                        background = chipBg
-                        setPadding(dpToPx(14f), dpToPx(7f), dpToPx(14f), dpToPx(7f))
-                        maxLines = 2
-                    }
-                    val chipParams = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                    ).apply {
-                        bottomMargin = dpToPx(28f)
-                    }
-                    contentLayout.addView(chipView, chipParams)
+                    addTargetChip(contentLayout, target)
                 }
 
-                // 5. Prominent "Go Back" Action Button
                 var currentCountdown = if (countdownSeconds > 0) countdownSeconds else 0
-
-                val goBackButton = Button(service).apply {
-                    isClickable = true
-                    isFocusable = true
-                    isEnabled = true
-                    text = if (currentCountdown > 0) "Go Back ($currentCountdown s)" else "Go Back to Safety"
-                    setTextColor(Color.WHITE)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                    typeface = Typeface.DEFAULT_BOLD
-                    isAllCaps = false
-                    val btnBg = GradientDrawable().apply {
-                        cornerRadius = dpToPx(14f).toFloat()
-                        setColor(COLOR_CORAL)
-                    }
-                    background = btnBg
-                    setOnClickListener {
-                        Log.i(TAG, "User clicked 'Go Back' on overlay.")
-                        dismissFullScreenAndExecute(onGoBack)
-                    }
+                val goBackButton = createPrimaryButton(
+                    label = if (currentCountdown > 0) "Go Back ($currentCountdown s)" else "Go Back to Safety",
+                    widthFraction = 0.82f,
+                    bottomMarginDp = 12f
+                ) {
+                    dismissFullScreenAndExecute(onGoBack)
                 }
-                val btnParams = LinearLayout.LayoutParams(
-                    (service.resources.displayMetrics.widthPixels * 0.82f).toInt(),
-                    dpToPx(50f)
-                ).apply {
-                    bottomMargin = dpToPx(12f)
-                }
-                contentLayout.addView(goBackButton, btnParams)
+                contentLayout.addView(goBackButton.first, goBackButton.second)
 
-                // 6. Safe Redirect / Alternate Escape
                 if (redirectUrl.isNotBlank()) {
                     val redirectBtn = Button(service).apply {
                         text = "Open Safe Site: $redirectUrl"
@@ -259,34 +134,34 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                         setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                         typeface = Typeface.DEFAULT_BOLD
                         isAllCaps = false
-                        val secBg = GradientDrawable().apply {
+                        background = GradientDrawable().apply {
                             cornerRadius = dpToPx(12f).toFloat()
                             setColor(COLOR_CHIP_BG)
                             setStroke(dpToPx(1f), 0x33FFFFFF.toInt())
                         }
-                        background = secBg
                         setOnClickListener {
                             handleSafeRedirect(redirectUrl)
                             hideFullScreenOverlay()
                         }
                     }
-                    val redirectParams = LinearLayout.LayoutParams(
-                        (service.resources.displayMetrics.widthPixels * 0.82f).toInt(),
-                        dpToPx(44f)
+                    contentLayout.addView(
+                        redirectBtn,
+                        LinearLayout.LayoutParams(
+                            (service.resources.displayMetrics.widthPixels * 0.82f).toInt(),
+                            dpToPx(44f)
+                        )
                     )
-                    contentLayout.addView(redirectBtn, redirectParams)
                 }
 
-                // Countdown Timer Logic
                 if (currentCountdown > 0) {
+                    val buttonView = goBackButton.first
                     countdownRunnable = object : Runnable {
                         override fun run() {
                             currentCountdown--
                             if (currentCountdown > 0) {
-                                goBackButton.text = "Go Back ($currentCountdown s)"
+                                buttonView.text = "Go Back ($currentCountdown s)"
                                 mainHandler.postDelayed(this, 1000L)
                             } else {
-                                Log.i(TAG, "Countdown finished, automatically executing safe back navigation.")
                                 dismissFullScreenAndExecute(onGoBack)
                             }
                         }
@@ -294,39 +169,13 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                     mainHandler.postDelayed(countdownRunnable!!, 1000L)
                 }
 
-                val layoutParams = WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                    PixelFormat.TRANSLUCENT
-                )
-
-                // Apply Hardware Cross-Window Gaussian Blur on Android 12+
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    try {
-                        layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
-                        layoutParams.blurBehindRadius = dpToPx(40f)
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Could not set blurBehindRadius: ${e.message}")
-                    }
-                }
-
-                windowManager.addView(root, layoutParams)
-                activeViews.add(root)
-                isFullScreenShowing = true
-                Log.i(TAG, "Full-screen TYPE_ACCESSIBILITY_OVERLAY rendered successfully with blur.")
+                attachFullScreenView(root)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to display full-screen accessibility overlay: ${e.message}", e)
             }
         }
     }
 
-    /**
-     * Focus Mode Overlay Window:
-     * Displayed when a user opens a restricted app during a scheduled Focus Mode session.
-     */
     fun showFocusOverlay(
         appName: String,
         scheduleInfo: String,
@@ -337,150 +186,54 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
         runOnMainThread {
             try {
                 if (isFullScreenShowing) return@runOnMainThread
-
                 hideAllImmediate()
 
-                val root = object : FrameLayout(service) {
-                    init {
-                        isFocusable = true
-                        isFocusableInTouchMode = true
-                    }
-
-                    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-                        if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
-                            dismissFullScreenAndExecute(onGoHome)
-                            return true
-                        }
-                        return super.dispatchKeyEvent(event)
-                    }
-                }
-
-                val hasBlur = isCrossWindowBlurSupported()
-                val bgColor = if (hasBlur) 0xDD0D0F14.toInt() else 0xFD0D0F14.toInt()
-                root.setBackgroundColor(bgColor)
-
-                val contentLayout = LinearLayout(service).apply {
-                    orientation = LinearLayout.VERTICAL
-                    gravity = Gravity.CENTER_HORIZONTAL
-                    setPadding(dpToPx(24f), dpToPx(32f), dpToPx(24f), dpToPx(32f))
-                }
-
+                val root = createOverlayContainer(
+                    bgBlurColor = 0xDD0D0F14.toInt(),
+                    bgSolidColor = 0xFD0D0F14.toInt(),
+                    onBack = { dismissFullScreenAndExecute(onGoHome) }
+                )
+                val contentLayout = createOverlayContentColumn()
                 root.addView(
                     contentLayout,
-                    FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
+                    FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        Gravity.CENTER
+                    )
                 )
 
-                // 1. Focus Mode Icon Box
-                val iconBox = FrameLayout(service).apply {
-                    val bg = GradientDrawable().apply {
-                        cornerRadius = dpToPx(20f).toFloat()
-                        setColor(COLOR_CORAL)
-                    }
-                    background = bg
-                }
-                val iconBoxParams = LinearLayout.LayoutParams(dpToPx(88f), dpToPx(88f)).apply {
-                    bottomMargin = dpToPx(20f)
-                }
-                val focusIcon = ImageView(service).apply {
-                    setImageResource(R.drawable.ic_focus_mode)
-                    scaleType = ImageView.ScaleType.FIT_CENTER
-                }
-                iconBox.addView(focusIcon, FrameLayout.LayoutParams(dpToPx(52f), dpToPx(52f), Gravity.CENTER))
-                contentLayout.addView(iconBox, iconBoxParams)
-
-                // 2. Title
-                val titleView = TextView(service).apply {
-                    text = "Focus Mode Active"
-                    setTextColor(Color.WHITE)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 22f)
-                    typeface = Typeface.DEFAULT_BOLD
-                    gravity = Gravity.CENTER
-                }
-                contentLayout.addView(titleView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    bottomMargin = dpToPx(8f)
-                })
-
-                // 3. Message
-                val messageView = TextView(service).apply {
-                    text = "This app is blocked during your scheduled focus time ($scheduleInfo). Stay focused on what matters."
-                    setTextColor(COLOR_TEXT_MUTED)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f)
-                    gravity = Gravity.CENTER
-                    setLineSpacing(dpToPx(2f).toFloat(), 1.1f)
-                }
-                contentLayout.addView(messageView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    bottomMargin = dpToPx(16f)
-                })
-
-                // 4. App Chip
-                val chipView = TextView(service).apply {
-                    text = appName
-                    setTextColor(COLOR_CORAL)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
-                    typeface = Typeface.DEFAULT_BOLD
-                    gravity = Gravity.CENTER
-                    val chipBg = GradientDrawable().apply {
-                        cornerRadius = dpToPx(10f).toFloat()
-                        setColor(COLOR_CHIP_BG)
-                        setStroke(dpToPx(1f), 0x4DFF5252.toInt())
-                    }
-                    background = chipBg
-                    setPadding(dpToPx(14f), dpToPx(7f), dpToPx(14f), dpToPx(7f))
-                }
-                contentLayout.addView(chipView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    bottomMargin = dpToPx(28f)
-                })
-
-                // 5. Return to Home Button
-                val returnButton = Button(service).apply {
-                    text = "Return to Safety"
-                    setTextColor(Color.WHITE)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                    typeface = Typeface.DEFAULT_BOLD
-                    isAllCaps = false
-                    val btnBg = GradientDrawable().apply {
-                        cornerRadius = dpToPx(14f).toFloat()
-                        setColor(COLOR_CORAL)
-                    }
-                    background = btnBg
-                    setOnClickListener {
-                        dismissFullScreenAndExecute(onGoHome)
-                    }
-                }
-                contentLayout.addView(returnButton, LinearLayout.LayoutParams(
-                    (service.resources.displayMetrics.widthPixels * 0.82f).toInt(),
-                    dpToPx(50f)
-                ))
-
-                val layoutParams = WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                    PixelFormat.TRANSLUCENT
+                addBrandHeader(
+                    contentLayout = contentLayout,
+                    iconRes = R.drawable.ic_focus_mode,
+                    boxSizeDp = 88f,
+                    iconSizeDp = 52f,
+                    cornerRadiusDp = 20f,
+                    boxBottomMarginDp = 20f,
+                    titleText = "Focus Mode Active",
+                    titleSizeSp = 22f,
+                    messageText = "This app is blocked during your scheduled focus time ($scheduleInfo). Stay focused on what matters.",
+                    messageSizeSp = 14.5f,
+                    messageBottomMarginDp = 16f
                 )
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    try {
-                        layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
-                        layoutParams.blurBehindRadius = dpToPx(40f)
-                    } catch (_: Exception) {}
-                }
+                addTargetChip(contentLayout, appName)
 
-                windowManager.addView(root, layoutParams)
-                activeViews.add(root)
-                isFullScreenShowing = true
+                val returnButton = createPrimaryButton(
+                    label = "Return to Safety",
+                    widthFraction = 0.82f
+                ) {
+                    dismissFullScreenAndExecute(onGoHome)
+                }
+                contentLayout.addView(returnButton.first, returnButton.second)
+
+                attachFullScreenView(root)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to display focus overlay: ${e.message}")
             }
         }
     }
 
-    /**
-     * Emergency 2-Minute Urge Lockdown Overlay Window:
-     * Displayed when the user is undergoing the 2-minute urge protocol and locks the phone from use.
-     */
     fun showUrgeLockdownOverlay(
         appName: String,
         remainingSeconds: Int
@@ -488,236 +241,243 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
         runOnMainThread {
             try {
                 if (isFullScreenShowing) return@runOnMainThread
-
                 hideAllImmediate()
 
-                val root = object : FrameLayout(service) {
-                    init {
-                        isFocusable = true
-                        isFocusableInTouchMode = true
-                    }
-
-                    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-                        // Absorb back key to enforce lockdown
-                        if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
-                            return true
-                        }
-                        return super.dispatchKeyEvent(event)
-                    }
-                }
-
-                val hasBlur = isCrossWindowBlurSupported()
-                val bgColor = if (hasBlur) 0xEE0D0F14.toInt() else 0xFF0D0F14.toInt()
-                root.setBackgroundColor(bgColor)
-
-                val contentLayout = LinearLayout(service).apply {
-                    orientation = LinearLayout.VERTICAL
-                    gravity = Gravity.CENTER_HORIZONTAL
-                    setPadding(dpToPx(24f), dpToPx(32f), dpToPx(24f), dpToPx(32f))
-                }
-
+                val root = createOverlayContainer(
+                    bgBlurColor = 0xEE0D0F14.toInt(),
+                    bgSolidColor = 0xFF0D0F14.toInt(),
+                    onBack = null // Absorb back key during emergency urge lockdown
+                )
+                val contentLayout = createOverlayContentColumn()
                 root.addView(
                     contentLayout,
-                    FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
+                    FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.MATCH_PARENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        Gravity.CENTER
+                    )
                 )
 
-                // 1. Lockdown Icon Box
-                val iconBox = FrameLayout(service).apply {
-                    val bg = GradientDrawable().apply {
-                        cornerRadius = dpToPx(22f).toFloat()
-                        setColor(COLOR_CORAL)
-                    }
-                    background = bg
-                }
-                val iconBoxParams = LinearLayout.LayoutParams(dpToPx(84f), dpToPx(84f)).apply {
-                    bottomMargin = dpToPx(18f)
-                }
-                val lockIcon = ImageView(service).apply {
-                    setImageResource(R.drawable.ic_feature_lock)
-                    scaleType = ImageView.ScaleType.FIT_CENTER
-                }
-                iconBox.addView(lockIcon, FrameLayout.LayoutParams(dpToPx(48f), dpToPx(48f), Gravity.CENTER))
-                contentLayout.addView(iconBox, iconBoxParams)
-
-                // 2. Title
-                val titleView = TextView(service).apply {
-                    text = "Phone Locked (2-Min Urge Protocol)"
-                    setTextColor(Color.WHITE)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
-                    typeface = Typeface.DEFAULT_BOLD
-                    gravity = Gravity.CENTER
-                }
-                contentLayout.addView(titleView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    bottomMargin = dpToPx(8f)
-                })
-
-                // 3. Message with Time Remaining
                 val mins = remainingSeconds / 60
                 val secs = remainingSeconds % 60
                 val timeStr = String.format("%d:%02d", mins, secs)
 
-                val messageView = TextView(service).apply {
-                    text = "Your phone is locked down from use for 2 minutes ($timeStr remaining) to break the impulsive craving loop. Breathe and stay strong."
-                    setTextColor(COLOR_TEXT_MUTED)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
-                    gravity = Gravity.CENTER
-                    setLineSpacing(dpToPx(2f).toFloat(), 1.15f)
-                }
-                contentLayout.addView(messageView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    bottomMargin = dpToPx(24f)
-                })
-
-                // 4. Return to Urge Protocol (PGuard) Button
-                val returnButton = Button(service).apply {
-                    text = "Return to Urge Breathing Protocol"
-                    setTextColor(Color.WHITE)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f)
-                    typeface = Typeface.DEFAULT_BOLD
-                    isAllCaps = false
-                    val btnBg = GradientDrawable().apply {
-                        cornerRadius = dpToPx(14f).toFloat()
-                        setColor(COLOR_CORAL)
-                    }
-                    background = btnBg
-                    setOnClickListener {
-                        dismissFullScreenAndExecute {
-                            try {
-                                val launchIntent = service.packageManager.getLaunchIntentForPackage(service.packageName)
-                                if (launchIntent != null) {
-                                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-                                    service.startActivity(launchIntent)
-                                }
-                            } catch (_: Exception) {}
-                        }
-                    }
-                }
-                contentLayout.addView(returnButton, LinearLayout.LayoutParams(
-                    (service.resources.displayMetrics.widthPixels * 0.84f).toInt(),
-                    dpToPx(50f)
-                ))
-
-                val layoutParams = WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                    PixelFormat.TRANSLUCENT
+                addBrandHeader(
+                    contentLayout = contentLayout,
+                    iconRes = R.drawable.ic_feature_lock,
+                    boxSizeDp = 84f,
+                    iconSizeDp = 48f,
+                    cornerRadiusDp = 22f,
+                    boxBottomMarginDp = 18f,
+                    titleText = "Phone Locked (2-Min Urge Protocol)",
+                    titleSizeSp = 20f,
+                    messageText = "Your phone is locked down from use for 2 minutes ($timeStr remaining) to break the impulsive craving loop. Breathe and stay strong.",
+                    messageSizeSp = 14f,
+                    messageBottomMarginDp = 24f
                 )
 
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    try {
-                        layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
-                        layoutParams.blurBehindRadius = dpToPx(40f)
-                    } catch (_: Exception) {}
+                val returnButton = createPrimaryButton(
+                    label = "Return to Urge Breathing Protocol",
+                    widthFraction = 0.84f
+                ) {
+                    dismissFullScreenAndExecute {
+                        try {
+                            val launchIntent = service.packageManager.getLaunchIntentForPackage(service.packageName)
+                            if (launchIntent != null) {
+                                launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                service.startActivity(launchIntent)
+                            }
+                        } catch (_: Exception) {}
+                    }
                 }
+                contentLayout.addView(returnButton.first, returnButton.second)
 
-                windowManager.addView(root, layoutParams)
-                activeViews.add(root)
-                isFullScreenShowing = true
-                Log.i(TAG, "Urge lockdown overlay displayed.")
+                attachFullScreenView(root)
+                Log.i(TAG, "Urge lockdown overlay displayed (intercepted $appName).")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to display urge lockdown overlay: ${e.message}")
             }
         }
     }
 
-    /**
-     * Tier 1: Container-Level Mask for Native Feed Items.
-     * Uses synchronous tracking and immediate cleanup to ensure it NEVER sticks on screen.
-     */
-    fun showContainerOverlay(bounds: Rect, label: String = "Restricted content") {
-        runOnMainThread {
-            try {
-                if (isFullScreenShowing) return@runOnMainThread
+    private fun createOverlayContainer(
+        bgBlurColor: Int,
+        bgSolidColor: Int,
+        onBack: (() -> Unit)?
+    ): FrameLayout {
+        val root = object : FrameLayout(service) {
+            init {
+                isFocusable = true
+                isFocusableInTouchMode = true
+            }
 
-                // Synchronously wipe all previous container views
-                hideContainerOverlayImmediate()
-
-                val displayMetrics = service.resources.displayMetrics
-                val cardWidth = displayMetrics.widthPixels
-                val cardHeight = bounds.height().coerceIn(dpToPx(140f), dpToPx(340f))
-
-                val containerRoot = FrameLayout(service).apply {
-                    val hasBlur = isCrossWindowBlurSupported()
-                    val bg = GradientDrawable().apply {
-                        cornerRadius = dpToPx(16f).toFloat()
-                        setColor(if (hasBlur) 0xEE121520.toInt() else 0xFA121520.toInt())
-                        setStroke(dpToPx(1.5f), COLOR_CORAL)
-                    }
-                    background = bg
+            override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                    onBack?.invoke()
+                    return true
                 }
-
-                val innerContent = LinearLayout(service).apply {
-                    orientation = LinearLayout.VERTICAL
-                    gravity = Gravity.CENTER
-                    setPadding(dpToPx(16f), dpToPx(16f), dpToPx(16f), dpToPx(16f))
-                }
-                containerRoot.addView(
-                    innerContent,
-                    FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
-                )
-
-                // Shield Icon
-                val icon = ImageView(service).apply {
-                    setImageResource(R.drawable.ic_pguard_shield)
-                    setColorFilter(COLOR_CORAL)
-                }
-                innerContent.addView(icon, LinearLayout.LayoutParams(dpToPx(32f), dpToPx(32f)).apply {
-                    bottomMargin = dpToPx(8f)
-                })
-
-                // Text details
-                val header = TextView(service).apply {
-                    text = "Restricted Content Hidden"
-                    setTextColor(Color.WHITE)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
-                    typeface = Typeface.DEFAULT_BOLD
-                    gravity = Gravity.CENTER
-                }
-                val subtext = TextView(service).apply {
-                    text = "$label • Scroll past to proceed"
-                    setTextColor(COLOR_TEXT_MUTED)
-                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f)
-                    gravity = Gravity.CENTER
-                }
-                innerContent.addView(header)
-                innerContent.addView(subtext)
-
-                val safeY = bounds.top.coerceIn(0, displayMetrics.heightPixels - cardHeight)
-
-                val layoutParams = WindowManager.LayoutParams(
-                    cardWidth,
-                    cardHeight,
-                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                            WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                    PixelFormat.TRANSLUCENT
-                ).apply {
-                    gravity = Gravity.TOP or Gravity.START
-                    x = 0
-                    y = safeY
-                }
-
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    try {
-                        layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
-                        layoutParams.blurBehindRadius = dpToPx(35f)
-                    } catch (_: Exception) {}
-                }
-
-                windowManager.addView(containerRoot, layoutParams)
-                activeViews.add(containerRoot)
-                isContainerShowing = true
-
-                // Auto-clear after 3 seconds so it never sticks
-                autoDismissRunnable = Runnable { hideContainerOverlay() }
-                mainHandler.postDelayed(autoDismissRunnable!!, 3000L)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to display container overlay: ${e.message}")
+                return super.dispatchKeyEvent(event)
             }
         }
+        root.setBackgroundColor(if (isCrossWindowBlurSupported()) bgBlurColor else bgSolidColor)
+        return root
+    }
+
+    private fun createOverlayContentColumn(): LinearLayout {
+        return LinearLayout(service).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dpToPx(24f), dpToPx(32f), dpToPx(24f), dpToPx(32f))
+        }
+    }
+
+    private fun addBrandHeader(
+        contentLayout: LinearLayout,
+        iconRes: Int,
+        boxSizeDp: Float,
+        iconSizeDp: Float,
+        cornerRadiusDp: Float,
+        boxBottomMarginDp: Float,
+        titleText: String,
+        titleSizeSp: Float,
+        messageText: String,
+        messageSizeSp: Float,
+        messageBottomMarginDp: Float
+    ) {
+        val iconBox = FrameLayout(service).apply {
+            background = GradientDrawable().apply {
+                cornerRadius = dpToPx(cornerRadiusDp).toFloat()
+                setColor(COLOR_CORAL)
+            }
+        }
+        val brandIcon = ImageView(service).apply {
+            setImageResource(iconRes)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+        }
+        iconBox.addView(
+            brandIcon,
+            FrameLayout.LayoutParams(dpToPx(iconSizeDp), dpToPx(iconSizeDp), Gravity.CENTER)
+        )
+        contentLayout.addView(
+            iconBox,
+            LinearLayout.LayoutParams(dpToPx(boxSizeDp), dpToPx(boxSizeDp)).apply {
+                bottomMargin = dpToPx(boxBottomMarginDp)
+            }
+        )
+
+        val titleView = TextView(service).apply {
+            text = titleText
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, titleSizeSp)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+        }
+        contentLayout.addView(
+            titleView,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(8f)
+            }
+        )
+
+        val messageView = TextView(service).apply {
+            text = messageText
+            setTextColor(COLOR_TEXT_MUTED)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, messageSizeSp)
+            gravity = Gravity.CENTER
+            setLineSpacing(dpToPx(2f).toFloat(), 1.15f)
+        }
+        contentLayout.addView(
+            messageView,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(messageBottomMarginDp)
+            }
+        )
+    }
+
+    private fun addTargetChip(contentLayout: LinearLayout, target: String) {
+        val chipView = TextView(service).apply {
+            text = target
+            setTextColor(COLOR_CORAL)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+            typeface = Typeface.DEFAULT_BOLD
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                cornerRadius = dpToPx(10f).toFloat()
+                setColor(COLOR_CHIP_BG)
+                setStroke(dpToPx(1f), 0x4DFF5252.toInt())
+            }
+            setPadding(dpToPx(14f), dpToPx(7f), dpToPx(14f), dpToPx(7f))
+            maxLines = 2
+        }
+        contentLayout.addView(
+            chipView,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dpToPx(28f)
+            }
+        )
+    }
+
+    private fun createPrimaryButton(
+        label: String,
+        widthFraction: Float,
+        bottomMarginDp: Float = 0f,
+        onClick: () -> Unit
+    ): Pair<Button, LinearLayout.LayoutParams> {
+        val button = Button(service).apply {
+            isClickable = true
+            isFocusable = true
+            isEnabled = true
+            text = label
+            setTextColor(Color.WHITE)
+            setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+            typeface = Typeface.DEFAULT_BOLD
+            isAllCaps = false
+            background = GradientDrawable().apply {
+                cornerRadius = dpToPx(14f).toFloat()
+                setColor(COLOR_CORAL)
+            }
+            setOnClickListener { onClick() }
+        }
+        val params = LinearLayout.LayoutParams(
+            (service.resources.displayMetrics.widthPixels * widthFraction).toInt(),
+            dpToPx(50f)
+        ).apply {
+            if (bottomMarginDp > 0f) {
+                bottomMargin = dpToPx(bottomMarginDp)
+            }
+        }
+        return button to params
+    }
+
+    private fun attachFullScreenView(root: View) {
+        val layoutParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
+                layoutParams.blurBehindRadius = dpToPx(40f)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not set blurBehindRadius: ${e.message}")
+            }
+        }
+        windowManager.addView(root, layoutParams)
+        activeViews.add(root)
+        isFullScreenShowing = true
     }
 
     fun hideFullScreenOverlay() {
@@ -729,29 +489,6 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
         }
     }
 
-    fun hideContainerOverlay() {
-        runOnMainThread {
-            hideContainerOverlayImmediate()
-        }
-    }
-
-    private fun hideContainerOverlayImmediate() {
-        autoDismissRunnable?.let { mainHandler.removeCallbacks(it) }
-        autoDismissRunnable = null
-
-        synchronized(activeViews) {
-            val iterator = activeViews.iterator()
-            while (iterator.hasNext()) {
-                val view = iterator.next()
-                if (!isFullScreenShowing || view.layoutParams.width != WindowManager.LayoutParams.MATCH_PARENT) {
-                    removeViewSafe(view)
-                    iterator.remove()
-                }
-            }
-        }
-        isContainerShowing = false
-    }
-
     fun hideAll() {
         runOnMainThread {
             hideAllImmediate()
@@ -761,8 +498,6 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
     private fun hideAllImmediate() {
         countdownRunnable?.let { mainHandler.removeCallbacks(it) }
         countdownRunnable = null
-        autoDismissRunnable?.let { mainHandler.removeCallbacks(it) }
-        autoDismissRunnable = null
 
         synchronized(activeViews) {
             val iterator = activeViews.iterator()
@@ -773,7 +508,6 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
             }
         }
         isFullScreenShowing = false
-        isContainerShowing = false
     }
 
     private fun removeViewSafe(view: View) {
@@ -797,12 +531,19 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
 
     private fun handleSafeRedirect(redirectUrl: String) {
         try {
-            val fullUrl = if (!redirectUrl.startsWith("http://") && !redirectUrl.startsWith("https://")) {
-                "https://$redirectUrl"
-            } else {
-                redirectUrl
+            val trimmed = redirectUrl.trim()
+            if (trimmed.isEmpty()) return
+            val fullUrl = when {
+                trimmed.startsWith("http://", ignoreCase = true) ||
+                    trimmed.startsWith("https://", ignoreCase = true) -> trimmed
+                trimmed.contains(":") -> return
+                else -> "https://$trimmed"
             }
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(fullUrl)).apply {
+            val parsed = Uri.parse(fullUrl)
+            val scheme = parsed.scheme?.lowercase()
+            if (scheme != "http" && scheme != "https") return
+
+            val intent = Intent(Intent.ACTION_VIEW, parsed).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             service.startActivity(intent)

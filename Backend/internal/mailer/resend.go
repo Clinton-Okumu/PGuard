@@ -5,13 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
 )
+
+const defaultResendAPIURL = "https://api.resend.com/emails"
 
 type Mailer interface {
 	SendEmail(ctx context.Context, to []string, subject, htmlBody, textBody string) (string, error)
@@ -21,11 +25,14 @@ type Mailer interface {
 }
 
 type ResendMailer struct {
-	apiKey        string
-	fromEmail     string
-	serverBaseUrl string
-	httpClient    *http.Client
-	logger        *log.Logger
+	apiKey               string
+	apiURL               string
+	fromEmail            string
+	serverBaseUrl        string
+	sandboxFallbackEmail string
+	devLogging           bool
+	httpClient           *http.Client
+	logger               *log.Logger
 }
 
 func NewResendMailer(logger *log.Logger) *ResendMailer {
@@ -37,13 +44,19 @@ func NewResendMailer(logger *log.Logger) *ResendMailer {
 
 	serverBaseUrl := strings.TrimRight(strings.TrimSpace(os.Getenv("SERVER_BASE_URL")), "/")
 	if serverBaseUrl == "" {
-		serverBaseUrl = "http://192.168.100.80:8080"
+		serverBaseUrl = "http://localhost:8080"
 	}
 
+	sandboxFallbackEmail := strings.TrimSpace(os.Getenv("RESEND_SANDBOX_FALLBACK_EMAIL"))
+	devLogging := strings.EqualFold(strings.TrimSpace(os.Getenv("DEV_MOCK_AUTH")), "true")
+
 	return &ResendMailer{
-		apiKey:        apiKey,
-		fromEmail:     fromEmail,
-		serverBaseUrl: serverBaseUrl,
+		apiKey:               apiKey,
+		apiURL:               defaultResendAPIURL,
+		fromEmail:            fromEmail,
+		serverBaseUrl:        serverBaseUrl,
+		sandboxFallbackEmail: sandboxFallbackEmail,
+		devLogging:           devLogging,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 		},
@@ -84,7 +97,12 @@ func (m *ResendMailer) SendEmail(ctx context.Context, to []string, subject, html
 		return "", fmt.Errorf("failed to marshal email payload: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.resend.com/emails", bytes.NewReader(reqBody))
+	endpoint := m.apiURL
+	if endpoint == "" {
+		endpoint = defaultResendAPIURL
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(reqBody))
 	if err != nil {
 		return "", fmt.Errorf("failed to create http request: %w", err)
 	}
@@ -106,11 +124,14 @@ func (m *ResendMailer) SendEmail(ctx context.Context, to []string, subject, html
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		m.logger.Printf("ERROR: Resend API responded with status %d: %s", resp.StatusCode, string(respBytes))
 
-		// If in Resend Sandbox and sending to an unverified email, forward to registered account email
-		if resp.StatusCode == 403 && strings.Contains(string(respBytes), "testing emails to your own email address") && len(to) > 0 && to[0] != "clintonomondiokumu@gmail.com" {
-			m.logger.Printf("⚠️ Resend sandbox fallback: redirecting email intended for %v to registered account (clintonomondiokumu@gmail.com)", to)
+		if resp.StatusCode == 403 &&
+			m.sandboxFallbackEmail != "" &&
+			strings.Contains(string(respBytes), "testing emails to your own email address") &&
+			len(to) > 0 &&
+			!strings.EqualFold(to[0], m.sandboxFallbackEmail) {
+			m.logger.Printf("⚠️ Resend sandbox fallback: redirecting email intended for %v to configured sandbox fallback", to)
 			fallbackSubject := fmt.Sprintf("[TESTING for %s] %s", strings.Join(to, ", "), subject)
-			return m.SendEmail(ctx, []string{"clintonomondiokumu@gmail.com"}, fallbackSubject, htmlBody, textBody)
+			return m.SendEmail(ctx, []string{m.sandboxFallbackEmail}, fallbackSubject, htmlBody, textBody)
 		}
 
 		return "", fmt.Errorf("resend API error (%d): %s", resp.StatusCode, string(respBytes))
@@ -127,16 +148,16 @@ func (m *ResendMailer) SendEmail(ctx context.Context, to []string, subject, html
 
 func (m *ResendMailer) SendPartnerInvite(ctx context.Context, partnerEmail, inviterEmail, inviteCode string) error {
 	subject := fmt.Sprintf("🛡️ PGuard: %s invited you as their Accountability Partner", inviterEmail)
-	acceptUrl := fmt.Sprintf("%s/api/v1/accountability/accept-web?code=%s", m.serverBaseUrl, inviteCode)
+	acceptUrl := fmt.Sprintf("%s/api/v1/accountability/accept-web?code=%s", m.serverBaseUrl, url.QueryEscape(inviteCode))
 
-	m.logger.Printf(`
-======================================================================
-🔗 ACCOUNTABILITY PARTNER INVITE CREATED
-👉 To:          %s
-👉 Invite Code: %s
-👉 One-Click Web Acceptance URL:
-   %s
-======================================================================`, partnerEmail, inviteCode, acceptUrl)
+	if m.devLogging {
+		m.logger.Printf("[DEV] Accountability partner invite created for %s (code=%s, url=%s)", partnerEmail, inviteCode, acceptUrl)
+	} else {
+		m.logger.Printf("INFO: Dispatching accountability partner invite email")
+	}
+
+	escapedInviter := html.EscapeString(inviterEmail)
+	escapedAcceptUrl := html.EscapeString(acceptUrl)
 
 	htmlBody := fmt.Sprintf(`
 <!DOCTYPE html>
@@ -160,7 +181,7 @@ func (m *ResendMailer) SendPartnerInvite(ctx context.Context, partnerEmail, invi
     <p>They have chosen you as their trusted <strong>Accountability Partner</strong> to support their journey.</p>
     
     <div style="text-align: center;">
-      <a href="%s" class="btn">Accept Partner Request</a>
+      <a href="%s" class="btn">Review &amp; Accept Partner Request</a>
     </div>
 
     <p style="font-size: 13px; color: #AAAAAA; line-height: 1.5; text-align: center;">
@@ -171,7 +192,7 @@ func (m *ResendMailer) SendPartnerInvite(ctx context.Context, partnerEmail, invi
   </div>
 </body>
 </html>
-`, inviterEmail, acceptUrl, inviterEmail)
+`, escapedInviter, escapedAcceptUrl, escapedInviter)
 
 	textBody := fmt.Sprintf("PGuard Accountability Request\n\n%s invited you as their Accountability Partner on PGuard.\n\nTo accept, click the link below:\n%s\n\nSent securely by PGuard.", inviterEmail, acceptUrl)
 
@@ -182,13 +203,15 @@ func (m *ResendMailer) SendPartnerInvite(ctx context.Context, partnerEmail, invi
 func (m *ResendMailer) SendUnlockRequest(ctx context.Context, partnerEmail, userEmail, featureName, approvalCode string) error {
 	subject := fmt.Sprintf("⚠️ PGuard Alert: %s requested to unlock %s", userEmail, featureName)
 
-	m.logger.Printf(`
-======================================================================
-🔑 UNLOCK APPROVAL CODE REQUESTED
-👉 Partner Email: %s
-👉 Feature:       %s
-👉 6-Digit Code:  %s
-======================================================================`, partnerEmail, featureName, approvalCode)
+	if m.devLogging {
+		m.logger.Printf("[DEV] Unlock approval code generated for feature=%s code=%s", featureName, approvalCode)
+	} else {
+		m.logger.Printf("INFO: Dispatching unlock approval email for feature=%s", featureName)
+	}
+
+	escapedUser := html.EscapeString(userEmail)
+	escapedFeature := html.EscapeString(featureName)
+	escapedCode := html.EscapeString(approvalCode)
 
 	htmlBody := fmt.Sprintf(`
 <!DOCTYPE html>
@@ -208,16 +231,16 @@ func (m *ResendMailer) SendUnlockRequest(ctx context.Context, partnerEmail, user
     <div class="header">⚠️ Protection Unlock Request</div>
     <p>Hello,</p>
     <p><strong>%s</strong> is attempting to turn off protection for: <strong>%s</strong>.</p>
-    <p>As their Accountability Partner, they need this 6-digit approval code to disable the block:</p>
+    <p>As their Accountability Partner, they need this 6-digit approval code to disable the block (valid for 10 minutes):</p>
     <div class="code-box">%s</div>
     <p style="font-size: 13px; color: #CCCCCC;">Only provide this code if you have spoken with them and both agree that turning off this shield is appropriate.</p>
     <div class="footer">PGuard Instant Security Alert</div>
   </div>
 </body>
 </html>
-`, userEmail, featureName, approvalCode)
+`, escapedUser, escapedFeature, escapedCode)
 
-	textBody := fmt.Sprintf("PGuard Protection Unlock Request\n\n%s requested to disable %s.\n\nApproval Code: %s\n\nOnly share this code if you agree.", userEmail, featureName, approvalCode)
+	textBody := fmt.Sprintf("PGuard Protection Unlock Request\n\n%s requested to disable %s.\n\nApproval Code (valid 10 minutes): %s\n\nOnly share this code if you agree.", userEmail, featureName, approvalCode)
 
 	_, err := m.SendEmail(ctx, []string{partnerEmail}, subject, htmlBody, textBody)
 	return err
@@ -225,6 +248,10 @@ func (m *ResendMailer) SendUnlockRequest(ctx context.Context, partnerEmail, user
 
 func (m *ResendMailer) SendSecurityAlert(ctx context.Context, partnerEmail, userEmail, eventType, details string) error {
 	subject := fmt.Sprintf("🚨 PGuard Security Alert: %s triggered on %s's device", eventType, userEmail)
+
+	escapedUser := html.EscapeString(userEmail)
+	escapedEvent := html.EscapeString(eventType)
+	escapedDetails := html.EscapeString(details)
 
 	htmlBody := fmt.Sprintf(`
 <!DOCTYPE html>
@@ -251,7 +278,7 @@ func (m *ResendMailer) SendSecurityAlert(ctx context.Context, partnerEmail, user
   </div>
 </body>
 </html>
-`, userEmail, eventType, details)
+`, escapedUser, escapedEvent, escapedDetails)
 
 	textBody := fmt.Sprintf("PGuard Security Alert\n\nUser: %s\nEvent: %s\nDetails: %s", userEmail, eventType, details)
 

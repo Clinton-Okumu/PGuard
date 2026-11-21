@@ -1,9 +1,9 @@
 package com.example.pguard.presentation.dashboard
 
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import com.example.pguard.R
 import com.example.pguard.core.network.model.UserSettingsDto
 import com.example.pguard.engine.accessibility.BrowserInspector
@@ -42,7 +42,7 @@ internal fun ContentBlockingSection(
                 )
             }
         )
-        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         ToggleSettingRow(
             title = "Block Youtube Shorts",
@@ -55,7 +55,7 @@ internal fun ContentBlockingSection(
                 )
             }
         )
-        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         ToggleSettingRow(
             title = "Block WhatsApp channels",
@@ -69,7 +69,7 @@ internal fun ContentBlockingSection(
                 )
             }
         )
-        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         ToggleSettingRow(
             title = "Block Instagram Reels",
@@ -82,7 +82,7 @@ internal fun ContentBlockingSection(
                 )
             }
         )
-        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         ToggleSettingRow(
             title = "Block TikTok",
@@ -121,7 +121,7 @@ internal fun AdvancedBlockingSection(
                 )
             }
         )
-        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         ToggleSettingRow(
             title = "Block unsupported browsers",
@@ -137,7 +137,7 @@ internal fun AdvancedBlockingSection(
                 )
             }
         )
-        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         ToggleSettingRow(
             title = "Block newly installed apps",
@@ -178,7 +178,7 @@ internal fun CustomizeBlockedScreenSection(
                 )
             }
         )
-        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         EditableSettingRow(
             title = "Blocked screen countdown",
@@ -192,7 +192,7 @@ internal fun CustomizeBlockedScreenSection(
                 )
             }
         )
-        HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         EditableSettingRow(
             title = "Redirect after closing (any URL)",

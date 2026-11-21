@@ -11,13 +11,10 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
@@ -34,20 +31,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.pguard.R
 import com.example.pguard.engine.accessibility.PGuardAccessibilityService
-import com.example.pguard.presentation.theme.CoralPrimary
 import com.example.pguard.presentation.theme.PGuardTheme
 
 internal data class PermissionAlerts(
@@ -176,7 +170,7 @@ fun BlockingScreen(
         onConfirmTimeDelay = { viewModel.onStartTimeDelay(context) },
         onCancelTimeDelay = { viewModel.cancelTimeDelay(context) },
         onDismissTimeDelayConfirm = viewModel::dismissTimeDelayConfirm,
-        onFriendApprovalSuccess = { viewModel.onFriendApprovalSuccess(context) },
+        onFriendApprovalSuccess = { },
         onVerifyFriendApprovalCode = { code -> viewModel.verifyFriendApprovalCode(code, context) },
         onDismissFriendApproval = viewModel::dismissFriendApproval,
         onRequestPartnerApproval = viewModel::requestPartnerApprovalCode,
@@ -211,8 +205,6 @@ internal fun BlockingScreenContent(
         state.accountabilityMode == AccountabilityMode.FRIEND && state.partner != null -> "Remove"
         else -> null
     }
-
-    val context = androidx.compose.ui.platform.LocalContext.current
 
     var showAccessibilityDialog by remember { mutableStateOf(false) }
     var showOverlayDialog by remember { mutableStateOf(false) }
@@ -325,13 +317,12 @@ internal fun BlockingScreenContent(
 
         ExtendedFloatingActionButton(
             onClick = callbacks.onFocusModeClick,
-            containerColor = CoralPrimary,
-            contentColor = Color.White,
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
             elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 6.dp),
-            shape = RoundedCornerShape(16.dp),
+            shape = MaterialTheme.shapes.medium,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .navigationBarsPadding()
                 .padding(end = 16.dp, bottom = 16.dp)
         ) {
             Icon(
@@ -342,8 +333,8 @@ internal fun BlockingScreenContent(
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = "Focus Mode",
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold
             )
         }
     }
@@ -461,7 +452,9 @@ private fun BlockingScreenDialogs(
             onRequestCode = { callbacks.onRequestPartnerApproval(featureTitle) },
             onSubmitCode = callbacks.onVerifyFriendApprovalCode,
             onDismiss = callbacks.onDismissFriendApproval,
-            devCode = state.devApprovalCode
+            isVerifying = state.isVerifyingUnlockCode,
+            errorMessage = state.unlockCodeError,
+            requestError = state.unlockRequestError
         )
     }
 
@@ -480,10 +473,10 @@ private fun readPermissionAlerts(context: Context): PermissionAlerts =
         overlayMissing = !Settings.canDrawOverlays(context)
     )
 
-@Preview(showBackground = true, backgroundColor = 0xFF121212)
+@Preview(showBackground = true)
 @Composable
 private fun BlockingScreenPreview() {
-    PGuardTheme(darkTheme = true) {
+    PGuardTheme {
         BlockingScreenContent(
             state = BlockingUiState(),
             alerts = PermissionAlerts(

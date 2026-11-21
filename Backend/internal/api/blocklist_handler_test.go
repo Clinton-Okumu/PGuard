@@ -270,6 +270,26 @@ func TestBlocklistHandler_HandleCreateBlocklistItem(t *testing.T) {
 
 		assert.Equal(t, http.StatusBadRequest, rr.Code)
 	})
+
+	t.Run("rejects bulk creation exceeding 200 items", func(t *testing.T) {
+		var items []blocklistPayload
+		for i := 0; i < 201; i++ {
+			items = append(items, blocklistPayload{
+				Type:  "keyword",
+				Value: fmt.Sprintf("kw%d", i),
+			})
+		}
+		raw, err := json.Marshal(map[string]any{"items": items})
+		require.NoError(t, err)
+
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/blocklist", strings.NewReader(string(raw)))
+		req = middleware.SetUser(req, user)
+		rr := httptest.NewRecorder()
+
+		handler.HandleCreateBlocklistItem(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
 }
 
 func TestBlocklistHandler_HandleToggleAndDelete(t *testing.T) {

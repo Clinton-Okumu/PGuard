@@ -3,6 +3,7 @@ package com.example.pguard.presentation.habits
 import android.content.Context
 import android.content.SharedPreferences
 import android.provider.Settings
+import com.example.pguard.core.common.runSuspendCatching
 import com.example.pguard.core.network.NetworkClient
 import com.example.pguard.engine.accessibility.PGuardAccessibilityService
 import kotlinx.serialization.Serializable
@@ -12,6 +13,7 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 data class DayConsistencyStatus(
     val dayLetter: String,
@@ -81,6 +83,12 @@ object HabitsManager {
     private const val KEY_CELEBRATED_MILESTONES = "celebrated_milestones_set"
     private const val KEY_LAST_STOIC_SHOWN_DATE = "last_stoic_shown_date"
     private const val KEY_PREFS_VERSION = "prefs_schema_version_v3"
+    private const val KEY_SYNCED_USER_ID = "synced_user_id"
+    private const val DAY_MS = 24L * 60L * 60L * 1000L
+
+    private val ISO_TIMESTAMP_REGEX = Regex(
+        """^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|([+-])(\d{2}):(\d{2}))$"""
+    )
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -139,6 +147,7 @@ object HabitsManager {
     }
 
     fun isAccessibilityServiceEnabled(context: Context): Boolean {
+        if (PGuardAccessibilityService.isRunning.value) return true
         return try {
             val enabledServices = Settings.Secure.getString(
                 context.contentResolver,
@@ -399,32 +408,127 @@ object HabitsManager {
 
     // --- BACKEND CALENDAR & STREAK SYNC ---
 
-    suspend fun syncCalendarWithBackend(context: Context) {
-        try {
+    internal fun parseIsoTimestampMillis(raw: String?): Long? {
+        val trimmed = raw?.trim() ?: return null
+        val match = ISO_TIMESTAMP_REGEX.matchEntire(trimmed) ?: return null
+        val year = match.groupValues[1].toIntOrNull() ?: return null
+        val month = match.groupValues[2].toIntOrNull() ?: return null
+        val day = match.groupValues[3].toIntOrNull() ?: return null
+        val hour = match.groupValues[4].toIntOrNull() ?: return null
+        val minute = match.groupValues[5].toIntOrNull() ?: return null
+        val second = match.groupValues[6].toIntOrNull() ?: return null
+        if (month !in 1..12 || day !in 1..31 || hour !in 0..23 || minute !in 0..59 || second !in 0..59) {
+            return null
+        }
+        val fraction = match.groupValues[7]
+        val millis = if (fraction.isEmpty()) 0 else fraction.padEnd(3, '0').take(3).toIntOrNull() ?: return null
+
+        val tzGroup = match.groupValues[8]
+        val offsetMs = if (tzGroup == "Z") {
+            0L
+        } else {
+            val sign = if (match.groupValues[9] == "-") -1L else 1L
+            val tzHour = match.groupValues[10].toIntOrNull() ?: return null
+            val tzMin = match.groupValues[11].toIntOrNull() ?: return null
+            if (tzHour !in 0..23 || tzMin !in 0..59) return null
+            sign * ((tzHour * 60L + tzMin) * 60_000L)
+        }
+
+        return try {
+            val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC")).apply {
+                isLenient = false
+                set(year, month - 1, day, hour, minute, second)
+                set(Calendar.MILLISECOND, millis)
+            }
+            cal.timeInMillis - offsetMs
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    internal fun resolveSyncedStreakStartMs(
+        localStartMs: Long,
+        serverStartMs: Long?,
+        serverCurrentDays: Int,
+        latestServerRelapseMs: Long?,
+        isDifferentAccount: Boolean,
+        nowMs: Long = System.currentTimeMillis()
+    ): Long {
+        if (isDifferentAccount) {
+            return serverStartMs ?: if (serverCurrentDays > 0) nowMs - serverCurrentDays.toLong() * DAY_MS else nowMs
+        }
+        if (serverStartMs != null) {
+            return when {
+                localStartMs <= 0L -> serverStartMs
+                latestServerRelapseMs != null && latestServerRelapseMs > localStartMs && serverStartMs >= latestServerRelapseMs -> serverStartMs
+                serverStartMs < localStartMs -> serverStartMs
+                else -> localStartMs
+            }
+        }
+        if (serverCurrentDays > 0) {
+            val inferred = nowMs - serverCurrentDays.toLong() * DAY_MS
+            if (localStartMs <= 0L || inferred < localStartMs) {
+                return inferred
+            }
+        }
+        return if (localStartMs > 0L) localStartMs else nowMs
+    }
+
+    suspend fun syncCalendarWithBackend(context: Context, userId: Long? = null) {
+        runSuspendCatching {
+            initDefaultsIfNeeded(context)
             val api = NetworkClient.getHabitsApiService(context)
             val streakRes = api.getStreak()
-            streakRes.streak?.let { streak ->
-                val prefs = getPrefs(context)
-                val editor = prefs.edit()
-                if (streak.longestStreakDays > getBestStreakDays(context)) {
-                    editor.putInt(KEY_BEST_STREAK, streak.longestStreakDays)
-                }
-                editor.apply()
+            val historyRes = api.getRelapseHistory(limit = 100)
+
+            val prefs = getPrefs(context)
+            val savedUserId = prefs.getLong(KEY_SYNCED_USER_ID, -1L)
+            val isDifferentAccount = userId != null && savedUserId != -1L && savedUserId != userId
+
+            val relapseDates = if (isDifferentAccount) {
+                mutableSetOf()
+            } else {
+                prefs.getStringSet(KEY_RELAPSE_DATES, emptySet())?.toMutableSet() ?: mutableSetOf()
             }
 
-            val historyRes = api.getRelapseHistory(limit = 100)
-            val prefs = getPrefs(context)
-            val existingRelapses = prefs.getStringSet(KEY_RELAPSE_DATES, emptySet())?.toMutableSet() ?: mutableSetOf()
+            var latestServerRelapseMs: Long? = null
             historyRes.relapses.forEach { log ->
-                log.createdAt?.take(10)?.let { dateStr ->
+                val rawTs = log.relapsedAt ?: log.createdAt
+                rawTs?.take(10)?.let { dateStr ->
                     if (dateStr.length == 10) {
-                        existingRelapses.add(dateStr)
+                        relapseDates.add(dateStr)
                     }
                 }
+                val parsedTs = parseIsoTimestampMillis(rawTs)
+                if (parsedTs != null && (latestServerRelapseMs == null || parsedTs > latestServerRelapseMs!!)) {
+                    latestServerRelapseMs = parsedTs
+                }
             }
-            prefs.edit().putStringSet(KEY_RELAPSE_DATES, existingRelapses).apply()
-        } catch (_: Exception) {
-            // Graceful fallback to local cache
+
+            val editor = prefs.edit()
+            editor.putStringSet(KEY_RELAPSE_DATES, relapseDates)
+
+            streakRes.streak?.let { streak ->
+                val resolvedStartMs = resolveSyncedStreakStartMs(
+                    localStartMs = prefs.getLong(KEY_STREAK_START_TIME, 0L),
+                    serverStartMs = parseIsoTimestampMillis(streak.currentStreakStart),
+                    serverCurrentDays = streak.currentDays,
+                    latestServerRelapseMs = latestServerRelapseMs,
+                    isDifferentAccount = isDifferentAccount
+                )
+                val resolvedBest = if (isDifferentAccount) {
+                    maxOf(streak.longestStreakDays, streak.currentDays)
+                } else {
+                    maxOf(getBestStreakDays(context), streak.longestStreakDays)
+                }
+                editor.putLong(KEY_STREAK_START_TIME, resolvedStartMs)
+                editor.putInt(KEY_BEST_STREAK, resolvedBest)
+            }
+
+            if (userId != null) {
+                editor.putLong(KEY_SYNCED_USER_ID, userId)
+            }
+            editor.apply()
         }
     }
 
@@ -477,9 +581,9 @@ object HabitsManager {
 
         if (jsonStr.isNullOrBlank()) {
             val starterHabits = listOf(
-                PersistentHabit(id = "1", title = "Drink 2.5L Water", iconKey = "water", currentStreak = 3, isCompletedToday = false),
-                PersistentHabit(id = "2", title = "Workout / Exercise", iconKey = "fitness", currentStreak = 5, isCompletedToday = false),
-                PersistentHabit(id = "3", title = "Read 15 Mins", iconKey = "book", currentStreak = 2, isCompletedToday = false)
+                PersistentHabit(id = "1", title = "Drink 2.5L Water", iconKey = "water", currentStreak = 0, isCompletedToday = false),
+                PersistentHabit(id = "2", title = "Workout / Exercise", iconKey = "fitness", currentStreak = 0, isCompletedToday = false),
+                PersistentHabit(id = "3", title = "Read 15 Mins", iconKey = "book", currentStreak = 0, isCompletedToday = false)
             )
             saveHabits(context, starterHabits)
             return starterHabits

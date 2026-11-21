@@ -28,15 +28,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.pguard.R
-import com.example.pguard.presentation.theme.CoralPrimary
 import com.example.pguard.presentation.theme.PGuardTheme
 
 enum class PGuardTab(
@@ -57,7 +54,7 @@ fun PGuardBottomBar(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = Color(0xFF141416),
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
         tonalElevation = 0.dp
     ) {
         Column(
@@ -66,7 +63,7 @@ fun PGuardBottomBar(
                 .navigationBarsPadding()
         ) {
             HorizontalDivider(
-                color = Color.White.copy(alpha = 0.08f),
+                color = MaterialTheme.colorScheme.outlineVariant,
                 thickness = 0.8.dp
             )
             Row(
@@ -104,7 +101,7 @@ private fun PGuardBottomBarItem(
 
     // Fast, snappy color transition (100ms)
     val contentColor by animateColorAsState(
-        targetValue = if (selected) CoralPrimary else Color.White.copy(alpha = 0.5f),
+        targetValue = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         animationSpec = tween(durationMillis = 100, easing = FastOutSlowInEasing),
         label = "tabContentColor"
     )
@@ -145,18 +142,16 @@ private fun PGuardBottomBarItem(
         Text(
             text = tab.title,
             color = contentColor,
-            style = MaterialTheme.typography.labelSmall.copy(
-                fontSize = 11.5.sp,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-            )
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
         )
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF121212)
+@Preview(showBackground = true)
 @Composable
 private fun PGuardBottomBarPreview() {
-    PGuardTheme(darkTheme = true) {
+    PGuardTheme {
         PGuardBottomBar(
             currentTab = PGuardTab.BLOCKING,
             onTabSelected = {}

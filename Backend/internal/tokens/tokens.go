@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -18,6 +19,8 @@ var (
 	ErrInvalidToken = errors.New("invalid or expired token")
 )
 
+const devFallbackJWTSecret = "pguard-dev-jwt-super-secure-secret-key-32-chars"
+
 type UserClaims struct {
 	UserID uint   `json:"user_id"`
 	Email  string `json:"email"`
@@ -25,15 +28,22 @@ type UserClaims struct {
 }
 
 type TokenService struct {
-	secret                 []byte
-	accessDurationMinutes  int
-	refreshDurationDays    int
+	secret                []byte
+	accessDurationMinutes int
+	refreshDurationDays   int
 }
 
-func NewTokenService() *TokenService {
-	secret := os.Getenv("JWT_SECRET")
+func NewTokenService() (*TokenService, error) {
+	secret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+	devMock := strings.EqualFold(strings.TrimSpace(os.Getenv("DEV_MOCK_AUTH")), "true")
+
 	if secret == "" {
-		secret = "pguard-dev-jwt-super-secure-secret-key-32-chars"
+		if !devMock {
+			return nil, errors.New("JWT_SECRET environment variable must be set (minimum 32 characters)")
+		}
+		secret = devFallbackJWTSecret
+	} else if len(secret) < 32 && !devMock {
+		return nil, errors.New("JWT_SECRET must be at least 32 characters")
 	}
 
 	accessMinutes, err := strconv.Atoi(os.Getenv("JWT_ACCESS_DURATION_MINUTES"))
@@ -50,7 +60,7 @@ func NewTokenService() *TokenService {
 		secret:                []byte(secret),
 		accessDurationMinutes: accessMinutes,
 		refreshDurationDays:   refreshDays,
-	}
+	}, nil
 }
 
 func (s *TokenService) GenerateAccessToken(userID uint, email string) (string, int64, error) {

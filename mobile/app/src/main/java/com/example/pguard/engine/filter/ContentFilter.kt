@@ -2,6 +2,7 @@ package com.example.pguard.engine.filter
 
 import java.net.URLDecoder
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Pure-Kotlin content classifier used by the blocking engine.
@@ -65,17 +66,29 @@ class ContentFilter(
 
     private fun textContainsDomain(text: String, domain: String): Boolean {
         if (text.isBlank() || domain.isBlank()) return false
-        val pattern = Regex(
-            "(?<![\\p{L}\\p{N}.\\-])" + Regex.escape(domain) + "(?![\\p{L}\\p{N}\\-])"
-        )
+        val pattern = domainRegexCache[domain] ?: run {
+            if (domainRegexCache.size >= MAX_REGEX_CACHE_SIZE) {
+                domainRegexCache.clear()
+            }
+            val compiled = Regex(
+                "(?<![\\p{L}\\p{N}.\\-])" + Regex.escape(domain) + "(?![\\p{L}\\p{N}\\-])"
+            )
+            domainRegexCache.putIfAbsent(domain, compiled) ?: compiled
+        }
         return pattern.containsMatchIn(text)
     }
 
     private fun keywordRegex(entry: String): Regex {
-        val escaped = entry.split(WHITESPACE)
-            .filter { it.isNotBlank() }
-            .joinToString("""\s+""") { Regex.escape(it) }
-        return Regex("(?<![\\p{L}\\p{N}])$escaped(?:s|es)?(?![\\p{L}\\p{N}])")
+        return keywordRegexCache[entry] ?: run {
+            if (keywordRegexCache.size >= MAX_REGEX_CACHE_SIZE) {
+                keywordRegexCache.clear()
+            }
+            val escaped = entry.split(WHITESPACE)
+                .filter { it.isNotBlank() }
+                .joinToString("""\s+""") { Regex.escape(it) }
+            val compiled = Regex("(?<![\\p{L}\\p{N}])$escaped(?:s|es)?(?![\\p{L}\\p{N}])")
+            keywordRegexCache.putIfAbsent(entry, compiled) ?: compiled
+        }
     }
 
     private fun normalizeEntry(raw: String): String = raw.trim()
@@ -167,7 +180,10 @@ class ContentFilter(
     }
 
     companion object {
+        private const val MAX_REGEX_CACHE_SIZE = 512
         private val WHITESPACE = Regex("\\s+")
+        private val domainRegexCache = ConcurrentHashMap<String, Regex>()
+        private val keywordRegexCache = ConcurrentHashMap<String, Regex>()
 
         private val DEFAULT_ADULT_DOMAIN_SIGNATURES = setOf(
             "pornhub", "xvideos", "xnxx", "xhamster", "redtube", "youporn",

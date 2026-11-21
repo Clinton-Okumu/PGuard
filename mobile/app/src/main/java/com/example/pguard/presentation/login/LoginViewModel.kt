@@ -65,4 +65,8 @@ class LoginViewModel(
     fun dismissError() {
         _uiState.update { it.copy(errorMessage = null) }
     }
+
+    fun resetState() {
+        _uiState.value = LoginUiState()
+    }
 }

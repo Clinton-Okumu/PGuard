@@ -85,6 +85,17 @@ data class RequestUnlockCodeResponse(
     @SerialName("message") val message: String? = null,
     @SerialName("partner_email") val partnerEmail: String? = null,
     @SerialName("feature_name") val featureName: String? = null,
-    @SerialName("code") val code: String? = null,
+    @SerialName("error") val error: String? = null
+)
+
+@Serializable
+data class VerifyUnlockCodeRequest(
+    @SerialName("code") val code: String
+)
+
+@Serializable
+data class VerifyUnlockCodeResponse(
+    @SerialName("verified") val verified: Boolean = false,
+    @SerialName("feature_name") val featureName: String? = null,
     @SerialName("error") val error: String? = null
 )

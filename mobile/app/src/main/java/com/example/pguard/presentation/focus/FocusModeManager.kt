@@ -20,6 +20,7 @@ object FocusModeManager {
     private const val PREFS_NAME = "pguard_focus_mode_prefs"
     private const val KEY_SCHEDULES = "focus_schedules_json"
     private const val KEY_URGE_LOCKDOWN_UNTIL = "urge_lockdown_until"
+    private const val SYSTEM_PKG_CACHE_TTL_MS = 30_000L
 
     const val MAX_FREE_SCHEDULES = Int.MAX_VALUE
 
@@ -31,10 +32,24 @@ object FocusModeManager {
     private val cachedSchedules = Collections.synchronizedList(mutableListOf<FocusSchedule>())
     @Volatile
     private var isInitialized = false
+    @Volatile
+    private var cachedUrgeLockdownUntil: Long = -1L
+
+    private data class SystemPackagesSnapshot(
+        val dialerPackages: Set<String>,
+        val allowedFocusPackages: Set<String>,
+        val inputMethodPackages: Set<String>,
+        val capturedAtMs: Long
+    )
+
+    @Volatile
+    private var cachedSystemPackages: SystemPackagesSnapshot? = null
 
     fun init(context: Context) {
         if (!isInitialized) {
             loadSchedulesFromDisk(context)
+            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            cachedUrgeLockdownUntil = prefs.getLong(KEY_URGE_LOCKDOWN_UNTIL, 0L)
             isInitialized = true
         }
     }
@@ -90,64 +105,140 @@ object FocusModeManager {
         return getActiveSchedule(context, cal) != null || isUrgeLockdownActive(context)
     }
 
+    private fun getSystemPackages(context: Context): SystemPackagesSnapshot {
+        val now = System.currentTimeMillis()
+        val existing = cachedSystemPackages
+        if (existing != null && (now - existing.capturedAtMs) < SYSTEM_PKG_CACHE_TTL_MS) {
+            return existing
+        }
+
+        val dialerPkgs = mutableSetOf(
+            "com.google.android.dialer",
+            "com.android.dialer",
+            "com.samsung.android.dialer",
+            "com.android.incallui",
+            "com.samsung.android.incallui",
+            "com.android.server.telecom",
+            "com.android.phone"
+        )
+        val focusPkgs = mutableSetOf(
+            "android",
+            "com.android.systemui",
+            "com.google.android.apps.messaging",
+            "com.samsung.android.messaging",
+            "com.android.mms",
+            "com.google.android.contacts",
+            "com.android.contacts",
+            "com.samsung.android.app.contacts"
+        )
+        val imePkgs = mutableSetOf<String>()
+
+        try {
+            val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            val homeResolve = context.packageManager.resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            homeResolve?.activityInfo?.packageName?.lowercase()?.let { focusPkgs.add(it) }
+        } catch (_: Exception) {}
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val telecomManager = context.getSystemService(Context.TELECOM_SERVICE) as? android.telecom.TelecomManager
+                telecomManager?.defaultDialerPackage?.lowercase()?.let {
+                    dialerPkgs.add(it)
+                    focusPkgs.add(it)
+                }
+            }
+        } catch (_: Exception) {}
+
+        try {
+            val dialIntent = Intent(Intent.ACTION_DIAL)
+            val dialResolve = context.packageManager.resolveActivity(dialIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            dialResolve?.activityInfo?.packageName?.lowercase()?.let {
+                dialerPkgs.add(it)
+                focusPkgs.add(it)
+            }
+        } catch (_: Exception) {}
+
+        try {
+            Telephony.Sms.getDefaultSmsPackage(context)?.lowercase()?.let { focusPkgs.add(it) }
+            val smsIntent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:"))
+            val smsResolve = context.packageManager.resolveActivity(smsIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            smsResolve?.activityInfo?.packageName?.lowercase()?.let { focusPkgs.add(it) }
+        } catch (_: Exception) {}
+
+        try {
+            val contactsIntent = Intent(Intent.ACTION_PICK, ContactsContract.Contacts.CONTENT_URI)
+            val contactsResolve = context.packageManager.resolveActivity(contactsIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            contactsResolve?.activityInfo?.packageName?.lowercase()?.let { focusPkgs.add(it) }
+        } catch (_: Exception) {}
+
+        try {
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.enabledInputMethodList?.forEach {
+                imePkgs.add(it.packageName.lowercase())
+            }
+        } catch (_: Exception) {}
+
+        focusPkgs.addAll(dialerPkgs)
+        focusPkgs.addAll(imePkgs)
+
+        val snapshot = SystemPackagesSnapshot(
+            dialerPackages = dialerPkgs,
+            allowedFocusPackages = focusPkgs,
+            inputMethodPackages = imePkgs,
+            capturedAtMs = now
+        )
+        cachedSystemPackages = snapshot
+        return snapshot
+    }
+
     /**
      * Determines whether a package is permitted during the 2-minute emergency urge lockdown.
-     * To enforce full phone lockdown from use, only PGuard (the urge breathing protocol)
-     * and emergency calls are permitted. All launchers and other apps are locked.
+     * To enforce full phone lockdown from use, only PGuard (the urge breathing protocol),
+     * emergency calls, and input methods are permitted. All launchers and other apps are locked.
      */
     fun isPackageAllowedDuringUrgeLockdown(context: Context, packageName: String): Boolean {
         val lower = packageName.lowercase()
         val appPkg = context.packageName.lowercase()
 
-        // 1. PGuard itself is always permitted
         if (lower == appPkg) return true
 
-        // 2. Emergency phone dialer / in-call UI is permitted for critical safety
-        val defaultDialer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val telecomManager = context.getSystemService(Context.TELECOM_SERVICE) as? android.telecom.TelecomManager
-            telecomManager?.defaultDialerPackage
-        } else null
+        val snapshot = getSystemPackages(context)
+        if (lower in snapshot.dialerPackages) return true
+        if (lower in snapshot.inputMethodPackages) return true
 
-        if (!defaultDialer.isNullOrBlank() && lower == defaultDialer.lowercase()) {
-            return true
-        }
-        if (lower.contains("dialer") || lower.contains("incallui") || lower.contains("telecom")) {
-            return true
-        }
-
-        // 3. Keyboards / Input methods
-        try {
-            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-            val imes = imm?.enabledInputMethodList?.map { it.packageName.lowercase() } ?: emptyList()
-            if (imes.contains(lower)) return true
-        } catch (_: Exception) {}
-
-        // Everything else (Launchers, browsers, social media, games, etc.) is strictly locked down!
         return false
     }
 
     fun startUrgeLockdown(context: Context, durationSeconds: Int = 120) {
         val until = System.currentTimeMillis() + (durationSeconds * 1000L)
+        cachedUrgeLockdownUntil = until
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().putLong(KEY_URGE_LOCKDOWN_UNTIL, until).apply()
         Log.i(TAG, "Started 2-min urge lockdown until $until")
     }
 
     fun stopUrgeLockdown(context: Context) {
+        cachedUrgeLockdownUntil = 0L
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         prefs.edit().remove(KEY_URGE_LOCKDOWN_UNTIL).apply()
         Log.i(TAG, "Stopped urge lockdown")
     }
 
-    fun isUrgeLockdownActive(context: Context): Boolean {
+    private fun readUrgeLockdownUntil(context: Context): Long {
+        val cached = cachedUrgeLockdownUntil
+        if (cached >= 0L) return cached
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val until = prefs.getLong(KEY_URGE_LOCKDOWN_UNTIL, 0L)
-        return System.currentTimeMillis() < until
+        val loaded = prefs.getLong(KEY_URGE_LOCKDOWN_UNTIL, 0L)
+        cachedUrgeLockdownUntil = loaded
+        return loaded
+    }
+
+    fun isUrgeLockdownActive(context: Context): Boolean {
+        return System.currentTimeMillis() < readUrgeLockdownUntil(context)
     }
 
     fun getUrgeLockdownRemainingSeconds(context: Context): Int {
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val until = prefs.getLong(KEY_URGE_LOCKDOWN_UNTIL, 0L)
+        val until = readUrgeLockdownUntil(context)
         val remainingMs = until - System.currentTimeMillis()
         return if (remainingMs > 0) ((remainingMs + 999L) / 1000L).toInt() else 0
     }
@@ -165,94 +256,25 @@ object FocusModeManager {
         val lower = packageName.lowercase()
         val appPkg = context.packageName.lowercase()
 
-        // 1. PGuard itself
         if (lower == appPkg) return true
 
-        // 2. Explicitly allowed apps selected during schedule creation
         if (schedule.allowedApps.any { it.equals(lower, ignoreCase = true) }) {
             return true
         }
 
-        // 3. System UI & Home Launcher
-        if (lower == "android" ||
-            lower.startsWith("com.android.systemui") ||
+        if (lower.startsWith("com.android.systemui") ||
             lower.contains("launcher") ||
-            lower.contains("nexuslauncher") ||
             lower.contains("trebuchet") ||
             lower.contains("quickstep")
         ) {
             return true
         }
-        try {
-            val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-            val homeResolve = context.packageManager.resolveActivity(homeIntent, PackageManager.MATCH_DEFAULT_ONLY)
-            val homePkg = homeResolve?.activityInfo?.packageName?.lowercase()
-            if (!homePkg.isNullOrBlank() && homePkg == lower) {
-                return true
-            }
-        } catch (_: Exception) {}
 
-        // 4. Calls / Phone Dialer (Default & Emergency Calls)
-        val defaultDialer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val telecomManager = context.getSystemService(Context.TELECOM_SERVICE) as? android.telecom.TelecomManager
-            telecomManager?.defaultDialerPackage
-        } else null
-
-        if (!defaultDialer.isNullOrBlank() && lower == defaultDialer.lowercase()) {
-            return true
-        }
-        try {
-            val dialIntent = Intent(Intent.ACTION_DIAL)
-            val dialResolve = context.packageManager.resolveActivity(dialIntent, PackageManager.MATCH_DEFAULT_ONLY)
-            val dialPkg = dialResolve?.activityInfo?.packageName?.lowercase()
-            if (!dialPkg.isNullOrBlank() && dialPkg == lower) {
-                return true
-            }
-        } catch (_: Exception) {}
-        if (lower.contains("dialer") || lower.contains("incallui") || lower.contains("phone") || lower.contains("telecom")) {
+        val snapshot = getSystemPackages(context)
+        if (lower in snapshot.allowedFocusPackages) {
             return true
         }
 
-        // 5. Messages / SMS
-        val defaultSms = Telephony.Sms.getDefaultSmsPackage(context)
-        if (!defaultSms.isNullOrBlank() && lower == defaultSms.lowercase()) {
-            return true
-        }
-        try {
-            val smsIntent = Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:"))
-            val smsResolve = context.packageManager.resolveActivity(smsIntent, PackageManager.MATCH_DEFAULT_ONLY)
-            val smsPkg = smsResolve?.activityInfo?.packageName?.lowercase()
-            if (!smsPkg.isNullOrBlank() && smsPkg == lower) {
-                return true
-            }
-        } catch (_: Exception) {}
-        if (lower.contains("messaging") || lower.contains("mms") || lower == "com.google.android.apps.messaging") {
-            return true
-        }
-
-        // 6. Contacts (Calls, Messages, Contacts are default allowed)
-        try {
-            val contactsIntent = Intent(Intent.ACTION_PICK, ContactsContract.Contacts.CONTENT_URI)
-            val contactsResolve = context.packageManager.resolveActivity(contactsIntent, PackageManager.MATCH_DEFAULT_ONLY)
-            val contactsPkg = contactsResolve?.activityInfo?.packageName?.lowercase()
-            if (!contactsPkg.isNullOrBlank() && contactsPkg == lower) {
-                return true
-            }
-        } catch (_: Exception) {}
-        if (lower == "com.google.android.contacts" ||
-            lower == "com.android.contacts" ||
-            lower == "com.samsung.android.app.contacts" ||
-            lower.contains("contacts")
-        ) {
-            return true
-        }
-
-        // 7. Input Method Keyboards (Gboard, Swiftkey, Samsung Keyboard, etc.)
-        try {
-            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
-            val imes = imm?.enabledInputMethodList?.map { it.packageName.lowercase() } ?: emptyList()
-            if (imes.contains(lower)) return true
-        } catch (_: Exception) {}
         if (lower.contains("inputmethod") || lower.contains("gboard") || lower.contains("latinime")) {
             return true
         }

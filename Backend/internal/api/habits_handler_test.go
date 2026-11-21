@@ -299,6 +299,31 @@ func TestHabitsHandler_HabitEndpoints(t *testing.T) {
 		assert.Equal(t, http.StatusNotFound, rr.Code)
 	})
 
+	t.Run("GET /api/v1/habits rejects invalid date format", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/habits?date=15-11-2026", nil)
+		req = middleware.SetUser(req, user1)
+		rr := httptest.NewRecorder()
+
+		handler.HandleGetHabits(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("POST /api/v1/habits/{id}/toggle rejects invalid date format", func(t *testing.T) {
+		url := fmt.Sprintf("/api/v1/habits/%d/toggle?date=not-a-date", createdHabitID)
+		req := httptest.NewRequest(http.MethodPost, url, nil)
+		req = middleware.SetUser(req, user1)
+
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", fmt.Sprintf("%d", createdHabitID))
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		rr := httptest.NewRecorder()
+		handler.HandleToggleHabit(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
 	t.Run("DELETE /api/v1/habits/{id} removes habit", func(t *testing.T) {
 		url := fmt.Sprintf("/api/v1/habits/%d", createdHabitID)
 		req := httptest.NewRequest(http.MethodDelete, url, nil)

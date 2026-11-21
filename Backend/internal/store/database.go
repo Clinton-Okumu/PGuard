@@ -27,7 +27,10 @@ func Open() (*gorm.DB, error) {
 		}
 		user := os.Getenv("DB_USER")
 		if user == "" {
-			user = "clinton"
+			user = os.Getenv("USER")
+		}
+		if user == "" {
+			user = "postgres"
 		}
 		password := os.Getenv("DB_PASSWORD")
 		dbname := os.Getenv("DB_NAME")
@@ -54,6 +57,12 @@ func Open() (*gorm.DB, error) {
 		return nil, fmt.Errorf("error connecting to postgres: %w", err)
 	}
 
+	if sqlDB, err := db.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(25)
+		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetConnMaxLifetime(5 * time.Minute)
+	}
+
 	fmt.Println("connected to database")
 	return db, nil
 }
@@ -70,5 +79,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&HabitLog{},
 		&AccountabilityPartner{},
 		&SecurityAlert{},
+		&UnlockCode{},
 	)
 }

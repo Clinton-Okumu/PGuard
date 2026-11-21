@@ -1,6 +1,7 @@
 package com.example.pguard.core.network
 
 import android.content.Context
+import com.example.pguard.BuildConfig
 import com.example.pguard.core.datastore.AuthDataStore
 import com.example.pguard.core.network.api.AccountabilityApiService
 import com.example.pguard.core.network.api.AuthApiService
@@ -17,15 +18,11 @@ import java.util.concurrent.TimeUnit
 
 object NetworkClient {
 
-    // LAN IP of your development Mac (accessible by both physical phones on Wi-Fi and emulators):
-    const val LAN_BASE_URL = "http://192.168.100.80:8080/"
-    const val EMULATOR_BASE_URL = "http://10.0.2.2:8080/"
-
-    private var _baseUrl: String = LAN_BASE_URL
+    private var _baseUrl: String = BuildConfig.API_BASE_URL
 
     var baseUrl: String
-        get() = _baseUrl
-        set(value) {
+        @Synchronized get() = _baseUrl
+        @Synchronized set(value) {
             _baseUrl = if (value.endsWith("/")) value else "$value/"
             _okHttpClient = null
             _hasAuthSetup = false
@@ -45,7 +42,8 @@ object NetworkClient {
     }
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BODY
+        level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY else HttpLoggingInterceptor.Level.NONE
+        redactHeader("Authorization")
     }
 
     private var _okHttpClient: OkHttpClient? = null
@@ -57,6 +55,7 @@ object NetworkClient {
     private var _habitsApiService: HabitsApiService? = null
     private var _accountabilityApiService: AccountabilityApiService? = null
 
+    @Synchronized
     fun getOkHttpClient(authDataStore: AuthDataStore? = null): OkHttpClient {
         if (_okHttpClient != null && (_hasAuthSetup || authDataStore == null)) {
             return _okHttpClient!!
@@ -70,6 +69,15 @@ object NetworkClient {
         if (authDataStore != null) {
             builder.addInterceptor(AuthInterceptor(authDataStore))
             builder.authenticator(TokenAuthenticator(authDataStore, { _baseUrl }, json))
+            if (!_hasAuthSetup) {
+                // Invalidate unauthenticated Retrofit & service instances so future requests use auth
+                _retrofit = null
+                _authApiService = null
+                _settingsApiService = null
+                _blocklistApiService = null
+                _habitsApiService = null
+                _accountabilityApiService = null
+            }
             _hasAuthSetup = true
         }
 
@@ -78,6 +86,7 @@ object NetworkClient {
         return client
     }
 
+    @Synchronized
     fun getRetrofit(context: Context? = null): Retrofit {
         val authDataStore = context?.let { AuthDataStore(it.applicationContext) }
         val client = getOkHttpClient(authDataStore)
@@ -96,6 +105,7 @@ object NetworkClient {
         return retrofit
     }
 
+    @Synchronized
     fun getAuthApiService(context: Context? = null): AuthApiService {
         return _authApiService ?: run {
             val service = getRetrofit(context).create(AuthApiService::class.java)
@@ -104,6 +114,7 @@ object NetworkClient {
         }
     }
 
+    @Synchronized
     fun getSettingsApiService(context: Context? = null): SettingsApiService {
         return _settingsApiService ?: run {
             val service = getRetrofit(context).create(SettingsApiService::class.java)
@@ -112,6 +123,7 @@ object NetworkClient {
         }
     }
 
+    @Synchronized
     fun getBlocklistApiService(context: Context? = null): BlocklistApiService {
         return _blocklistApiService ?: run {
             val service = getRetrofit(context).create(BlocklistApiService::class.java)
@@ -120,6 +132,7 @@ object NetworkClient {
         }
     }
 
+    @Synchronized
     fun getHabitsApiService(context: Context? = null): HabitsApiService {
         return _habitsApiService ?: run {
             val service = getRetrofit(context).create(HabitsApiService::class.java)
@@ -128,6 +141,7 @@ object NetworkClient {
         }
     }
 
+    @Synchronized
     fun getAccountabilityApiService(context: Context? = null): AccountabilityApiService {
         return _accountabilityApiService ?: run {
             val service = getRetrofit(context).create(AccountabilityApiService::class.java)

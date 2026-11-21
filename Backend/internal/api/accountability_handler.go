@@ -6,15 +6,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"log"
 	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"Backend/internal/mailer"
 	"Backend/internal/middleware"
 	"Backend/internal/store"
+	"Backend/internal/tokens"
 	"Backend/internal/utils"
 )
 
@@ -48,6 +51,10 @@ type recordEventRequest struct {
 
 type requestUnlockCodeRequest struct {
 	FeatureName string `json:"feature_name"`
+}
+
+type verifyUnlockCodeRequest struct {
+	Code string `json:"code"`
 }
 
 func (h *AccountabilityHandler) HandleGetPartner(w http.ResponseWriter, r *http.Request) {
@@ -117,7 +124,9 @@ func (h *AccountabilityHandler) HandleCreateInvite(w http.ResponseWriter, r *htt
 
 	if h.mailer != nil {
 		go func(pEmail, uEmail, code string) {
-			if err := h.mailer.SendPartnerInvite(context.Background(), pEmail, uEmail, code); err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := h.mailer.SendPartnerInvite(ctx, pEmail, uEmail, code); err != nil {
 				h.logger.Printf("ERROR: sending partner invite email: %v", err)
 			}
 		}(req.PartnerEmail, user.Email, partner.InviteCode)
@@ -150,7 +159,7 @@ func (h *AccountabilityHandler) HandleAcceptInvite(w http.ResponseWriter, r *htt
 
 	partner, err := h.accountabilityStore.AcceptInvite(code, &user.ID)
 	if err != nil {
-		if errors.Is(err, store.ErrInvalidInviteCode) {
+		if errors.Is(err, store.ErrInvalidInviteCode) || errors.Is(err, store.ErrInviteNotPending) || errors.Is(err, store.ErrInviteExpired) {
 			_ = utils.WriteJSON(w, http.StatusNotFound, utils.Envelope{"error": "Invalid or expired invite code"})
 			return
 		}
@@ -169,8 +178,83 @@ func (h *AccountabilityHandler) HandleAcceptInvite(w http.ResponseWriter, r *htt
 	})
 }
 
-func (h *AccountabilityHandler) HandleAcceptInviteWeb(w http.ResponseWriter, r *http.Request) {
+func formatInviterLabel(partner *store.AccountabilityPartner) string {
+	if partner != nil {
+		name := strings.TrimSpace(partner.User.DisplayName)
+		email := strings.TrimSpace(partner.User.Email)
+		if name != "" && email != "" {
+			return fmt.Sprintf("%s (%s)", name, email)
+		}
+		if email != "" {
+			return email
+		}
+		if name != "" {
+			return name
+		}
+	}
+	return "a PGuard user"
+}
+
+// HandleAcceptInviteWebPage renders a read-only confirmation page with a POST form
+// so link scanners and email previewers fetching GET URLs do not mutate state.
+func (h *AccountabilityHandler) HandleAcceptInviteWebPage(w http.ResponseWriter, r *http.Request) {
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+
+	if code == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`<!DOCTYPE html><html><body style="background:#121212;color:#FFF;font-family:sans-serif;padding:32px;text-align:center;"><h2>⚠️ Missing Code</h2><p>No invite code provided.</p></body></html>`))
+		return
+	}
+
+	partner, err := h.accountabilityStore.GetInviteByCode(code)
+	if err != nil || partner.Status != store.PartnerStatusPending || (!partner.UpdatedAt.IsZero() && time.Since(partner.UpdatedAt) > 7*24*time.Hour) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`<!DOCTYPE html><html><body style="background:#121212;color:#FFF;font-family:sans-serif;padding:32px;text-align:center;"><h2>⚠️ Invite Expired or Invalid</h2><p>This invite code is invalid, expired, or has already been accepted.</p></body></html>`))
+		return
+	}
+
+	escapedInviter := html.EscapeString(formatInviterLabel(partner))
+	escapedCode := html.EscapeString(partner.InviteCode)
+
+	htmlResp := fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Confirm Accountability Partner - PGuard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { background-color: #121212; color: #FFFFFF; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 80vh; margin: 0; padding: 20px; }
+    .card { background-color: #1E1E22; border-radius: 20px; padding: 36px; max-width: 480px; text-align: center; border: 1px solid #333333; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+    .icon { font-size: 54px; margin-bottom: 16px; }
+    h2 { color: #FFFFFF; margin: 0 0 12px 0; font-size: 24px; }
+    p { color: #CCCCCC; font-size: 15px; line-height: 1.6; }
+    .btn { background-color: #FF5252; color: #FFFFFF; border: none; border-radius: 12px; padding: 14px 28px; font-size: 15px; font-weight: bold; cursor: pointer; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">🛡️</div>
+    <h2>Accept Accountability Partnership?</h2>
+    <p><strong>%s</strong> invited you to be their trusted Accountability Partner on PGuard.</p>
+    <p>Confirm below to start receiving unlock approval requests and security alerts.</p>
+    <form method="POST" action="/api/v1/accountability/accept-web">
+      <input type="hidden" name="code" value="%s">
+      <button type="submit" class="btn">Confirm Partnership</button>
+    </form>
+  </div>
+</body>
+</html>`, escapedInviter, escapedCode)
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(htmlResp))
+}
+
+func (h *AccountabilityHandler) HandleAcceptInviteWeb(w http.ResponseWriter, r *http.Request) {
+	code := strings.TrimSpace(r.FormValue("code"))
+	if code == "" {
+		code = strings.TrimSpace(r.URL.Query().Get("code"))
+	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
 	if code == "" {
@@ -182,9 +266,11 @@ func (h *AccountabilityHandler) HandleAcceptInviteWeb(w http.ResponseWriter, r *
 	partner, err := h.accountabilityStore.AcceptInvite(code, nil)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`<!DOCTYPE html><html><body style="background:#121212;color:#FFF;font-family:sans-serif;padding:32px;text-align:center;"><h2>⚠️ Invite Expired or Invalid</h2><p>This invite code is invalid or has already been accepted.</p></body></html>`))
+		_, _ = w.Write([]byte(`<!DOCTYPE html><html><body style="background:#121212;color:#FFF;font-family:sans-serif;padding:32px;text-align:center;"><h2>⚠️ Invite Expired or Invalid</h2><p>This invite code is invalid, expired, or has already been accepted.</p></body></html>`))
 		return
 	}
+
+	escapedInviter := html.EscapeString(formatInviterLabel(partner))
 
 	htmlResp := fmt.Sprintf(`<!DOCTYPE html>
 <html>
@@ -210,7 +296,7 @@ func (h *AccountabilityHandler) HandleAcceptInviteWeb(w http.ResponseWriter, r *
     <p>Thank you for supporting their digital wellbeing. You don't need to install anything. Whenever they request to disable a protection shield, you will receive an approval email.</p>
   </div>
 </body>
-</html>`, partner.PartnerEmail)
+</html>`, escapedInviter)
 
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(htmlResp))
@@ -269,8 +355,10 @@ func (h *AccountabilityHandler) HandleRecordEvent(w http.ResponseWriter, r *http
 
 	if h.mailer != nil {
 		go func(uid uint, uEmail, eType, msg string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
 			if partner, err := h.accountabilityStore.GetPartnerByUserID(uid); err == nil && partner != nil && partner.Status == store.PartnerStatusAccepted {
-				_ = h.mailer.SendSecurityAlert(context.Background(), partner.PartnerEmail, uEmail, eType, msg)
+				_ = h.mailer.SendSecurityAlert(ctx, partner.PartnerEmail, uEmail, eType, msg)
 			}
 		}(user.ID, user.Email, req.EventType, req.Message)
 	}
@@ -295,9 +383,9 @@ func (h *AccountabilityHandler) HandleRequestUnlockCode(w http.ResponseWriter, r
 	}
 
 	partner, err := h.accountabilityStore.GetPartnerByUserID(user.ID)
-	if err != nil || partner == nil || (partner.Status != store.PartnerStatusAccepted && partner.Status != store.PartnerStatusPending) {
+	if err != nil || partner == nil || partner.Status != store.PartnerStatusAccepted {
 		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{
-			"error": "No active or pending accountability partner found",
+			"error": "No accepted accountability partner found",
 		})
 		return
 	}
@@ -310,25 +398,73 @@ func (h *AccountabilityHandler) HandleRequestUnlockCode(w http.ResponseWriter, r
 	}
 	code := fmt.Sprintf("%06d", num.Int64()+100000)
 
-	featureName := req.FeatureName
-	if strings.TrimSpace(featureName) == "" {
+	featureName := strings.TrimSpace(req.FeatureName)
+	if featureName == "" {
 		featureName = "Protected Content"
+	}
+
+	codeHash := tokens.HashToken(code)
+	if _, err := h.accountabilityStore.CreateUnlockCode(user.ID, featureName, codeHash, time.Now().Add(10*time.Minute)); err != nil {
+		h.logger.Printf("ERROR: store unlock approval code for user %d: %v", user.ID, err)
+		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "Failed to generate approval code"})
+		return
 	}
 
 	if h.mailer != nil {
 		go func(pEmail, uEmail, fName, c string) {
-			if err := h.mailer.SendUnlockRequest(context.Background(), pEmail, uEmail, fName, c); err != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			if err := h.mailer.SendUnlockRequest(ctx, pEmail, uEmail, fName, c); err != nil {
 				h.logger.Printf("ERROR: sending unlock approval email: %v", err)
 			}
 		}(partner.PartnerEmail, user.Email, featureName, code)
 	}
 
 	_ = utils.WriteJSON(w, http.StatusOK, utils.Envelope{
-		"message":      "Approval code sent to accountability partner",
+		"message":       "Approval code sent to accountability partner",
 		"partner_email": partner.PartnerEmail,
-		"feature_name": featureName,
-		// Return code in dev for easy debugging/testing
-		"code": code,
+		"feature_name":  featureName,
+	})
+}
+
+func (h *AccountabilityHandler) HandleVerifyUnlockCode(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUser(r)
+	if user == nil || user.IsAnonymous() {
+		_ = utils.WriteJSON(w, http.StatusUnauthorized, utils.Envelope{"error": "Unauthorized"})
+		return
+	}
+
+	var req verifyUnlockCodeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Invalid request body"})
+		return
+	}
+
+	code := strings.TrimSpace(req.Code)
+	if len(code) != 6 {
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "A 6-digit approval code is required"})
+		return
+	}
+
+	codeHash := tokens.HashToken(code)
+	unlock, err := h.accountabilityStore.VerifyAndConsumeUnlockCode(user.ID, codeHash)
+	if err != nil {
+		if errors.Is(err, store.ErrUnlockCodeAttemptsExceeded) {
+			_ = utils.WriteJSON(w, http.StatusTooManyRequests, utils.Envelope{"error": err.Error()})
+			return
+		}
+		if errors.Is(err, store.ErrInvalidUnlockCode) {
+			_ = utils.WriteJSON(w, http.StatusUnauthorized, utils.Envelope{"error": err.Error()})
+			return
+		}
+		h.logger.Printf("ERROR: verify unlock code for user %d: %v", user.ID, err)
+		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "Failed to verify approval code"})
+		return
+	}
+
+	_ = utils.WriteJSON(w, http.StatusOK, utils.Envelope{
+		"verified":     true,
+		"feature_name": unlock.FeatureName,
 	})
 }
 

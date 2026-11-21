@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -51,11 +50,8 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.pguard.R
-import com.example.pguard.presentation.theme.CoralPrimary
 import com.example.pguard.presentation.theme.PGuardTheme
-
-private val CardBackground = Color(0xFF16161A)
-private val EmeraldAccent = Color(0xFF26C281)
+import com.example.pguard.presentation.theme.pguardColors
 
 enum class PremiumPlan(
     val id: String,
@@ -92,6 +88,8 @@ fun PremiumScreen(
         )
     }
 
+    val primary = MaterialTheme.colorScheme.primary
+
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -104,7 +102,6 @@ fun PremiumScreen(
                 .verticalScroll(rememberScrollState())
                 .padding(bottom = 32.dp)
         ) {
-            // 1. Top Navigation Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -112,35 +109,26 @@ fun PremiumScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                IconButton(
-                    onClick = onBackClick,
-                    modifier = Modifier.size(40.dp)
-                ) {
+                IconButton(onClick = onBackClick) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_arrow_back),
                         contentDescription = "Back",
-                        tint = Color.White,
+                        tint = MaterialTheme.colorScheme.onBackground,
                         modifier = Modifier.size(20.dp)
                     )
                 }
 
                 Text(
                     text = "Premium",
-                    style = MaterialTheme.typography.titleLarge.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 20.sp
-                    ),
-                    color = Color.White
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onBackground
                 )
 
-                IconButton(
-                    onClick = { showHelpDialog = true },
-                    modifier = Modifier.size(40.dp)
-                ) {
+                IconButton(onClick = { showHelpDialog = true }) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_help_circle),
                         contentDescription = "Help",
-                        tint = Color.White.copy(alpha = 0.7f),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(22.dp)
                     )
                 }
@@ -148,14 +136,13 @@ fun PremiumScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 2. Card 1: What you get
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
-                shape = RoundedCornerShape(20.dp),
-                color = CardBackground,
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Column(
                     modifier = Modifier
@@ -164,11 +151,8 @@ fun PremiumScreen(
                 ) {
                     Text(
                         text = "What you get",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 18.sp
-                        ),
-                        color = Color.White
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
 
                     Spacer(modifier = Modifier.height(18.dp))
@@ -187,11 +171,9 @@ fun PremiumScreen(
                             Spacer(modifier = Modifier.width(14.dp))
                             Text(
                                 text = benefit,
-                                style = MaterialTheme.typography.bodyMedium.copy(
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.Medium
-                                ),
-                                color = Color.White.copy(alpha = 0.95f)
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface
                             )
                         }
 
@@ -204,14 +186,13 @@ fun PremiumScreen(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 3. Card 2: Choose your plan
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
-                shape = RoundedCornerShape(20.dp),
-                color = CardBackground,
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+                shape = MaterialTheme.shapes.large,
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
             ) {
                 Column(
                     modifier = Modifier
@@ -220,11 +201,8 @@ fun PremiumScreen(
                 ) {
                     Text(
                         text = "Choose your plan",
-                        style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.5.sp
-                        ),
-                        color = Color.White,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
                     )
 
@@ -240,7 +218,7 @@ fun PremiumScreen(
 
                         if (index < PremiumPlan.entries.lastIndex) {
                             HorizontalDivider(
-                                color = Color.White.copy(alpha = 0.06f),
+                                color = MaterialTheme.colorScheme.outlineVariant,
                                 thickness = 0.8.dp,
                                 modifier = Modifier.padding(horizontal = 20.dp)
                             )
@@ -251,21 +229,16 @@ fun PremiumScreen(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // 4. Guarantee Text
             Text(
                 text = "*3-Day Money-Back Guarantee",
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
-                ),
-                color = Color.White.copy(alpha = 0.5f),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 5. Continue to Checkout Button
             Button(
                 onClick = {
                     onCheckoutClick(selectedPlan)
@@ -277,8 +250,8 @@ fun PremiumScreen(
                 },
                 shape = CircleShape,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = CoralPrimary,
-                    contentColor = Color.White
+                    containerColor = primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -292,30 +265,25 @@ fun PremiumScreen(
                     Icon(
                         painter = painterResource(id = R.drawable.ic_ribbon_badge),
                         contentDescription = null,
-                        tint = Color.White,
+                        tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
                         text = "CONTINUE TO CHECKOUT",
+                        style = MaterialTheme.typography.labelLarge.copy(letterSpacing = 0.8.sp),
                         fontWeight = FontWeight.ExtraBold,
-                        fontSize = 14.5.sp,
-                        letterSpacing = 0.8.sp,
-                        color = Color.White
+                        color = MaterialTheme.colorScheme.onPrimary
                     )
                 }
             }
 
             Spacer(modifier = Modifier.height(26.dp))
 
-            // 6. Disclaimer Footer
             Text(
                 text = "You can cancel or manage your subscription anytime on Google Play Store.",
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontSize = 12.sp,
-                    lineHeight = 17.sp
-                ),
-                color = Color.White.copy(alpha = 0.45f),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -324,46 +292,45 @@ fun PremiumScreen(
         }
     }
 
-    // Help / Info Dialog
     if (showHelpDialog) {
         AlertDialog(
             onDismissRequest = { showHelpDialog = false },
             title = {
                 Text(
                     text = "PGuard Premium Help",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
                         text = "With PGuard Premium, you unlock full content blocking without limits, tamper-proof protection, and cross-device sync.",
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
                     )
                     Text(
                         text = "• Subscriptions renew automatically unless canceled at least 24 hours before the end of the period.",
-                        fontSize = 12.5.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
                         text = "• Manage or cancel your subscriptions anytime in Google Play Store > Subscriptions.",
-                        fontSize = 12.5.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f)
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             },
             confirmButton = {
                 TextButton(
                     onClick = { showHelpDialog = false },
-                    colors = ButtonDefaults.textButtonColors(contentColor = CoralPrimary)
+                    colors = ButtonDefaults.textButtonColors(contentColor = primary)
                 ) {
-                    Text("Got it", fontWeight = FontWeight.Bold)
+                    Text("Got it", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                 }
             },
-            containerColor = Color(0xFF1E1E24),
-            shape = RoundedCornerShape(16.dp)
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            shape = MaterialTheme.shapes.medium
         )
     }
 }
@@ -375,28 +342,29 @@ private fun PlanRowItem(
     onSelect: () -> Unit
 ) {
     val rowBackground by animateColorAsState(
-        targetValue = if (isSelected) Color(0xFF22222A) else Color.Transparent,
+        targetValue = if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
         animationSpec = tween(durationMillis = 150),
         label = "planRowBackground"
     )
+    val primary = MaterialTheme.colorScheme.primary
+    val successColor = MaterialTheme.pguardColors.success
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(MaterialTheme.shapes.small)
             .background(rowBackground)
             .clickable(onClick = onSelect)
             .padding(horizontal = 20.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Custom Radio Button
         Box(
             modifier = Modifier
                 .size(22.dp)
                 .clip(CircleShape)
                 .border(
                     width = if (isSelected) 2.2.dp else 1.8.dp,
-                    color = if (isSelected) CoralPrimary else Color.White.copy(alpha = 0.5f),
+                    color = if (isSelected) primary else MaterialTheme.colorScheme.onSurfaceVariant,
                     shape = CircleShape
                 ),
             contentAlignment = Alignment.Center
@@ -406,7 +374,7 @@ private fun PlanRowItem(
                     modifier = Modifier
                         .size(11.dp)
                         .clip(CircleShape)
-                        .background(CoralPrimary)
+                        .background(primary)
                 )
             }
         }
@@ -415,18 +383,17 @@ private fun PlanRowItem(
 
         Text(
             text = "${plan.price} / ${plan.period}",
+            style = MaterialTheme.typography.bodyLarge,
             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-            fontSize = 15.sp,
-            color = Color.White
+            color = MaterialTheme.colorScheme.onSurface
         )
 
         if (plan.isRecommended) {
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = "(Recommended)",
-                color = EmeraldAccent,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold
+                color = successColor,
+                style = MaterialTheme.typography.labelMedium
             )
         }
 
@@ -434,18 +401,18 @@ private fun PlanRowItem(
             Spacer(modifier = Modifier.width(6.dp))
             Text(
                 text = plan.discountBadge,
-                color = EmeraldAccent,
-                fontSize = 12.sp,
+                color = successColor,
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold
             )
         }
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF121214)
+@Preview(showBackground = true)
 @Composable
 private fun PremiumScreenPreview() {
-    PGuardTheme(darkTheme = true) {
+    PGuardTheme {
         PremiumScreen(onBackClick = {})
     }
 }

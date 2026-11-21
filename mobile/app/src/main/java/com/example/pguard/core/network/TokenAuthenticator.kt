@@ -22,6 +22,12 @@ class TokenAuthenticator(
     private val json: Json
 ) : Authenticator {
 
+    private sealed interface RefreshResult {
+        data class Success(val auth: AuthResponse) : RefreshResult
+        data object InvalidToken : RefreshResult
+        data object TransientError : RefreshResult
+    }
+
     private val refreshHttpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
@@ -55,23 +61,29 @@ class TokenAuthenticator(
                 return null
             }
 
-            val newAuth = performRefreshToken(refreshToken) ?: run {
-                // Refresh token invalid or expired; clear session
-                runBlocking { authDataStore.clearSession() }
-                return null
+            return when (val result = performRefreshToken(refreshToken)) {
+                is RefreshResult.Success -> {
+                    runBlocking {
+                        authDataStore.updateTokens(result.auth.accessToken, result.auth.refreshToken)
+                    }
+                    response.request.newBuilder()
+                        .header("Authorization", "Bearer ${result.auth.accessToken}")
+                        .build()
+                }
+                RefreshResult.InvalidToken -> {
+                    // Refresh token definitively rejected (401/403); clear session
+                    runBlocking { authDataStore.clearSession() }
+                    null
+                }
+                RefreshResult.TransientError -> {
+                    // Offline or transient server error; preserve session
+                    null
+                }
             }
-
-            runBlocking {
-                authDataStore.updateTokens(newAuth.accessToken, newAuth.refreshToken)
-            }
-
-            return response.request.newBuilder()
-                .header("Authorization", "Bearer ${newAuth.accessToken}")
-                .build()
         }
     }
 
-    private fun performRefreshToken(refreshToken: String): AuthResponse? {
+    private fun performRefreshToken(refreshToken: String): RefreshResult {
         return try {
             val base = baseUrlProvider().let { if (it.endsWith("/")) it else "$it/" }
             val url = "${base}api/v1/auth/refresh"
@@ -86,14 +98,19 @@ class TokenAuthenticator(
                 .post(body)
                 .build()
 
-            val resp = refreshHttpClient.newCall(request).execute()
-            if (!resp.isSuccessful) {
-                return null
+            refreshHttpClient.newCall(request).execute().use { resp ->
+                if (resp.code == 401 || resp.code == 403) {
+                    return RefreshResult.InvalidToken
+                }
+                if (!resp.isSuccessful) {
+                    return RefreshResult.TransientError
+                }
+                val respBody = resp.body?.string() ?: return RefreshResult.TransientError
+                val authResp = json.decodeFromString(AuthResponse.serializer(), respBody)
+                RefreshResult.Success(authResp)
             }
-            val respBody = resp.body?.string() ?: return null
-            json.decodeFromString(AuthResponse.serializer(), respBody)
-        } catch (e: Exception) {
-            null
+        } catch (_: Exception) {
+            RefreshResult.TransientError
         }
     }
 

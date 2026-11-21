@@ -14,26 +14,23 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.pguard.R
-import com.example.pguard.presentation.theme.CoralPrimary
 
 @Composable
 fun PermissionGuideDialog(
@@ -46,11 +43,13 @@ fun PermissionGuideDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val primary = MaterialTheme.colorScheme.primary
+
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = CardBackground,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -66,51 +65,46 @@ fun PermissionGuideDialog(
                     Box(
                         modifier = Modifier
                             .size(44.dp)
-                            .background(CoralPrimary.copy(alpha = 0.15f), CircleShape),
+                            .background(primary.copy(alpha = 0.15f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             painter = painterResource(id = iconRes),
                             contentDescription = null,
-                            tint = CoralPrimary,
+                            tint = primary,
                             modifier = Modifier.size(24.dp)
                         )
                     }
                     Column {
                         Text(
                             text = title,
-                            fontSize = 17.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = category,
-                            fontSize = 12.sp,
-                            color = CoralPrimary,
-                            fontWeight = FontWeight.SemiBold
+                            style = MaterialTheme.typography.labelMedium,
+                            color = primary
                         )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Text(
                     text = description,
-                    fontSize = 13.5.sp,
-                    color = Color.White.copy(alpha = 0.85f),
-                    lineHeight = 20.sp
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
                 )
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
                     text = "HOW TO ACTIVATE IN SETTINGS:",
-                    fontSize = 11.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White.copy(alpha = 0.5f),
-                    letterSpacing = 0.5.sp
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -126,21 +120,19 @@ fun PermissionGuideDialog(
                         Box(
                             modifier = Modifier
                                 .size(22.dp)
-                                .background(Color.White.copy(alpha = 0.08f), CircleShape),
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "${index + 1}",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = CoralPrimary
+                                style = MaterialTheme.typography.labelSmall,
+                                color = primary
                             )
                         }
                         Text(
                             text = step,
-                            fontSize = 13.sp,
-                            color = Color.White.copy(alpha = 0.9f),
-                            lineHeight = 18.sp,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -153,18 +145,18 @@ fun PermissionGuideDialog(
                     horizontalArrangement = Arrangement.End
                 ) {
                     TextButton(onClick = onDismiss) {
-                        Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                        Text("Cancel", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = onConfirm,
-                        colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
-                        shape = RoundedCornerShape(12.dp)
+                        colors = ButtonDefaults.buttonColors(containerColor = primary),
+                        shape = MaterialTheme.shapes.small
                     ) {
                         Text(
                             text = confirmLabel,
-                            color = Color.White,
-                            fontWeight = FontWeight.SemiBold
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onPrimary
                         )
                     }
                 }
@@ -178,11 +170,13 @@ fun AccessibilityExplanationDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val primary = MaterialTheme.colorScheme.primary
+
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = CardBackground,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -191,7 +185,6 @@ fun AccessibilityExplanationDialog(
                     .padding(22.dp)
                     .verticalScroll(rememberScrollState())
             ) {
-                // Header
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
@@ -199,47 +192,42 @@ fun AccessibilityExplanationDialog(
                     Box(
                         modifier = Modifier
                             .size(46.dp)
-                            .background(CoralPrimary.copy(alpha = 0.15f), CircleShape),
+                            .background(primary.copy(alpha = 0.15f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             painter = painterResource(id = R.drawable.ic_accessibility),
                             contentDescription = null,
-                            tint = CoralPrimary,
+                            tint = primary,
                             modifier = Modifier.size(24.dp)
                         )
                     }
                     Column {
                         Text(
                             text = "Accessibility Disclosure",
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = "Prominent In-App Consent",
-                            fontSize = 12.sp,
-                            color = CoralPrimary,
-                            fontWeight = FontWeight.SemiBold
+                            style = MaterialTheme.typography.labelMedium,
+                            color = primary
                         )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
-                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Core explanation
                 Text(
                     text = "PGuard uses Android's AccessibilityService API solely for real-time digital wellbeing protection and content filtering.",
-                    fontSize = 13.sp,
-                    color = Color.White.copy(alpha = 0.85f),
-                    lineHeight = 19.sp
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Section 1: What Data Is Monitored
                 DisclosureSection(
                     title = "WHAT DATA IS INSPECTED",
                     items = listOf(
@@ -250,7 +238,6 @@ fun AccessibilityExplanationDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Section 2: Non-Destructive Protection
                 DisclosureSection(
                     title = "HOW IT PROTECTS YOU",
                     items = listOf(
@@ -261,7 +248,6 @@ fun AccessibilityExplanationDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Section 3: Strict Privacy Guarantee
                 DisclosureSection(
                     title = "PRIVACY & SECURITY GUARANTEE",
                     items = listOf(
@@ -272,13 +258,10 @@ fun AccessibilityExplanationDialog(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Activation steps
                 Text(
                     text = "ACTIVATION STEPS:",
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White.copy(alpha = 0.5f),
-                    letterSpacing = 0.5.sp
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(8.dp))
 
@@ -297,21 +280,19 @@ fun AccessibilityExplanationDialog(
                         Box(
                             modifier = Modifier
                                 .size(20.dp)
-                                .background(Color.White.copy(alpha = 0.08f), CircleShape),
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "${index + 1}",
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = CoralPrimary
+                                style = MaterialTheme.typography.labelSmall,
+                                color = primary
                             )
                         }
                         Text(
                             text = step,
-                            fontSize = 12.5.sp,
-                            color = Color.White.copy(alpha = 0.9f),
-                            lineHeight = 17.sp,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f),
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -319,26 +300,24 @@ fun AccessibilityExplanationDialog(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Action buttons (Decline vs Affirmative Consent)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     TextButton(onClick = onDismiss) {
-                        Text("Decline", color = Color.White.copy(alpha = 0.7f), fontSize = 13.5.sp)
+                        Text("Decline", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = onConfirm,
-                        colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
-                        shape = RoundedCornerShape(12.dp)
+                        colors = ButtonDefaults.buttonColors(containerColor = primary),
+                        shape = MaterialTheme.shapes.small
                     ) {
                         Text(
                             text = "Agree & Open Settings",
-                            color = Color.White,
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.5.sp
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onPrimary
                         )
                     }
                 }
@@ -355,15 +334,13 @@ private fun DisclosureSection(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Color.White.copy(alpha = 0.04f), RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow, MaterialTheme.shapes.small)
             .padding(10.dp)
     ) {
         Text(
             text = title,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            color = CoralPrimary,
-            letterSpacing = 0.5.sp
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary
         )
         Spacer(modifier = Modifier.height(6.dp))
         items.forEach { item ->
@@ -376,15 +353,14 @@ private fun DisclosureSection(
             ) {
                 Text(
                     text = "•",
-                    color = CoralPrimary,
-                    fontSize = 12.sp,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
                     text = item,
-                    fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.85f),
-                    lineHeight = 16.5.sp
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
                 )
             }
         }

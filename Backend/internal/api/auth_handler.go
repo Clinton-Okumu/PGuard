@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 
@@ -124,16 +125,30 @@ func (h *AuthHandler) HandleRefreshToken(w http.ResponseWriter, r *http.Request)
 	}
 
 	tokenHash := tokens.HashToken(req.RefreshToken)
-	existingToken, err := h.tokenStore.GetValidRefreshToken(tokenHash)
-	if err != nil || existingToken == nil {
-		_ = utils.WriteJSON(w, http.StatusUnauthorized, utils.Envelope{"error": "Invalid or expired refresh token"})
+	plainRefresh, newHash, expiresAt, err := h.tokenService.GenerateRefreshToken()
+	if err != nil {
+		h.logger.Printf("ERROR: generate refresh token: %v", err)
+		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "Internal server error"})
 		return
 	}
 
-	// Token rotation: Revoke existing refresh token immediately
-	_ = h.tokenStore.RevokeRefreshToken(tokenHash)
+	rotatedToken, err := h.tokenStore.RotateRefreshToken(tokenHash, newHash, req.DeviceInfo, expiresAt)
+	if err != nil {
+		if errors.Is(err, store.ErrRefreshTokenReused) {
+			h.logger.Printf("WARN: refresh token reuse detected; revoked all user tokens")
+			_ = utils.WriteJSON(w, http.StatusUnauthorized, utils.Envelope{"error": "Refresh token reuse detected"})
+			return
+		}
+		if errors.Is(err, store.ErrInvalidRefreshToken) {
+			_ = utils.WriteJSON(w, http.StatusUnauthorized, utils.Envelope{"error": "Invalid or expired refresh token"})
+			return
+		}
+		h.logger.Printf("ERROR: rotate refresh token: %v", err)
+		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "Internal server error"})
+		return
+	}
 
-	user, err := h.userStore.GetUserByID(existingToken.UserID)
+	user, err := h.userStore.GetUserByID(rotatedToken.UserID)
 	if err != nil || user == nil {
 		_ = utils.WriteJSON(w, http.StatusUnauthorized, utils.Envelope{"error": "User not found"})
 		return
@@ -142,25 +157,6 @@ func (h *AuthHandler) HandleRefreshToken(w http.ResponseWriter, r *http.Request)
 	accessToken, expiresIn, err := h.tokenService.GenerateAccessToken(user.ID, user.Email)
 	if err != nil {
 		h.logger.Printf("ERROR: generate access token: %v", err)
-		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "Internal server error"})
-		return
-	}
-
-	plainRefresh, newHash, expiresAt, err := h.tokenService.GenerateRefreshToken()
-	if err != nil {
-		h.logger.Printf("ERROR: generate refresh token: %v", err)
-		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "Internal server error"})
-		return
-	}
-
-	deviceInfo := req.DeviceInfo
-	if deviceInfo == "" {
-		deviceInfo = existingToken.DeviceInfo
-	}
-
-	_, err = h.tokenStore.CreateRefreshToken(user.ID, newHash, deviceInfo, expiresAt)
-	if err != nil {
-		h.logger.Printf("ERROR: store refresh token: %v", err)
 		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "Internal server error"})
 		return
 	}

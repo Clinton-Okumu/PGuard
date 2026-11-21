@@ -1,8 +1,33 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
+
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) {
+        file.inputStream().use { load(it) }
+    }
+}
+
+fun normalizeBaseUrl(raw: String): String {
+    val trimmed = raw.trim()
+    return if (trimmed.endsWith("/")) trimmed else "$trimmed/"
+}
+
+fun escapeBuildConfigString(value: String): String =
+    value.replace("\\", "\\\\").replace("\"", "\\\"")
+
+val debugApiBaseUrl = normalizeBaseUrl(
+    localProperties.getProperty("pguard.apiBaseUrl") ?: "http://192.168.100.80:8080/"
+)
+val releaseApiBaseUrl = normalizeBaseUrl(
+    localProperties.getProperty("pguard.releaseApiBaseUrl") ?: "https://api.pguard.app/"
+)
+val googleWebClientId = (localProperties.getProperty("pguard.googleWebClientId") ?: "").trim()
 
 android {
     namespace = "com.example.pguard"
@@ -21,7 +46,13 @@ android {
     }
 
     buildTypes {
+        debug {
+            buildConfigField("String", "API_BASE_URL", "\"${escapeBuildConfigString(debugApiBaseUrl)}\"")
+            buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${escapeBuildConfigString(googleWebClientId)}\"")
+        }
         release {
+            buildConfigField("String", "API_BASE_URL", "\"${escapeBuildConfigString(releaseApiBaseUrl)}\"")
+            buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${escapeBuildConfigString(googleWebClientId)}\"")
             optimization {
                 enable = true
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
@@ -34,6 +65,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

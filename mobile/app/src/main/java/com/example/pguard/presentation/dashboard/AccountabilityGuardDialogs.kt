@@ -1,12 +1,9 @@
 package com.example.pguard.presentation.dashboard
 
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,8 +15,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -47,22 +45,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.pguard.R
-import com.example.pguard.presentation.theme.CoralPrimary
+import com.example.pguard.engine.accessibility.BlockingPreferences
+import com.example.pguard.presentation.theme.pguardColors
 import kotlinx.coroutines.delay
 
-/**
- * Dialog allowing the user to select their active protection guard mode:
- * 1. Friend (Accountability Partner)
- * 2. Myself (Typing Challenge)
- * 3. 24-Hour Time Delay
- */
 @Composable
 fun AccountabilityModeSelectionDialog(
     currentMode: AccountabilityMode,
@@ -70,12 +62,13 @@ fun AccountabilityModeSelectionDialog(
     onDismiss: () -> Unit
 ) {
     var selected by remember { mutableStateOf(currentMode) }
+    val primary = MaterialTheme.colorScheme.primary
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = CardBackground,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -91,33 +84,32 @@ fun AccountabilityModeSelectionDialog(
                     Box(
                         modifier = Modifier
                             .size(38.dp)
-                            .background(CoralPrimary.copy(alpha = 0.15f), CircleShape),
+                            .background(primary.copy(alpha = 0.15f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             painter = painterResource(id = R.drawable.ic_partner),
                             contentDescription = null,
-                            tint = CoralPrimary,
+                            tint = primary,
                             modifier = Modifier.size(20.dp)
                         )
                     }
                     Column {
                         Text(
                             text = "Accountability Guard",
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = "Choose friction before turning off blocks",
-                            fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.6f)
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(modifier = Modifier.height(12.dp))
 
                 val modes = listOf(
@@ -148,12 +140,12 @@ fun AccountabilityModeSelectionDialog(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(if (isSelected) CoralPrimary.copy(alpha = 0.08f) else Color.Transparent)
+                            .clip(MaterialTheme.shapes.small)
+                            .background(if (isSelected) primary.copy(alpha = 0.08f) else Color.Transparent)
                             .border(
                                 width = 1.dp,
-                                color = if (isSelected) CoralPrimary.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.06f),
-                                shape = RoundedCornerShape(14.dp)
+                                color = if (isSelected) primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant,
+                                shape = MaterialTheme.shapes.small
                             )
                             .clickable { selected = mode }
                             .padding(12.dp),
@@ -163,8 +155,8 @@ fun AccountabilityModeSelectionDialog(
                             selected = isSelected,
                             onClick = { selected = mode },
                             colors = RadioButtonDefaults.colors(
-                                selectedColor = CoralPrimary,
-                                unselectedColor = Color.White.copy(alpha = 0.4f)
+                                selectedColor = primary,
+                                unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
                             ),
                             modifier = Modifier.size(20.dp)
                         )
@@ -172,16 +164,14 @@ fun AccountabilityModeSelectionDialog(
                         Column {
                             Text(
                                 text = title,
-                                fontSize = 14.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.9f)
+                                style = MaterialTheme.typography.titleSmall,
+                                color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.9f)
                             )
                             Spacer(modifier = Modifier.height(3.dp))
                             Text(
                                 text = desc,
-                                fontSize = 11.5.sp,
-                                color = Color.White.copy(alpha = 0.55f),
-                                lineHeight = 16.sp
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
                     }
@@ -195,7 +185,7 @@ fun AccountabilityModeSelectionDialog(
                     horizontalArrangement = Arrangement.End
                 ) {
                     TextButton(onClick = onDismiss) {
-                        Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                        Text("Cancel", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
@@ -203,10 +193,10 @@ fun AccountabilityModeSelectionDialog(
                             onSelectMode(selected)
                             onDismiss()
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
-                        shape = RoundedCornerShape(12.dp)
+                        colors = ButtonDefaults.buttonColors(containerColor = primary),
+                        shape = MaterialTheme.shapes.small
                     ) {
-                        Text("Save Mode", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text("Save Mode", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimary)
                     }
                 }
             }
@@ -214,10 +204,6 @@ fun AccountabilityModeSelectionDialog(
     }
 }
 
-/**
- * Interactive Typing Challenge Dialog for "Myself" mode.
- * Presents an original focus commitment, a 60-second timer, and live validation.
- */
 @Composable
 fun TypingChallengeDialog(
     targetFeatureTitle: String,
@@ -247,12 +233,13 @@ fun TypingChallengeDialog(
     }
 
     val isMatch = inputText.trim() == targetText.trim()
+    val primary = MaterialTheme.colorScheme.primary
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = CardBackground,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -267,15 +254,14 @@ fun TypingChallengeDialog(
                 ) {
                     Text(
                         text = "Typing Challenge",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
                         text = if (isExpired) "Expired" else "${secondsLeft}s",
-                        fontSize = 14.sp,
+                        style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold,
-                        color = if (secondsLeft <= 10) CoralPrimary else Color.White.copy(alpha = 0.8f)
+                        color = if (secondsLeft <= 10) primary else MaterialTheme.colorScheme.onSurface
                     )
                 }
 
@@ -286,8 +272,8 @@ fun TypingChallengeDialog(
                         .fillMaxWidth()
                         .height(4.dp)
                         .clip(CircleShape),
-                    color = CoralPrimary,
-                    trackColor = Color.White.copy(alpha = 0.1f)
+                    color = primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceContainerHigh
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -301,24 +287,23 @@ fun TypingChallengeDialog(
                 }
                 Text(
                     text = challengePrompt,
-                    fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.7f)
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color.White.copy(alpha = 0.05f),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.1f)),
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
                         text = targetText,
-                        fontSize = 13.5.sp,
+                        style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
-                        color = CoralPrimary,
-                        modifier = Modifier.padding(12.dp),
-                        lineHeight = 19.sp
+                        color = primary,
+                        modifier = Modifier.padding(12.dp)
                     )
                 }
 
@@ -327,14 +312,20 @@ fun TypingChallengeDialog(
                 OutlinedTextField(
                     value = inputText,
                     onValueChange = { if (!isExpired) inputText = it },
-                    placeholder = { Text("Type phrase here...", fontSize = 13.sp, color = Color.White.copy(alpha = 0.3f)) },
+                    placeholder = {
+                        Text(
+                            "Type phrase here...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = MaterialTheme.shapes.small,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = if (isMatch) Color(0xFF4CAF50) else CoralPrimary,
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
+                        focusedBorderColor = if (isMatch) MaterialTheme.pguardColors.success else primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
                     ),
                     singleLine = false,
                     maxLines = 4,
@@ -345,8 +336,8 @@ fun TypingChallengeDialog(
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Time expired! Protection remains active.",
-                        color = CoralPrimary,
-                        fontSize = 12.sp,
+                        color = primary,
+                        style = MaterialTheme.typography.bodySmall,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
@@ -358,7 +349,7 @@ fun TypingChallengeDialog(
                     horizontalArrangement = Arrangement.End
                 ) {
                     TextButton(onClick = onDismiss) {
-                        Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                        Text("Cancel", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
@@ -369,12 +360,12 @@ fun TypingChallengeDialog(
                         },
                         enabled = isMatch && !isExpired,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = CoralPrimary,
-                            disabledContainerColor = Color.White.copy(alpha = 0.1f)
+                            containerColor = primary,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                         ),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = MaterialTheme.shapes.small
                     ) {
-                        Text("Verify & Unlock", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text("Verify & Unlock", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimary)
                     }
                 }
             }
@@ -382,20 +373,19 @@ fun TypingChallengeDialog(
     }
 }
 
-/**
- * Confirmation dialog before initiating a 24-Hour Cooling-Off delay.
- */
 @Composable
 fun TimeDelayConfirmDialog(
     targetFeatureTitle: String,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val primary = MaterialTheme.colorScheme.primary
+
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = CardBackground,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -406,13 +396,13 @@ fun TimeDelayConfirmDialog(
                 Box(
                     modifier = Modifier
                         .size(44.dp)
-                        .background(CoralPrimary.copy(alpha = 0.15f), CircleShape),
+                        .background(primary.copy(alpha = 0.15f), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_focus_mode),
                         contentDescription = null,
-                        tint = CoralPrimary,
+                        tint = primary,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -420,9 +410,8 @@ fun TimeDelayConfirmDialog(
                 Spacer(modifier = Modifier.height(14.dp))
                 Text(
                     text = "24-Hour Cooling-Off Period",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -436,9 +425,8 @@ fun TimeDelayConfirmDialog(
                 }
                 Text(
                     text = timeDelayPrompt,
-                    fontSize = 13.sp,
-                    color = Color.White.copy(alpha = 0.7f),
-                    lineHeight = 18.sp
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -448,15 +436,15 @@ fun TimeDelayConfirmDialog(
                     horizontalArrangement = Arrangement.End
                 ) {
                     TextButton(onClick = onDismiss) {
-                        Text("Keep Protected", color = Color.White.copy(alpha = 0.7f))
+                        Text("Keep Protected", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = onConfirm,
-                        colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
-                        shape = RoundedCornerShape(12.dp)
+                        colors = ButtonDefaults.buttonColors(containerColor = primary),
+                        shape = MaterialTheme.shapes.small
                     ) {
-                        Text("Start 24h Timer", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text("Start 24h Timer", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimary)
                     }
                 }
             }
@@ -464,9 +452,6 @@ fun TimeDelayConfirmDialog(
     }
 }
 
-/**
- * Prominent banner showing an active 24-Hour Delay countdown.
- */
 @Composable
 fun TimeDelayActiveBanner(
     targetFeatureTitle: String,
@@ -474,17 +459,35 @@ fun TimeDelayActiveBanner(
     onCancel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val now = System.currentTimeMillis()
-    val diffMillis = (unlockAt - now).coerceAtLeast(0L)
+    val context = LocalContext.current
+    var diffMillis by remember(unlockAt, targetFeatureTitle) {
+        mutableStateOf(
+            BlockingPreferences.getTimeDelayRemainingMs(context).let {
+                if (it > 0L) it else (unlockAt - System.currentTimeMillis()).coerceAtLeast(0L)
+            }
+        )
+    }
+
+    LaunchedEffect(unlockAt, targetFeatureTitle) {
+        while (diffMillis > 0L) {
+            delay(30_000L)
+            diffMillis = BlockingPreferences.getTimeDelayRemainingMs(context).let {
+                if (it > 0L || BlockingPreferences.timeDelayUnlockAt <= 0L) it
+                else (unlockAt - System.currentTimeMillis()).coerceAtLeast(0L)
+            }
+        }
+    }
+
     val hours = diffMillis / (1000 * 60 * 60)
     val minutes = (diffMillis / (1000 * 60)) % 60
     val isComplete = diffMillis <= 0L
+    val primary = MaterialTheme.colorScheme.primary
 
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = CoralPrimary.copy(alpha = 0.15f)),
-        border = BorderStroke(1.dp, CoralPrimary.copy(alpha = 0.4f))
+        shape = MaterialTheme.shapes.medium,
+        colors = CardDefaults.cardColors(containerColor = primary.copy(alpha = 0.15f)),
+        border = BorderStroke(1.dp, primary.copy(alpha = 0.4f))
     ) {
         Row(
             modifier = Modifier
@@ -500,43 +503,40 @@ fun TimeDelayActiveBanner(
                 Icon(
                     painter = painterResource(id = R.drawable.ic_focus_mode),
                     contentDescription = null,
-                    tint = CoralPrimary,
+                    tint = primary,
                     modifier = Modifier.size(24.dp)
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text(
                         text = if (isComplete) "Unlock Ready: $targetFeatureTitle" else "Unlock Pending: $targetFeatureTitle",
-                        fontSize = 13.5.sp,
+                        style = MaterialTheme.typography.titleSmall,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
                         text = if (isComplete) "Ready to toggle off" else "Available in ${hours}h ${minutes}m",
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.75f)
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
             OutlinedButton(
                 onClick = onCancel,
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, Color.White.copy(alpha = 0.3f)),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
-                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 2.dp),
-                modifier = Modifier.height(30.dp)
+                shape = MaterialTheme.shapes.small,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                modifier = Modifier.height(32.dp)
             ) {
-                Text("Cancel", fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+                Text("Cancel", style = MaterialTheme.typography.labelMedium)
             }
         }
     }
 }
 
-/**
- * Partner Approval Dialog for "Friend" mode.
- */
 @Composable
 fun FriendApprovalDialog(
     targetFeatureTitle: String,
@@ -544,10 +544,13 @@ fun FriendApprovalDialog(
     onRequestCode: () -> Unit,
     onSubmitCode: (String) -> Unit,
     onDismiss: () -> Unit,
-    devCode: String? = null
+    isVerifying: Boolean = false,
+    errorMessage: String? = null,
+    requestError: String? = null
 ) {
     var code by remember { mutableStateOf("") }
     var codeRequested by remember { mutableStateOf(false) }
+    val primary = MaterialTheme.colorScheme.primary
 
     LaunchedEffect(Unit) {
         onRequestCode()
@@ -556,9 +559,9 @@ fun FriendApprovalDialog(
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = CardBackground,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -573,27 +576,26 @@ fun FriendApprovalDialog(
                     Box(
                         modifier = Modifier
                             .size(38.dp)
-                            .background(CoralPrimary.copy(alpha = 0.15f), CircleShape),
+                            .background(primary.copy(alpha = 0.15f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             painter = painterResource(id = R.drawable.ic_partner),
                             contentDescription = null,
-                            tint = CoralPrimary,
+                            tint = primary,
                             modifier = Modifier.size(20.dp)
                         )
                     }
                     Column {
                         Text(
                             text = "Partner Approval",
-                            fontSize = 17.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = partnerEmail.ifBlank { "Accountability Friend" },
-                            fontSize = 12.sp,
-                            color = Color.White.copy(alpha = 0.6f)
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -609,41 +611,42 @@ fun FriendApprovalDialog(
                 }
                 Text(
                     text = friendPrompt,
-                    fontSize = 12.5.sp,
-                    color = Color.White.copy(alpha = 0.75f),
-                    lineHeight = 17.sp
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f)
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedTextField(
                     value = code,
-                    onValueChange = { if (it.length <= 6) code = it },
-                    placeholder = { Text("6-digit code", fontSize = 14.sp, color = Color.White.copy(alpha = 0.3f)) },
+                    onValueChange = { if (it.length <= 6 && !isVerifying) code = it },
+                    placeholder = {
+                        Text(
+                            "6-digit code",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = MaterialTheme.shapes.small,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CoralPrimary,
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.15f),
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White
+                        focusedBorderColor = primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
                     ),
-                    singleLine = true
+                    singleLine = true,
+                    enabled = !isVerifying
                 )
 
-                if (!devCode.isNullOrBlank()) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    TextButton(
-                        onClick = { code = devCode },
-                        modifier = Modifier.align(Alignment.Start),
-                        contentPadding = PaddingValues(0.dp)
-                    ) {
-                        Text(
-                            text = "💡 Auto-fill Code for Testing ($devCode)",
-                            fontSize = 11.5.sp,
-                            color = CoralPrimary
-                        )
-                    }
+                if (!errorMessage.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = errorMessage,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(8.dp))
@@ -653,12 +656,17 @@ fun FriendApprovalDialog(
                         onRequestCode()
                         codeRequested = true
                     },
+                    enabled = !isVerifying,
                     modifier = Modifier.align(Alignment.Start)
                 ) {
                     Text(
-                        text = if (codeRequested) "Email sent to partner!" else "Resend approval email to partner",
-                        fontSize = 12.sp,
-                        color = if (codeRequested) Color(0xFF4CAF50) else CoralPrimary
+                        text = when {
+                            !requestError.isNullOrBlank() -> "Failed to send email ($requestError) — tap to retry"
+                            codeRequested -> "Email sent to partner! Tap to resend"
+                            else -> "Resend approval email to partner"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (!requestError.isNullOrBlank()) primary else if (codeRequested) MaterialTheme.pguardColors.success else primary
                     )
                 }
 
@@ -668,20 +676,24 @@ fun FriendApprovalDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End
                 ) {
-                    TextButton(onClick = onDismiss) {
-                        Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                    TextButton(onClick = onDismiss, enabled = !isVerifying) {
+                        Text("Cancel", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = { onSubmitCode(code.trim()) },
-                        enabled = code.trim().length >= 4,
+                        enabled = code.trim().length == 6 && !isVerifying,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = CoralPrimary,
-                            disabledContainerColor = Color.White.copy(alpha = 0.1f)
+                            containerColor = primary,
+                            disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh
                         ),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = MaterialTheme.shapes.small
                     ) {
-                        Text("Verify & Unlock", color = Color.White, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            text = if (isVerifying) "Verifying..." else "Verify & Unlock",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
                     }
                 }
             }
@@ -689,20 +701,18 @@ fun FriendApprovalDialog(
     }
 }
 
-/**
- * Modal dialog prompting the user to allow Android Device Administrator access
- * to activate Uninstall Protection.
- */
 @Composable
 fun DeviceAdminPermissionDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
+    val primary = MaterialTheme.colorScheme.primary
+
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = CardBackground,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -717,40 +727,38 @@ fun DeviceAdminPermissionDialog(
                     Box(
                         modifier = Modifier
                             .size(42.dp)
-                            .background(CoralPrimary.copy(alpha = 0.15f), CircleShape),
+                            .background(primary.copy(alpha = 0.15f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             painter = painterResource(id = R.drawable.ic_feature_shield),
                             contentDescription = null,
-                            tint = CoralPrimary,
+                            tint = primary,
                             modifier = Modifier.size(22.dp)
                         )
                     }
                     Column {
                         Text(
                             text = "Admin Access Required",
-                            fontSize = 17.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
                             text = "Uninstall Protection",
-                            fontSize = 12.sp,
-                            color = CoralPrimary
+                            style = MaterialTheme.typography.labelMedium,
+                            color = primary
                         )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(modifier = Modifier.height(14.dp))
 
                 Text(
                     text = "To prevent PGuard from being uninstalled or tampered with, Android requires Device Administrator permission.\n\nOnce activated, the Android operating system prevents PGuard from being uninstalled until you pass your accountability check inside the app.\n\nOn the next screen, tap \"Activate this device admin app\".",
-                    fontSize = 13.5.sp,
-                    color = Color.White.copy(alpha = 0.85f),
-                    lineHeight = 20.sp
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -760,18 +768,18 @@ fun DeviceAdminPermissionDialog(
                     horizontalArrangement = Arrangement.End
                 ) {
                     TextButton(onClick = onDismiss) {
-                        Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                        Text("Cancel", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = onConfirm,
-                        colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
-                        shape = RoundedCornerShape(12.dp)
+                        colors = ButtonDefaults.buttonColors(containerColor = primary),
+                        shape = MaterialTheme.shapes.small
                     ) {
                         Text(
                             text = "Allow Admin Access",
-                            color = Color.White,
-                            fontWeight = FontWeight.SemiBold
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onPrimary
                         )
                     }
                 }

@@ -64,16 +64,18 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.pguard.R
+import com.example.pguard.engine.accessibility.BlockingPreferences
 import com.example.pguard.engine.accessibility.PGuardAccessibilityService
 import com.example.pguard.presentation.dashboard.AccountabilityMode
 import com.example.pguard.presentation.dashboard.BlockingViewModel
 import com.example.pguard.presentation.dashboard.FriendApprovalDialog
+import com.example.pguard.presentation.dashboard.TimeDelayActiveBanner
 import com.example.pguard.presentation.dashboard.TimeDelayConfirmDialog
 import com.example.pguard.presentation.dashboard.TypingChallengeDialog
-import com.example.pguard.presentation.theme.CoralPrimary
+import com.example.pguard.presentation.dashboard.targetDisplayName
 import com.example.pguard.presentation.theme.PGuardTheme
+import com.example.pguard.presentation.theme.pguardColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -125,7 +127,9 @@ fun BlocklistScreen(
     var showTimeDelayConfirm by remember { mutableStateOf(false) }
     var showFriendApproval by remember { mutableStateOf(false) }
     var pendingFrictionAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var pendingTimeDelayTargetId by remember { mutableStateOf("") }
     var frictionTargetTitle by remember { mutableStateOf("Blocklist Item") }
+    var localUnlockError by remember { mutableStateOf<String?>(null) }
 
     val currentApps = if (selectedListType == ListType.BLOCKLIST) blockedApps else whitelistedApps
     val currentKeywords = if (selectedListType == ListType.BLOCKLIST) blockedKeywords else whitelistedKeywords
@@ -190,7 +194,7 @@ fun BlocklistScreen(
         }
     }
 
-    fun triggerProtectedRemove(itemTitle: String, action: () -> Unit) {
+    fun triggerProtectedRemove(targetId: String, itemTitle: String, action: () -> Unit) {
         if (selectedListType == ListType.WHITELIST) {
             // Whitelisting doesn't require any use of friction
             action()
@@ -208,13 +212,21 @@ fun BlocklistScreen(
                 showTypingChallenge = true
             }
             AccountabilityMode.TIME_DELAY -> {
-                pendingFrictionAction = action
-                showTimeDelayConfirm = true
+                if (BlockingPreferences.isTimeDelayElapsed(context, targetId)) {
+                    blockingViewModel?.cancelTimeDelay(context) ?: BlockingPreferences.clearTimeDelay(context)
+                    action()
+                } else {
+                    pendingTimeDelayTargetId = targetId
+                    pendingFrictionAction = null
+                    showTimeDelayConfirm = true
+                }
             }
             AccountabilityMode.FRIEND -> {
                 val partner = blockingUiState?.partner
                 val isLinked = blockingUiState?.isPartnerLinked ?: false
                 if (partner != null && isLinked) {
+                    localUnlockError = null
+                    blockingViewModel?.clearUnlockErrors()
                     pendingFrictionAction = action
                     showFriendApproval = true
                 } else {
@@ -223,6 +235,8 @@ fun BlocklistScreen(
             }
         }
     }
+
+    val primary = MaterialTheme.colorScheme.primary
 
     Box(
         modifier = modifier
@@ -240,24 +254,28 @@ fun BlocklistScreen(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp)
                     .height(48.dp)
-                    .background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(14.dp))
-                    .border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow, MaterialTheme.shapes.medium)
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.medium)
                     .padding(4.dp)
             ) {
                 Box(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(if (selectedListType == ListType.BLOCKLIST) CoralPrimary else Color.Transparent)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(if (selectedListType == ListType.BLOCKLIST) primary else Color.Transparent)
                         .clickable { selectedListType = ListType.BLOCKLIST },
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "Blocklist",
+                        style = MaterialTheme.typography.labelLarge,
                         fontWeight = if (selectedListType == ListType.BLOCKLIST) FontWeight.Bold else FontWeight.Medium,
-                        fontSize = 14.5.sp,
-                        color = if (selectedListType == ListType.BLOCKLIST) Color.White else Color.White.copy(alpha = 0.65f)
+                        color = if (selectedListType == ListType.BLOCKLIST) {
+                            MaterialTheme.colorScheme.onPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
                     )
                 }
 
@@ -265,16 +283,20 @@ fun BlocklistScreen(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight()
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(if (selectedListType == ListType.WHITELIST) CoralPrimary else Color.Transparent)
+                        .clip(MaterialTheme.shapes.small)
+                        .background(if (selectedListType == ListType.WHITELIST) primary else Color.Transparent)
                         .clickable { selectedListType = ListType.WHITELIST },
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "Whitelist",
+                        style = MaterialTheme.typography.labelLarge,
                         fontWeight = if (selectedListType == ListType.WHITELIST) FontWeight.Bold else FontWeight.Medium,
-                        fontSize = 14.5.sp,
-                        color = if (selectedListType == ListType.WHITELIST) Color.White else Color.White.copy(alpha = 0.65f)
+                        color = if (selectedListType == ListType.WHITELIST) {
+                            MaterialTheme.colorScheme.onPrimary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        }
                     )
                 }
             }
@@ -287,11 +309,11 @@ fun BlocklistScreen(
             ) {
                 Surface(
                     onClick = { selectedCategory = ContentCategory.APPS },
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (selectedCategory == ContentCategory.APPS) CoralPrimary else Color.White.copy(alpha = 0.06f),
+                    shape = MaterialTheme.shapes.small,
+                    color = if (selectedCategory == ContentCategory.APPS) primary else MaterialTheme.colorScheme.surfaceContainerLow,
                     border = BorderStroke(
                         1.dp,
-                        if (selectedCategory == ContentCategory.APPS) CoralPrimary else Color.White.copy(alpha = 0.12f)
+                        if (selectedCategory == ContentCategory.APPS) primary else MaterialTheme.colorScheme.outlineVariant
                     ),
                     modifier = Modifier.height(36.dp)
                 ) {
@@ -303,25 +325,32 @@ fun BlocklistScreen(
                         Icon(
                             painter = painterResource(id = R.drawable.ic_nav_blocking),
                             contentDescription = null,
-                            tint = if (selectedCategory == ContentCategory.APPS) Color.White else Color.White.copy(alpha = 0.7f),
+                            tint = if (selectedCategory == ContentCategory.APPS) {
+                                MaterialTheme.colorScheme.onPrimary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                             modifier = Modifier.size(15.dp)
                         )
                         Text(
                             text = "Apps (${currentApps.size})",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            color = if (selectedCategory == ContentCategory.APPS) Color.White else Color.White.copy(alpha = 0.75f)
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (selectedCategory == ContentCategory.APPS) {
+                                MaterialTheme.colorScheme.onPrimary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
                         )
                     }
                 }
 
                 Surface(
                     onClick = { selectedCategory = ContentCategory.KEYWORDS_WEBSITES },
-                    shape = RoundedCornerShape(12.dp),
-                    color = if (selectedCategory == ContentCategory.KEYWORDS_WEBSITES) CoralPrimary else Color.White.copy(alpha = 0.06f),
+                    shape = MaterialTheme.shapes.small,
+                    color = if (selectedCategory == ContentCategory.KEYWORDS_WEBSITES) primary else MaterialTheme.colorScheme.surfaceContainerLow,
                     border = BorderStroke(
                         1.dp,
-                        if (selectedCategory == ContentCategory.KEYWORDS_WEBSITES) CoralPrimary else Color.White.copy(alpha = 0.12f)
+                        if (selectedCategory == ContentCategory.KEYWORDS_WEBSITES) primary else MaterialTheme.colorScheme.outlineVariant
                     ),
                     modifier = Modifier.height(36.dp)
                 ) {
@@ -333,20 +362,40 @@ fun BlocklistScreen(
                         Icon(
                             painter = painterResource(id = R.drawable.ic_globe),
                             contentDescription = null,
-                            tint = if (selectedCategory == ContentCategory.KEYWORDS_WEBSITES) Color.White else Color.White.copy(alpha = 0.7f),
+                            tint = if (selectedCategory == ContentCategory.KEYWORDS_WEBSITES) {
+                                MaterialTheme.colorScheme.onPrimary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
                             modifier = Modifier.size(15.dp)
                         )
                         Text(
                             text = "Keywords / Websites (${currentKeywords.size})",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp,
-                            color = if (selectedCategory == ContentCategory.KEYWORDS_WEBSITES) Color.White else Color.White.copy(alpha = 0.75f)
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (selectedCategory == ContentCategory.KEYWORDS_WEBSITES) {
+                                MaterialTheme.colorScheme.onPrimary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
                         )
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
+
+            val pendingTarget = blockingUiState?.timeDelayTarget ?: BlockingPreferences.timeDelayTarget
+            val pendingUnlockAt = blockingUiState?.timeDelayUnlockAt ?: BlockingPreferences.timeDelayUnlockAt
+            if (pendingUnlockAt > 0L && pendingTarget.startsWith("BLOCKLIST_")) {
+                TimeDelayActiveBanner(
+                    targetFeatureTitle = targetDisplayName(pendingTarget),
+                    unlockAt = pendingUnlockAt,
+                    onCancel = {
+                        blockingViewModel?.cancelTimeDelay(context) ?: BlockingPreferences.clearTimeDelay(context)
+                    },
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
 
             // 3. Main Content: Empty State or Active List
             val isEmpty = if (selectedCategory == ContentCategory.APPS) currentApps.isEmpty() else currentKeywords.isEmpty()
@@ -365,9 +414,9 @@ fun BlocklistScreen(
                         Box(
                             modifier = Modifier
                                 .size(64.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color.White.copy(alpha = 0.05f))
-                                .border(1.dp, Color.White.copy(alpha = 0.1f), RoundedCornerShape(16.dp)),
+                                .clip(MaterialTheme.shapes.medium)
+                                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MaterialTheme.shapes.medium),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
@@ -375,7 +424,7 @@ fun BlocklistScreen(
                                     id = if (selectedCategory == ContentCategory.APPS) R.drawable.ic_nav_blocking else R.drawable.ic_globe
                                 ),
                                 contentDescription = null,
-                                tint = CoralPrimary.copy(alpha = 0.8f),
+                                tint = primary.copy(alpha = 0.85f),
                                 modifier = Modifier.size(28.dp)
                             )
                         }
@@ -386,10 +435,8 @@ fun BlocklistScreen(
                             } else {
                                 if (selectedListType == ListType.BLOCKLIST) "No Blocked Keywords or Websites" else "No Whitelisted Keywords or Websites"
                             },
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
@@ -398,10 +445,9 @@ fun BlocklistScreen(
                             } else {
                                 "Add domains or keywords to prevent access."
                             },
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                color = Color.White.copy(alpha = 0.55f),
-                                textAlign = TextAlign.Center
-                            )
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
                         )
                         Spacer(modifier = Modifier.height(20.dp))
                         Button(
@@ -413,22 +459,22 @@ fun BlocklistScreen(
                                     showAddKeywordDialog = true
                                 }
                             },
-                            shape = RoundedCornerShape(14.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
+                            shape = MaterialTheme.shapes.small,
+                            colors = ButtonDefaults.buttonColors(containerColor = primary),
                             contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp)
                         ) {
                             Icon(
                                 painter = painterResource(id = R.drawable.ic_add),
                                 contentDescription = null,
-                                tint = Color.White,
+                                tint = MaterialTheme.colorScheme.onPrimary,
                                 modifier = Modifier.size(18.dp)
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
                                 text = if (selectedCategory == ContentCategory.APPS) "Add Apps" else "Add Keyword",
+                                style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 14.sp,
-                                color = Color.White
+                                color = MaterialTheme.colorScheme.onPrimary
                             )
                         }
                     }
@@ -445,7 +491,7 @@ fun BlocklistScreen(
                             AppListItem(
                                 app = app,
                                 onRemove = {
-                                    triggerProtectedRemove(app.name) {
+                                    triggerProtectedRemove("BLOCKLIST_APP:${app.packageName}", app.name) {
                                         if (selectedListType == ListType.BLOCKLIST) {
                                             blockedApps.remove(app)
                                             PGuardAccessibilityService.removeBlockedApp(context, app.packageName)
@@ -456,14 +502,14 @@ fun BlocklistScreen(
                                     }
                                 }
                             )
-                            HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         }
                     } else {
                         items(currentKeywords, key = { it }) { keyword ->
                             KeywordListItem(
                                 keyword = keyword,
                                 onRemove = {
-                                    triggerProtectedRemove(keyword) {
+                                    triggerProtectedRemove("BLOCKLIST_KW:$keyword", keyword) {
                                         if (selectedListType == ListType.BLOCKLIST) {
                                             blockedKeywords.remove(keyword)
                                             PGuardAccessibilityService.removeCustomBlockedKeyword(context, keyword)
@@ -474,7 +520,7 @@ fun BlocklistScreen(
                                     }
                                 }
                             )
-                            HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         }
                     }
                 }
@@ -491,9 +537,9 @@ fun BlocklistScreen(
                     showAddKeywordDialog = true
                 }
             },
-            shape = RoundedCornerShape(16.dp),
-            containerColor = CoralPrimary,
-            contentColor = Color.White,
+            shape = MaterialTheme.shapes.medium,
+            containerColor = primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 20.dp, bottom = 20.dp)
@@ -501,7 +547,7 @@ fun BlocklistScreen(
             Icon(
                 painter = painterResource(id = R.drawable.ic_add),
                 contentDescription = "Add",
-                tint = Color.White,
+                tint = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier.size(24.dp)
             )
         }
@@ -515,16 +561,16 @@ fun BlocklistScreen(
             title = {
                 Text(
                     text = "Add to $typeTitle",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
             },
             text = {
                 Column {
                     Text(
                         text = "Enter a website domain or keyword (e.g. reddit.com, casino, adult):",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(14.dp))
                     OutlinedTextField(
@@ -532,11 +578,11 @@ fun BlocklistScreen(
                         onValueChange = { keywordInput = it },
                         placeholder = { Text("domain.com or keyword") },
                         singleLine = true,
-                        shape = RoundedCornerShape(14.dp),
+                        shape = MaterialTheme.shapes.small,
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = CoralPrimary,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.25f)
+                            focusedBorderColor = primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline
                         )
                     )
                 }
@@ -548,7 +594,6 @@ fun BlocklistScreen(
                         if (trimmed.isEmpty()) return@Button
 
                         if (selectedListType == ListType.WHITELIST) {
-                            // Cannot whitelist keywords/websites that are currently in the Blocklist!
                             val isBlocked = blockedKeywords.any { it.equals(trimmed, ignoreCase = true) }
                             if (isBlocked) {
                                 Toast.makeText(
@@ -563,7 +608,6 @@ fun BlocklistScreen(
                                 PGuardAccessibilityService.addWhitelistedKeyword(context, trimmed)
                             }
                         } else {
-                            // Adding to Blocklist takes precedence over Whitelist
                             if (whitelistedKeywords.contains(trimmed)) {
                                 whitelistedKeywords.remove(trimmed)
                                 PGuardAccessibilityService.removeWhitelistedKeyword(context, trimmed)
@@ -575,23 +619,23 @@ fun BlocklistScreen(
                         }
                         showAddKeywordDialog = false
                     },
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
+                    shape = MaterialTheme.shapes.small,
+                    colors = ButtonDefaults.buttonColors(containerColor = primary),
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
                 ) {
-                    Text("Add", fontWeight = FontWeight.Bold, color = Color.White)
+                    Text("Add", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimary)
                 }
             },
             dismissButton = {
                 TextButton(
                     onClick = { showAddKeywordDialog = false },
-                    shape = RoundedCornerShape(12.dp)
+                    shape = MaterialTheme.shapes.small
                 ) {
-                    Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                    Text("Cancel", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             },
-            containerColor = Color(0xFF1E1E24),
-            shape = RoundedCornerShape(20.dp)
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            shape = MaterialTheme.shapes.large
         )
     }
 
@@ -653,11 +697,20 @@ fun BlocklistScreen(
             targetFeatureTitle = frictionTargetTitle,
             onConfirm = {
                 showTimeDelayConfirm = false
-                pendingFrictionAction?.invoke()
+                if (pendingTimeDelayTargetId.isNotBlank()) {
+                    if (blockingViewModel != null) {
+                        blockingViewModel.startTimeDelayForTarget(pendingTimeDelayTargetId, context)
+                    } else {
+                        val duration = BlockingPreferences.DEFAULT_TIME_DELAY_MS
+                        BlockingPreferences.setTimeDelay(context, System.currentTimeMillis() + duration, pendingTimeDelayTargetId, duration)
+                    }
+                }
+                pendingTimeDelayTargetId = ""
                 pendingFrictionAction = null
             },
             onDismiss = {
                 showTimeDelayConfirm = false
+                pendingTimeDelayTargetId = ""
                 pendingFrictionAction = null
             }
         )
@@ -669,23 +722,36 @@ fun BlocklistScreen(
             targetFeatureTitle = frictionTargetTitle,
             partnerEmail = blockingUiState?.partner?.partnerEmail ?: "",
             onRequestCode = {
+                localUnlockError = null
                 blockingViewModel?.requestPartnerApprovalCode(frictionTargetTitle)
             },
             onSubmitCode = { code ->
-                val expected = blockingUiState?.devApprovalCode
-                if (!expected.isNullOrBlank() && code.trim() != expected.trim()) {
-                    // Mismatched code
+                if (blockingViewModel != null) {
+                    blockingViewModel.verifyExternalUnlockCode(
+                        enteredCode = code,
+                        onSuccess = {
+                            showFriendApproval = false
+                            localUnlockError = null
+                            pendingFrictionAction?.invoke()
+                            pendingFrictionAction = null
+                        },
+                        onError = { err ->
+                            localUnlockError = err
+                        }
+                    )
                 } else {
-                    showFriendApproval = false
-                    pendingFrictionAction?.invoke()
-                    pendingFrictionAction = null
+                    localUnlockError = "Accountability verification service is unavailable."
                 }
             },
             onDismiss = {
                 showFriendApproval = false
+                localUnlockError = null
+                blockingViewModel?.clearUnlockErrors()
                 pendingFrictionAction = null
             },
-            devCode = blockingUiState?.devApprovalCode
+            isVerifying = blockingUiState?.isVerifyingUnlockCode ?: false,
+            errorMessage = localUnlockError ?: blockingUiState?.unlockCodeError,
+            requestError = blockingUiState?.unlockRequestError
         )
     }
 }
@@ -695,16 +761,19 @@ private fun AppListItem(
     app: InstalledAppItem,
     onRemove: () -> Unit
 ) {
+    val primary = MaterialTheme.colorScheme.primary
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 12.dp),
+            .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f).padding(end = 12.dp)
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 12.dp)
         ) {
             val bitmap = remember(app.packageName) { app.icon?.toComposeBitmap() }
             if (bitmap != null) {
@@ -713,21 +782,21 @@ private fun AppListItem(
                     contentDescription = app.name,
                     modifier = Modifier
                         .size(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(MaterialTheme.shapes.small)
                 )
             } else {
                 Box(
                     modifier = Modifier
                         .size(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(CoralPrimary.copy(alpha = 0.14f))
-                        .border(1.dp, CoralPrimary.copy(alpha = 0.25f), RoundedCornerShape(12.dp)),
+                        .clip(MaterialTheme.shapes.small)
+                        .background(primary.copy(alpha = 0.14f))
+                        .border(1.dp, primary.copy(alpha = 0.25f), MaterialTheme.shapes.small),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_nav_blocking),
                         contentDescription = null,
-                        tint = CoralPrimary,
+                        tint = primary,
                         modifier = Modifier.size(20.dp)
                     )
                 }
@@ -738,27 +807,23 @@ private fun AppListItem(
             Column {
                 Text(
                     text = app.name,
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.sp,
-                    color = Color.White
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = app.packageName,
-                    fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.5f)
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
 
-        IconButton(
-            onClick = onRemove,
-            modifier = Modifier.size(32.dp)
-        ) {
+        IconButton(onClick = onRemove) {
             Icon(
                 painter = painterResource(id = R.drawable.ic_close),
                 contentDescription = "Remove",
-                tint = Color.White.copy(alpha = 0.55f),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(18.dp)
             )
         }
@@ -770,29 +835,32 @@ private fun KeywordListItem(
     keyword: String,
     onRemove: () -> Unit
 ) {
+    val infoColor = MaterialTheme.pguardColors.info
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 14.dp),
+            .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f).padding(end = 12.dp)
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 12.dp)
         ) {
             Box(
                 modifier = Modifier
                     .size(40.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color(0xFF64B5F6).copy(alpha = 0.14f))
-                    .border(1.dp, Color(0xFF64B5F6).copy(alpha = 0.25f), RoundedCornerShape(12.dp)),
+                    .clip(MaterialTheme.shapes.small)
+                    .background(infoColor.copy(alpha = 0.14f))
+                    .border(1.dp, infoColor.copy(alpha = 0.25f), MaterialTheme.shapes.small),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     painter = painterResource(id = R.drawable.ic_globe),
                     contentDescription = null,
-                    tint = Color(0xFF64B5F6),
+                    tint = infoColor,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -801,20 +869,16 @@ private fun KeywordListItem(
 
             Text(
                 text = keyword,
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 15.sp,
-                color = Color.White
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface
             )
         }
 
-        IconButton(
-            onClick = onRemove,
-            modifier = Modifier.size(32.dp)
-        ) {
+        IconButton(onClick = onRemove) {
             Icon(
                 painter = painterResource(id = R.drawable.ic_close),
                 contentDescription = "Remove",
-                tint = Color.White.copy(alpha = 0.55f),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(18.dp)
             )
         }
@@ -835,6 +899,7 @@ private fun AddAppPickerDialog(
     var searchQuery by remember { mutableStateOf("") }
     val selectedPackages = remember { mutableStateListOf<String>() }
     var isLoading by remember { mutableStateOf(true) }
+    val primary = MaterialTheme.colorScheme.primary
 
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
@@ -860,8 +925,8 @@ private fun AddAppPickerDialog(
         title = {
             Text(
                 text = listTitle,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface
             )
         },
         text = {
@@ -874,16 +939,16 @@ private fun AddAppPickerDialog(
                         Icon(
                             painter = painterResource(id = R.drawable.ic_search),
                             contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.5f),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp)
                         )
                     },
                     singleLine = true,
-                    shape = RoundedCornerShape(14.dp),
+                    shape = MaterialTheme.shapes.small,
                     modifier = Modifier.fillMaxWidth(),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CoralPrimary,
-                        unfocusedBorderColor = Color.White.copy(alpha = 0.25f)
+                        focusedBorderColor = primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
                     )
                 )
 
@@ -891,11 +956,19 @@ private fun AddAppPickerDialog(
 
                 if (isLoading) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(text = "Loading installed apps...", color = Color.White.copy(alpha = 0.6f))
+                        Text(
+                            text = "Loading installed apps...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 } else if (filteredApps.isEmpty()) {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(text = "No apps found", color = Color.White.copy(alpha = 0.6f))
+                        Text(
+                            text = "No apps found",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 } else {
                     LazyColumn(modifier = Modifier.fillMaxSize()) {
@@ -932,21 +1005,21 @@ private fun AddAppPickerDialog(
                                         contentDescription = app.name,
                                         modifier = Modifier
                                             .size(36.dp)
-                                            .clip(RoundedCornerShape(10.dp))
+                                            .clip(MaterialTheme.shapes.small)
                                     )
                                 } else {
                                     Box(
                                         modifier = Modifier
                                             .size(36.dp)
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(CoralPrimary.copy(alpha = 0.14f))
-                                            .border(1.dp, CoralPrimary.copy(alpha = 0.25f), RoundedCornerShape(10.dp)),
+                                            .clip(MaterialTheme.shapes.small)
+                                            .background(primary.copy(alpha = 0.14f))
+                                            .border(1.dp, primary.copy(alpha = 0.25f), MaterialTheme.shapes.small),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
                                             painter = painterResource(id = R.drawable.ic_nav_blocking),
                                             contentDescription = null,
-                                            tint = CoralPrimary,
+                                            tint = primary,
                                             modifier = Modifier.size(18.dp)
                                         )
                                     }
@@ -957,9 +1030,12 @@ private fun AddAppPickerDialog(
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = app.name,
-                                        fontWeight = FontWeight.Medium,
-                                        fontSize = 14.sp,
-                                        color = if (isAlreadyAdded || isBlockedConflict) Color.White.copy(alpha = 0.4f) else Color.White
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = if (isAlreadyAdded || isBlockedConflict) {
+                                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurface
+                                        }
                                     )
                                     Text(
                                         text = when {
@@ -967,11 +1043,11 @@ private fun AddAppPickerDialog(
                                             isAlreadyAdded -> "Already in list"
                                             else -> app.packageName
                                         },
-                                        fontSize = 11.5.sp,
+                                        style = MaterialTheme.typography.bodySmall,
                                         color = when {
-                                            isBlockedConflict -> CoralPrimary
-                                            isAlreadyAdded -> CoralPrimary.copy(alpha = 0.8f)
-                                            else -> Color.White.copy(alpha = 0.45f)
+                                            isBlockedConflict -> primary
+                                            isAlreadyAdded -> primary.copy(alpha = 0.8f)
+                                            else -> MaterialTheme.colorScheme.onSurfaceVariant
                                         }
                                     )
                                 }
@@ -986,12 +1062,12 @@ private fun AddAppPickerDialog(
                                         }
                                     },
                                     colors = CheckboxDefaults.colors(
-                                        checkedColor = CoralPrimary,
-                                        checkmarkColor = Color.White
+                                        checkedColor = primary,
+                                        checkmarkColor = MaterialTheme.colorScheme.onPrimary
                                     )
                                 )
                             }
-                            HorizontalDivider(color = Color.White.copy(alpha = 0.05f))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         }
                     }
                 }
@@ -1005,27 +1081,28 @@ private fun AddAppPickerDialog(
                     }
                     onAddApps(toAdd)
                 },
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
+                shape = MaterialTheme.shapes.small,
+                colors = ButtonDefaults.buttonColors(containerColor = primary),
                 contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
             ) {
                 Text(
                     text = "Add (${selectedPackages.size})",
+                    style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = MaterialTheme.colorScheme.onPrimary
                 )
             }
         },
         dismissButton = {
             TextButton(
                 onClick = onDismiss,
-                shape = RoundedCornerShape(12.dp)
+                shape = MaterialTheme.shapes.small
             ) {
-                Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                Text("Cancel", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         },
-        containerColor = Color(0xFF1E1E24),
-        shape = RoundedCornerShape(20.dp)
+        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+        shape = MaterialTheme.shapes.large
     )
 }
 
@@ -1078,10 +1155,10 @@ private fun Drawable.toComposeBitmap(width: Int = 96, height: Int = 96): ImageBi
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF121214)
+@Preview(showBackground = true)
 @Composable
 private fun BlocklistScreenPreview() {
-    PGuardTheme(darkTheme = true) {
+    PGuardTheme {
         BlocklistScreen()
     }
 }

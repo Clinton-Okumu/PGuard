@@ -1,12 +1,10 @@
 package com.example.pguard.presentation.focus
 
 import android.app.TimePickerDialog
-import android.content.Context
 import java.util.Calendar
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,20 +17,14 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -44,29 +36,23 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.pguard.R
-import com.example.pguard.presentation.theme.CoralPrimary
 
-private val DialogBackground = Color(0xFF1E1E24)
-
-/**
- * Help modal matching Image 1: Explains Schedule and Allowed Apps.
- */
 @Composable
 fun FocusHelpDialog(onDismiss: () -> Unit) {
+    val primary = MaterialTheme.colorScheme.primary
+
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(22.dp),
-            color = DialogBackground,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -76,32 +62,28 @@ fun FocusHelpDialog(onDismiss: () -> Unit) {
             ) {
                 Text(
                     text = "What is Schedule?",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = "If you want to block all apps except few selected apps for a particular time period, then you can schedule a focus time.\nExample: 4:00 PM - 5:00 PM.",
-                    fontSize = 13.sp,
-                    color = Color.White.copy(alpha = 0.75f),
-                    lineHeight = 18.sp
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 Spacer(modifier = Modifier.height(18.dp))
 
                 Text(
                     text = "What is Allowed Apps?",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
                     text = "By default only 'Call/SMS' apps are allowed during active focus time, but this option used to allow apps you want to access during active focus time.",
-                    fontSize = 13.sp,
-                    color = Color.White.copy(alpha = 0.75f),
-                    lineHeight = 18.sp
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -112,14 +94,13 @@ fun FocusHelpDialog(onDismiss: () -> Unit) {
                 ) {
                     OutlinedButton(
                         onClick = onDismiss,
-                        border = BorderStroke(1.2.dp, CoralPrimary),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
+                        border = BorderStroke(1.2.dp, primary),
+                        shape = CircleShape,
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface)
                     ) {
                         Text(
                             text = "Got it",
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.sp
+                            style = MaterialTheme.typography.labelLarge
                         )
                     }
                 }
@@ -128,20 +109,18 @@ fun FocusHelpDialog(onDismiss: () -> Unit) {
     }
 }
 
-/**
- * Accountability Guard Dialog matching Image 3:
- * Appears when user attempts to disable or delete an active schedule under accountability partner lock.
- */
 @Composable
 fun FocusAccountabilityGuardDialog(
     partnerModeTitle: String = "Team",
     onDismiss: () -> Unit
 ) {
+    val primary = MaterialTheme.colorScheme.primary
+
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(22.dp),
-            color = DialogBackground,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+            shape = MaterialTheme.shapes.large,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -152,9 +131,8 @@ fun FocusAccountabilityGuardDialog(
             ) {
                 Text(
                     text = "To disable or reset this option, please contact our support team, as you have chosen '$partnerModeTitle' as your accountability partner.",
-                    fontSize = 14.5.sp,
-                    color = Color.White.copy(alpha = 0.85f),
-                    lineHeight = 21.sp,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f),
                     textAlign = TextAlign.Start
                 )
 
@@ -162,17 +140,17 @@ fun FocusAccountabilityGuardDialog(
 
                 Button(
                     onClick = onDismiss,
-                    colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
-                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = primary),
+                    shape = MaterialTheme.shapes.small,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
                 ) {
                     Text(
                         text = "Okay",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -180,19 +158,15 @@ fun FocusAccountabilityGuardDialog(
     }
 }
 
-/**
- * Free Tier Limit Toast Pill matching Image 2:
- * "Only one focus time allowed in the free version."
- */
 @Composable
 fun FreeLimitPillToast(
     onDismiss: () -> Unit,
     onUpgradeClick: () -> Unit = {}
 ) {
     Surface(
-        shape = RoundedCornerShape(16.dp),
-        color = DialogBackground,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.15f)),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         shadowElevation = 8.dp,
         modifier = Modifier
             .fillMaxWidth(0.92f)
@@ -209,8 +183,8 @@ fun FreeLimitPillToast(
             Box(
                 modifier = Modifier
                     .size(34.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(CoralPrimary),
+                    .clip(MaterialTheme.shapes.extraSmall)
+                    .background(MaterialTheme.colorScheme.primary),
                 contentAlignment = Alignment.Center
             ) {
                 Image(
@@ -222,8 +196,8 @@ fun FreeLimitPillToast(
 
             Text(
                 text = "Only one focus time allowed in the free version.",
-                color = Color.White,
-                fontSize = 13.sp,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.bodySmall,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f)
             )
@@ -231,9 +205,6 @@ fun FreeLimitPillToast(
     }
 }
 
-/**
- * Dialog to configure and save a new Focus Schedule.
- */
 @Composable
 fun CreateScheduleDialog(
     initialSchedule: FocusSchedule? = null,
@@ -281,9 +252,7 @@ fun CreateScheduleDialog(
     }
 
     var selectedDays by remember {
-        mutableStateOf(
-            initialSchedule?.repeatDays ?: allDays
-        )
+        mutableStateOf(initialSchedule?.repeatDays ?: allDays)
     }
 
     fun showTimePicker(initialH: Int, initialM: Int, onTimeSet: (Int, Int) -> Unit) {
@@ -303,11 +272,13 @@ fun CreateScheduleDialog(
         )
     }
 
+    val primary = MaterialTheme.colorScheme.primary
+
     Dialog(onDismissRequest = onDismiss) {
         Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = DialogBackground,
-            border = BorderStroke(1.dp, Color.White.copy(alpha = 0.12f)),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(
@@ -315,21 +286,18 @@ fun CreateScheduleDialog(
                     .fillMaxWidth()
                     .padding(22.dp)
             ) {
-                // Header
                 Text(
                     text = if (initialSchedule == null) "New Focus Schedule" else "Edit Focus Schedule",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
 
                 Spacer(modifier = Modifier.height(18.dp))
 
-                // Unified Time Selector Card
                 Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color.White.copy(alpha = 0.05f),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
@@ -337,7 +305,6 @@ fun CreateScheduleDialog(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // Start Time
                             Column(
                                 modifier = Modifier
                                     .weight(1f)
@@ -350,31 +317,26 @@ fun CreateScheduleDialog(
                             ) {
                                 Text(
                                     text = "START",
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White.copy(alpha = 0.5f),
-                                    letterSpacing = 0.5.sp
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = String.format("%02d:%02d", startHour, startMinute),
-                                    fontSize = 22.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
 
-                            // Direction Arrow
                             Icon(
                                 painter = painterResource(id = R.drawable.ic_chevron_right),
                                 contentDescription = null,
-                                tint = Color.White.copy(alpha = 0.35f),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier
                                     .size(24.dp)
                                     .padding(horizontal = 4.dp)
                             )
 
-                            // End Time
                             Column(
                                 modifier = Modifier
                                     .weight(1f)
@@ -388,44 +350,36 @@ fun CreateScheduleDialog(
                             ) {
                                 Text(
                                     text = "END",
-                                    fontSize = 10.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White.copy(alpha = 0.5f),
-                                    letterSpacing = 0.5.sp
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = String.format("%02d:%02d", endHour, endMinute),
-                                    fontSize = 22.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
+                                    style = MaterialTheme.typography.headlineSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
                                 )
                             }
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))
-                        HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // Duration text
                         Text(
                             text = "${tempSchedule.formattedDuration} focus window",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = CoralPrimary
+                            style = MaterialTheme.typography.labelMedium,
+                            color = primary
                         )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(18.dp))
 
-                // Repeat Days Section
                 Text(
                     text = "REPEAT",
-                    fontSize = 10.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White.copy(alpha = 0.5f),
-                    letterSpacing = 0.5.sp
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -453,7 +407,9 @@ fun CreateScheduleDialog(
                             modifier = Modifier
                                 .size(38.dp)
                                 .clip(CircleShape)
-                                .background(if (isSelected) CoralPrimary else Color.White.copy(alpha = 0.08f))
+                                .background(
+                                    if (isSelected) primary else MaterialTheme.colorScheme.surfaceContainerHigh
+                                )
                                 .clickable {
                                     selectedDays = if (isSelected) {
                                         if (selectedDays.size > 1) selectedDays - dayInt else selectedDays
@@ -465,8 +421,12 @@ fun CreateScheduleDialog(
                         ) {
                             Text(
                                 text = letter,
-                                color = if (isSelected) Color.White else Color.White.copy(alpha = 0.55f),
-                                fontSize = 13.5.sp,
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.onPrimary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                style = MaterialTheme.typography.labelLarge,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                             )
                         }
@@ -475,35 +435,44 @@ fun CreateScheduleDialog(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Quick Presets: Everyday / Weekdays / Weekends
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
                         text = "Everyday",
-                        fontSize = 11.5.sp,
-                        color = if (selectedDays.size >= 7) CoralPrimary else Color.White.copy(alpha = 0.5f),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (selectedDays.size >= 7) primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = if (selectedDays.size >= 7) FontWeight.Bold else FontWeight.Normal,
                         modifier = Modifier
                             .clickable { selectedDays = allDays }
                             .padding(vertical = 4.dp, horizontal = 2.dp)
                     )
-                    Text("•", color = Color.White.copy(alpha = 0.25f), fontSize = 11.5.sp, modifier = Modifier.align(Alignment.CenterVertically))
+                    Text(
+                        text = "•",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.align(Alignment.CenterVertically)
+                    )
                     Text(
                         text = "Weekdays",
-                        fontSize = 11.5.sp,
-                        color = if (selectedDays == weekdays) CoralPrimary else Color.White.copy(alpha = 0.5f),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (selectedDays == weekdays) primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = if (selectedDays == weekdays) FontWeight.Bold else FontWeight.Normal,
                         modifier = Modifier
                             .clickable { selectedDays = weekdays }
                             .padding(vertical = 4.dp, horizontal = 2.dp)
                     )
-                    Text("•", color = Color.White.copy(alpha = 0.25f), fontSize = 11.5.sp, modifier = Modifier.align(Alignment.CenterVertically))
+                    Text(
+                        text = "•",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.align(Alignment.CenterVertically)
+                    )
                     Text(
                         text = "Weekends",
-                        fontSize = 11.5.sp,
-                        color = if (selectedDays == weekends) CoralPrimary else Color.White.copy(alpha = 0.5f),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (selectedDays == weekends) primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = if (selectedDays == weekends) FontWeight.Bold else FontWeight.Normal,
                         modifier = Modifier
                             .clickable { selectedDays = weekends }
@@ -513,11 +482,10 @@ fun CreateScheduleDialog(
 
                 Spacer(modifier = Modifier.height(18.dp))
 
-                // Allowed Apps Row
                 Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = Color.White.copy(alpha = 0.05f),
-                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onPickAllowedAppsClick(selectedAllowedApps) }
@@ -537,14 +505,14 @@ fun CreateScheduleDialog(
                             Box(
                                 modifier = Modifier
                                     .size(34.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(CoralPrimary.copy(alpha = 0.15f)),
+                                    .clip(MaterialTheme.shapes.extraSmall)
+                                    .background(primary.copy(alpha = 0.15f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     painter = painterResource(id = R.drawable.ic_feature_lock),
                                     contentDescription = null,
-                                    tint = CoralPrimary,
+                                    tint = primary,
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -552,14 +520,13 @@ fun CreateScheduleDialog(
                             Column {
                                 Text(
                                     text = if (selectedAllowedApps.isEmpty()) "Allowed Apps (0)" else "Allowed Apps (${selectedAllowedApps.size})",
-                                    color = Color.White,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    style = MaterialTheme.typography.titleSmall
                                 )
                                 Text(
                                     text = "Calls, Messages & Contacts allowed by default",
-                                    color = Color.White.copy(alpha = 0.55f),
-                                    fontSize = 11.5.sp
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodySmall
                                 )
                             }
                         }
@@ -567,7 +534,7 @@ fun CreateScheduleDialog(
                         Icon(
                             painter = painterResource(id = R.drawable.ic_chevron_right),
                             contentDescription = null,
-                            tint = Color.White.copy(alpha = 0.45f),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(18.dp)
                         )
                     }
@@ -575,7 +542,6 @@ fun CreateScheduleDialog(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // Action Buttons
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
@@ -583,9 +549,9 @@ fun CreateScheduleDialog(
                 ) {
                     TextButton(
                         onClick = onDismiss,
-                        shape = RoundedCornerShape(12.dp)
+                        shape = MaterialTheme.shapes.small
                     ) {
-                        Text("Cancel", color = Color.White.copy(alpha = 0.7f), fontSize = 14.sp)
+                        Text("Cancel", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Button(
@@ -593,15 +559,15 @@ fun CreateScheduleDialog(
                             onSaveSchedule(tempSchedule)
                             onDismiss()
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = CoralPrimary),
-                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = primary),
+                        shape = MaterialTheme.shapes.small,
                         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
                     ) {
                         Text(
                             text = "Save Schedule",
-                            color = Color.White,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp
+                            color = MaterialTheme.colorScheme.onPrimary,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }

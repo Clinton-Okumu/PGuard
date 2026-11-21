@@ -11,6 +11,8 @@ import com.example.pguard.core.network.model.RequestUnlockCodeRequest
 import com.example.pguard.core.network.model.RequestUnlockCodeResponse
 import com.example.pguard.core.network.model.SecurityEventsResponse
 import com.example.pguard.core.network.model.StatusResponse
+import com.example.pguard.core.network.model.VerifyUnlockCodeRequest
+import com.example.pguard.core.network.model.VerifyUnlockCodeResponse
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
@@ -49,4 +51,9 @@ interface AccountabilityApiService {
     suspend fun requestUnlockCode(
         @Body request: RequestUnlockCodeRequest
     ): RequestUnlockCodeResponse
+
+    @POST("api/v1/accountability/verify-unlock")
+    suspend fun verifyUnlockCode(
+        @Body request: VerifyUnlockCodeRequest
+    ): VerifyUnlockCodeResponse
 }

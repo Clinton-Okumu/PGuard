@@ -2,6 +2,7 @@ package store
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"math/big"
@@ -9,14 +10,19 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
-	ErrPartnerNotFound   = errors.New("accountability partner not found")
-	ErrInvalidEmail      = errors.New("invalid partner email address")
-	ErrSelfInvite        = errors.New("cannot invite yourself as an accountability partner")
-	ErrInvalidInviteCode = errors.New("invalid or expired invite code")
-	ErrInvalidEventType  = errors.New("invalid security event type")
+	ErrPartnerNotFound            = errors.New("accountability partner not found")
+	ErrInvalidEmail               = errors.New("invalid partner email address")
+	ErrSelfInvite                 = errors.New("cannot invite yourself as an accountability partner")
+	ErrInvalidInviteCode          = errors.New("invalid or expired invite code")
+	ErrInviteNotPending           = errors.New("invite has already been used or disconnected")
+	ErrInviteExpired              = errors.New("invite code has expired")
+	ErrInvalidEventType           = errors.New("invalid security event type")
+	ErrInvalidUnlockCode          = errors.New("invalid or expired approval code")
+	ErrUnlockCodeAttemptsExceeded = errors.New("too many invalid approval code attempts; request a new code")
 )
 
 const (
@@ -92,6 +98,19 @@ type SecurityAlert struct {
 	User      User      `gorm:"foreignKey:UserID" json:"-"`
 }
 
+type UnlockCode struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	UserID      uint      `gorm:"index;not null" json:"user_id"`
+	FeatureName string    `gorm:"size:120;not null" json:"feature_name"`
+	CodeHash    string    `gorm:"size:64;not null" json:"-"`
+	Attempts    int       `gorm:"default:0;not null" json:"attempts"`
+	MaxAttempts int       `gorm:"default:5;not null" json:"max_attempts"`
+	Used        bool      `gorm:"default:false;not null" json:"used"`
+	ExpiresAt   time.Time `gorm:"not null" json:"expires_at"`
+	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
+	User        User      `gorm:"foreignKey:UserID" json:"-"`
+}
+
 func GenerateInviteCode() string {
 	const charset = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	b := make([]byte, 6)
@@ -108,6 +127,9 @@ type AccountabilityStore interface {
 	GetInviteByCode(code string) (*AccountabilityPartner, error)
 	AcceptInvite(code string, partnerUserID *uint) (*AccountabilityPartner, error)
 	DisconnectPartner(userID uint) error
+
+	CreateUnlockCode(userID uint, featureName, codeHash string, expiresAt time.Time) (*UnlockCode, error)
+	VerifyAndConsumeUnlockCode(userID uint, codeHash string) (*UnlockCode, error)
 
 	RecordSecurityEvent(userID uint, eventType, message string) (*SecurityAlert, error)
 	GetRecentEvents(userID uint, limit int) ([]SecurityAlert, error)
@@ -129,6 +151,13 @@ func (s *PostgresAccountabilityStore) CreateInvite(userID uint, userEmail, partn
 
 	if AreEmailsEquivalent(email, userEmail) {
 		return nil, ErrSelfInvite
+	}
+
+	// Disconnect any other pending/accepted partner records for this user so orphaned rows cannot remain
+	if err := s.db.Model(&AccountabilityPartner{}).
+		Where("user_id = ? AND partner_email != ? AND status != ?", userID, email, PartnerStatusDisconnected).
+		Update("status", PartnerStatusDisconnected).Error; err != nil {
+		return nil, err
 	}
 
 	// Check if already invited or linked
@@ -177,7 +206,9 @@ func (s *PostgresAccountabilityStore) GetPartnerByUserID(userID uint) (*Accounta
 
 func (s *PostgresAccountabilityStore) GetInviteByCode(code string) (*AccountabilityPartner, error) {
 	var partner AccountabilityPartner
-	err := s.db.Where("invite_code = ?", strings.ToUpper(strings.TrimSpace(code))).First(&partner).Error
+	err := s.db.Preload("User").
+		Where("invite_code = ?", strings.ToUpper(strings.TrimSpace(code))).
+		First(&partner).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrInvalidInviteCode
@@ -191,6 +222,13 @@ func (s *PostgresAccountabilityStore) AcceptInvite(code string, partnerUserID *u
 	partner, err := s.GetInviteByCode(code)
 	if err != nil {
 		return nil, err
+	}
+
+	if partner.Status != PartnerStatusPending {
+		return nil, ErrInviteNotPending
+	}
+	if time.Since(partner.UpdatedAt) > 7*24*time.Hour {
+		return nil, ErrInviteExpired
 	}
 
 	if partnerUserID != nil && *partnerUserID == partner.UserID {
@@ -216,6 +254,102 @@ func (s *PostgresAccountabilityStore) DisconnectPartner(userID uint) error {
 
 	partner.Status = PartnerStatusDisconnected
 	return s.db.Save(partner).Error
+}
+
+func (s *PostgresAccountabilityStore) CreateUnlockCode(userID uint, featureName, codeHash string, expiresAt time.Time) (*UnlockCode, error) {
+	var created *UnlockCode
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&UnlockCode{}).
+			Where("user_id = ? AND used = false", userID).
+			Update("used", true).Error; err != nil {
+			return err
+		}
+		rec := &UnlockCode{
+			UserID:      userID,
+			FeatureName: strings.TrimSpace(featureName),
+			CodeHash:    codeHash,
+			Attempts:    0,
+			MaxAttempts: 5,
+			Used:        false,
+			ExpiresAt:   expiresAt,
+		}
+		if err := tx.Create(rec).Error; err != nil {
+			return err
+		}
+		created = rec
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
+func (s *PostgresAccountabilityStore) VerifyAndConsumeUnlockCode(userID uint, codeHash string) (*UnlockCode, error) {
+	var verified *UnlockCode
+	var domainErr error
+
+	txErr := s.db.Transaction(func(tx *gorm.DB) error {
+		var rec UnlockCode
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND used = false", userID).
+			Order("created_at DESC").
+			First(&rec).Error
+		if err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				domainErr = ErrInvalidUnlockCode
+				return nil
+			}
+			return err
+		}
+
+		if rec.ExpiresAt.Before(time.Now()) {
+			rec.Used = true
+			if err := tx.Save(&rec).Error; err != nil {
+				return err
+			}
+			domainErr = ErrInvalidUnlockCode
+			return nil
+		}
+
+		if rec.Attempts >= rec.MaxAttempts {
+			rec.Used = true
+			if err := tx.Save(&rec).Error; err != nil {
+				return err
+			}
+			domainErr = ErrUnlockCodeAttemptsExceeded
+			return nil
+		}
+
+		if subtle.ConstantTimeCompare([]byte(rec.CodeHash), []byte(codeHash)) != 1 {
+			rec.Attempts++
+			if rec.Attempts >= rec.MaxAttempts {
+				rec.Used = true
+				domainErr = ErrUnlockCodeAttemptsExceeded
+			} else {
+				domainErr = ErrInvalidUnlockCode
+			}
+			if err := tx.Save(&rec).Error; err != nil {
+				return err
+			}
+			return nil
+		}
+
+		rec.Used = true
+		if err := tx.Save(&rec).Error; err != nil {
+			return err
+		}
+		verified = &rec
+		return nil
+	})
+
+	if txErr != nil {
+		return nil, txErr
+	}
+	if domainErr != nil {
+		return nil, domainErr
+	}
+	return verified, nil
 }
 
 func (s *PostgresAccountabilityStore) RecordSecurityEvent(userID uint, eventType, message string) (*SecurityAlert, error) {

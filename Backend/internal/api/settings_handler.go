@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"Backend/internal/middleware"
 	"Backend/internal/store"
@@ -99,17 +101,42 @@ func (h *SettingsHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Re
 		current.BlockNewlyInstalledApps = *req.BlockNewlyInstalledApps
 	}
 	if req.BlockedScreenMessage != nil {
-		current.BlockedScreenMessage = *req.BlockedScreenMessage
+		msg := strings.TrimSpace(*req.BlockedScreenMessage)
+		if len(msg) > 300 {
+			_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Blocked screen message must be 300 characters or fewer"})
+			return
+		}
+		current.BlockedScreenMessage = msg
 	}
 	if req.BlockedScreenCountdown != nil {
-		if *req.BlockedScreenCountdown < 0 {
-			_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Countdown must be non-negative"})
+		if *req.BlockedScreenCountdown < 0 || *req.BlockedScreenCountdown > 300 {
+			_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Countdown must be between 0 and 300 seconds"})
 			return
 		}
 		current.BlockedScreenCountdown = *req.BlockedScreenCountdown
 	}
 	if req.RedirectURL != nil {
-		current.RedirectURL = *req.RedirectURL
+		rawURL := strings.TrimSpace(*req.RedirectURL)
+		if rawURL != "" {
+			if strings.ContainsAny(rawURL, " \t\r\n") {
+				_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Redirect URL contains invalid whitespace"})
+				return
+			}
+			toValidate := rawURL
+			if !strings.Contains(toValidate, "://") {
+				if strings.Contains(toValidate, ":") {
+					_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Redirect URL must use http or https"})
+					return
+				}
+				toValidate = "https://" + toValidate
+			}
+			parsed, err := url.Parse(toValidate)
+			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+				_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Redirect URL must be a valid http or https URL"})
+				return
+			}
+		}
+		current.RedirectURL = rawURL
 	}
 
 	updated, err := h.settingsStore.Upsert(current)

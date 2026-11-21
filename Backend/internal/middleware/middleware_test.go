@@ -1,10 +1,12 @@
 package middleware
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
+	"strings"
 	"testing"
+	"time"
 
 	"Backend/internal/store"
 	"Backend/internal/tokens"
@@ -37,8 +39,9 @@ func (m *mockUserStore) UpdateUser(user *store.User) error {
 }
 
 func TestUserMiddleware(t *testing.T) {
-	os.Setenv("JWT_SECRET", "test-secret-key-min-32-chars-long")
-	tokenService := tokens.NewTokenService()
+	t.Setenv("JWT_SECRET", "test-secret-key-min-32-chars-long")
+	tokenService, err := tokens.NewTokenService()
+	require.NoError(t, err)
 
 	testUser := &store.User{
 		ID:          99,
@@ -113,5 +116,44 @@ func TestUserMiddleware(t *testing.T) {
 		protectedHandler.ServeHTTP(w, req)
 		assert.True(t, nextCalled)
 		assert.Equal(t, http.StatusOK, w.Code)
+	})
+}
+
+func TestSecurityMiddleware(t *testing.T) {
+	t.Run("MaxBodySize rejects payloads larger than limit", func(t *testing.T) {
+		handler := MaxBodySize(10)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "too large", http.StatusRequestEntityTooLarge)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("0123456789abcdef"))
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		assert.Equal(t, http.StatusRequestEntityTooLarge, rr.Code)
+	})
+
+	t.Run("RateLimiter returns 429 once limit exceeded", func(t *testing.T) {
+		rl := NewRateLimiter(2, time.Minute)
+		handler := rl.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+
+		for i := 0; i < 2; i++ {
+			req := httptest.NewRequest(http.MethodPost, "/", nil)
+			req.RemoteAddr = "10.0.0.1:12345"
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+			assert.Equal(t, http.StatusOK, rr.Code)
+		}
+
+		req3 := httptest.NewRequest(http.MethodPost, "/", nil)
+		req3.RemoteAddr = "10.0.0.1:12346"
+		rr3 := httptest.NewRecorder()
+		handler.ServeHTTP(rr3, req3)
+		assert.Equal(t, http.StatusTooManyRequests, rr3.Code)
 	})
 }

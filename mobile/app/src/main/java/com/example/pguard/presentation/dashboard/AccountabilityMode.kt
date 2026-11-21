@@ -62,6 +62,9 @@ fun targetDisplayName(target: String?): String {
     if (target == null) return "Protection Feature"
     if (target == "DISCONNECT_PARTNER") return "Remove Accountability Partner"
     if (target == "OPEN_CHANGE_MODE") return "Change Accountability Mode"
+    if (target.startsWith("BLOCKLIST_APP:")) return "Blocklist App"
+    if (target.startsWith("BLOCKLIST_KW:")) return "Blocklist Keyword (${target.removePrefix("BLOCKLIST_KW:")})"
+    if (target.startsWith("FOCUS_SCHEDULE:")) return "Focus Schedule"
     if (target.startsWith("MODE_")) {
         val modeCode = target.removePrefix("MODE_")
         val mode = AccountabilityMode.fromCode(modeCode)

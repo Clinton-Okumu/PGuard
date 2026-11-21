@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,7 +21,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ButtonDefaults
@@ -45,12 +45,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.pguard.R
 import com.example.pguard.core.network.NetworkClient
 import com.example.pguard.core.network.model.UserDto
-import com.example.pguard.engine.accessibility.PGuardAccessibilityService
-import com.example.pguard.presentation.theme.CoralPrimary
+import com.example.pguard.data.repository.SettingsRepository
+import com.example.pguard.engine.accessibility.BlockingPreferences
+import com.example.pguard.presentation.dashboard.BlockingViewModel
+import com.example.pguard.presentation.habits.HabitsManager
 import com.example.pguard.presentation.theme.PGuardTheme
 import kotlinx.coroutines.launch
 
@@ -58,6 +59,7 @@ import kotlinx.coroutines.launch
 fun SettingsScreen(
     user: UserDto?,
     onLogout: () -> Unit,
+    blockingViewModel: BlockingViewModel? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -72,6 +74,8 @@ fun SettingsScreen(
         getAppVersionString(context)
     }
 
+    val primary = MaterialTheme.colorScheme.primary
+
     Box(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -81,7 +85,6 @@ fun SettingsScreen(
         ) {
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 1. Account
             SettingItemRow(
                 iconRes = R.drawable.ic_settings_account,
                 title = "Account",
@@ -89,54 +92,67 @@ fun SettingsScreen(
             )
             SettingDivider()
 
-            // 2. Update Settings
             SettingItemRow(
                 iconRes = R.drawable.ic_settings_sync,
                 title = "Update Settings",
                 onClick = {
                     coroutineScope.launch {
-                        try {
-                            val api = NetworkClient.getSettingsApiService(context)
-                            val res = api.getSettings()
-                            res.settings?.let { s ->
-                                val prefs = context.getSharedPreferences(PGuardAccessibilityService.PREFS_NAME, Context.MODE_PRIVATE)
-                                prefs.edit()
-                                    .putBoolean(PGuardAccessibilityService.KEY_ADULT, s.blockAdultContent)
-                                    .putBoolean(PGuardAccessibilityService.KEY_SHORTS, s.blockShorts)
-                                    .putBoolean(PGuardAccessibilityService.KEY_WHATSAPP, s.blockWhatsAppChannels)
-                                    .putBoolean(PGuardAccessibilityService.KEY_INSTAGRAM_REELS, s.blockInstagramReels)
-                                    .putBoolean(PGuardAccessibilityService.KEY_TIKTOK, s.blockTikTok)
-                                    .putBoolean(PGuardAccessibilityService.KEY_UNINSTALL, s.uninstallProtection)
-                                    .putBoolean(PGuardAccessibilityService.KEY_UNSUPPORTED_BROWSERS, s.blockUnsupportedBrowsers)
-                                    .putBoolean(PGuardAccessibilityService.KEY_NEW_INSTALLED_APPS, s.blockNewlyInstalledApps)
-                                    .putString(PGuardAccessibilityService.KEY_MESSAGE, s.blockedScreenMessage)
-                                    .putInt(PGuardAccessibilityService.KEY_COUNTDOWN, s.blockedScreenCountdown)
-                                    .putString(PGuardAccessibilityService.KEY_REDIRECT_URL, s.redirectUrl)
-                                    .apply()
+                        val settingsRepository = SettingsRepository(NetworkClient.getSettingsApiService(context))
+                        settingsRepository.fetchSettings().fold(
+                            onSuccess = { s ->
+                                BlockingPreferences.saveSettings(
+                                    context = context,
+                                    adult = s.blockAdultContent,
+                                    shorts = s.blockShorts,
+                                    whatsapp = s.blockWhatsAppChannels,
+                                    instagramReels = s.blockInstagramReels,
+                                    tiktok = s.blockTikTok,
+                                    uninstall = s.uninstallProtection,
+                                    unsupportedBrowsers = s.blockUnsupportedBrowsers,
+                                    newInstalledApps = s.blockNewlyInstalledApps,
+                                    message = s.blockedScreenMessage,
+                                    countdown = s.blockedScreenCountdown,
+                                    redirect = s.redirectUrl,
+                                    markDirty = false
+                                )
+                                BlockingPreferences.markLocalDirty(context, false)
+                                HabitsManager.syncCalendarWithBackend(context, user?.id)
+                                blockingViewModel?.refreshFromLocalPreferences(context)
+                                Toast.makeText(context, "Settings synced successfully", Toast.LENGTH_SHORT).show()
+                            },
+                            onFailure = { error ->
+                                Toast.makeText(
+                                    context,
+                                    "Sync failed: ${error.localizedMessage ?: "Unable to reach server"}",
+                                    Toast.LENGTH_LONG
+                                ).show()
                             }
-                            Toast.makeText(context, "Settings synced successfully", Toast.LENGTH_SHORT).show()
-                        } catch (_: Exception) {
-                            Toast.makeText(context, "Settings synced successfully", Toast.LENGTH_SHORT).show()
-                        }
+                        )
                     }
                 }
             )
             SettingDivider()
 
-            // 3. Uninstall App
             SettingItemRow(
                 iconRes = R.drawable.ic_settings_uninstall,
                 title = "Uninstall App",
                 onClick = {
-                    val intent = Intent(Intent.ACTION_DELETE).apply {
-                        data = Uri.parse("package:${context.packageName}")
+                    if (BlockingPreferences.isUninstallProtectionEnabled) {
+                        Toast.makeText(
+                            context,
+                            "Uninstall Protection is active. Disable it under Blocking using your Accountability Guard first.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        val intent = Intent(Intent.ACTION_DELETE).apply {
+                            data = Uri.parse("package:${context.packageName}")
+                        }
+                        context.startActivity(intent)
                     }
-                    context.startActivity(intent)
                 }
             )
             SettingDivider()
 
-            // 4. Log Out
             SettingItemRow(
                 iconRes = R.drawable.ic_settings_logout,
                 title = "Log Out",
@@ -144,7 +160,6 @@ fun SettingsScreen(
             )
             SettingDivider()
 
-            // 5. Privacy Policy
             SettingItemRow(
                 iconRes = R.drawable.ic_settings_privacy,
                 title = "Privacy Policy",
@@ -152,7 +167,6 @@ fun SettingsScreen(
             )
             SettingDivider()
 
-            // 6. Terms of Service
             SettingItemRow(
                 iconRes = R.drawable.ic_guide,
                 title = "Terms of Service",
@@ -160,7 +174,6 @@ fun SettingsScreen(
             )
             SettingDivider()
 
-            // 7. Check Update
             SettingItemRow(
                 iconRes = R.drawable.ic_settings_history,
                 title = "Check Update",
@@ -171,7 +184,6 @@ fun SettingsScreen(
             )
             SettingDivider()
 
-            // 8. Rate App
             SettingItemRow(
                 iconRes = R.drawable.ic_settings_star,
                 title = "Rate App",
@@ -188,7 +200,6 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(36.dp))
 
-            // Social Channels Row
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -219,7 +230,6 @@ fun SettingsScreen(
             }
         }
 
-        // Floating Support Button at bottom-right
         FloatingActionButton(
             onClick = {
                 val emailIntent = Intent(Intent.ACTION_SENDTO).apply {
@@ -232,9 +242,9 @@ fun SettingsScreen(
                     Toast.makeText(context, "Contact: support@pguard.app", Toast.LENGTH_LONG).show()
                 }
             },
-            shape = RoundedCornerShape(16.dp),
-            containerColor = CoralPrimary,
-            contentColor = Color.White,
+            shape = MaterialTheme.shapes.medium,
+            containerColor = primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 20.dp, bottom = 20.dp)
@@ -246,160 +256,28 @@ fun SettingsScreen(
                 Icon(
                     painter = painterResource(id = R.drawable.ic_mail),
                     contentDescription = "Support",
-                    tint = Color.White,
+                    tint = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = "Support",
+                    style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    color = Color.White
+                    color = MaterialTheme.colorScheme.onPrimary
                 )
             }
         }
     }
 
-    // Privacy Policy Dialog (In-App Comprehensive)
     if (showPrivacyPolicyDialog) {
-        AlertDialog(
-            onDismissRequest = { showPrivacyPolicyDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(CoralPrimary.copy(alpha = 0.15f))
-                            .border(1.dp, CoralPrimary.copy(alpha = 0.3f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_settings_privacy),
-                            contentDescription = null,
-                            tint = CoralPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = "Privacy Policy",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
-                }
-            },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(380.dp)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    Text(
-                        text = "Last updated: November 2026",
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.5f)
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Text(
-                        text = "1. Zero-Log Local Protection\n" +
-                                "PGuard operates entirely on-device. Your browsing activities, URLs visited, and habit tracking remain strictly on your personal phone. We do not sell personal data, do not monetize ads, and do not route web traffic through remote proxies.\n\n" +
-                                "2. Accessibility Service (BIND_ACCESSIBILITY_SERVICE)\n" +
-                                "PGuard uses Android's Accessibility Service exclusively to:\n" +
-                                "• Detect adult or blocked website URLs in active browsers to prevent unauthorized access.\n" +
-                                "• Enforce Uninstall Protection to prevent tampering during weak moments.\n" +
-                                "• Zero Remote Transmission: The service works purely in local memory. PGuard does NOT log keystrokes, does NOT read personal chats, and NEVER sends browsing history to external servers.\n\n" +
-                                "3. Android VpnService (Local DNS Filtering)\n" +
-                                "PGuard uses Android's VpnService to create a local-only loopback DNS resolver. DNS queries for blocked domains are resolved locally on-device. No internet traffic is routed to external VPN servers, keeping your connection fast and secure.\n\n" +
-                                "4. Account & Cloud Sync\n" +
-                                "If you create an account, we securely store your email, encrypted authentication credentials, and recovery streak metrics via TLS 1.3 encryption solely for cross-device restoration.\n\n" +
-                                "5. Data Rights & Contact\n" +
-                                "You can request account deletion at any time by contacting privacy@pguard.app.",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
-                        lineHeight = 18.sp
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = { showPrivacyPolicyDialog = false },
-                    colors = ButtonDefaults.textButtonColors(contentColor = CoralPrimary)
-                ) {
-                    Text(text = "Close", fontWeight = FontWeight.Bold)
-                }
-            },
-            containerColor = Color(0xFF1E1E24),
-            shape = RoundedCornerShape(16.dp)
-        )
+        PrivacyPolicyDialog(onDismiss = { showPrivacyPolicyDialog = false })
     }
 
-    // Terms of Service Dialog
     if (showTermsDialog) {
-        AlertDialog(
-            onDismissRequest = { showTermsDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(CoralPrimary.copy(alpha = 0.15f))
-                            .border(1.dp, CoralPrimary.copy(alpha = 0.3f), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            painter = painterResource(id = R.drawable.ic_guide),
-                            contentDescription = null,
-                            tint = CoralPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = "Terms of Service",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
-                    )
-                }
-            },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(340.dp)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    Text(
-                        text = "1. Purpose\n" +
-                                "PGuard is a self-discipline and digital wellness application designed to help users overcome compulsive phone usage and adult content addiction.\n\n" +
-                                "2. User Responsibility\n" +
-                                "You are responsible for your own device configuration and maintaining the protection settings you choose to enable.\n\n" +
-                                "3. Disclaimer\n" +
-                                "PGuard is provided 'as is' without warranty. While the filtering engine continually improves, no automated filter is guaranteed to block 100% of newly created web domains.\n\n" +
-                                "4. Support\n" +
-                                "For assistance, contact support@pguard.app.",
-                        fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
-                        lineHeight = 18.sp
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = { showTermsDialog = false },
-                    colors = ButtonDefaults.textButtonColors(contentColor = CoralPrimary)
-                ) {
-                    Text(text = "Close", fontWeight = FontWeight.Bold)
-                }
-            },
-            containerColor = Color(0xFF1E1E24),
-            shape = RoundedCornerShape(16.dp)
-        )
+        TermsOfServiceDialog(onDismiss = { showTermsDialog = false })
     }
 
-    // Log Out Confirmation Dialog
     if (showLogoutDialog) {
         AlertDialog(
             onDismissRequest = { showLogoutDialog = false },
@@ -409,30 +287,30 @@ fun SettingsScreen(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(CoralPrimary.copy(alpha = 0.15f))
-                            .border(1.dp, CoralPrimary.copy(alpha = 0.3f), CircleShape),
+                            .background(primary.copy(alpha = 0.15f))
+                            .border(BorderStroke(1.dp, primary.copy(alpha = 0.3f)), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             painter = painterResource(id = R.drawable.ic_settings_logout),
                             contentDescription = null,
-                            tint = CoralPrimary,
+                            tint = primary,
                             modifier = Modifier.size(18.dp)
                         )
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
                         text = "Log Out",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             },
             text = {
                 Text(
                     text = "Are you sure you want to log out of your account?",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             },
             confirmButton = {
@@ -441,30 +319,29 @@ fun SettingsScreen(
                         showLogoutDialog = false
                         onLogout()
                     },
-                    colors = ButtonDefaults.textButtonColors(contentColor = CoralPrimary)
+                    colors = ButtonDefaults.textButtonColors(contentColor = primary)
                 ) {
                     Text(
                         text = "Log Out",
+                        style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold
                     )
                 }
             },
             dismissButton = {
-                TextButton(
-                    onClick = { showLogoutDialog = false }
-                ) {
+                TextButton(onClick = { showLogoutDialog = false }) {
                     Text(
                         text = "Cancel",
-                        color = Color.White.copy(alpha = 0.7f)
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             },
-            containerColor = Color(0xFF1E1E24),
-            shape = RoundedCornerShape(16.dp)
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            shape = MaterialTheme.shapes.medium
         )
     }
 
-    // Account Details Dialog
     if (showAccountDialog) {
         AlertDialog(
             onDismissRequest = { showAccountDialog = false },
@@ -474,22 +351,22 @@ fun SettingsScreen(
                         modifier = Modifier
                             .size(36.dp)
                             .clip(CircleShape)
-                            .background(CoralPrimary.copy(alpha = 0.15f))
-                            .border(1.dp, CoralPrimary.copy(alpha = 0.3f), CircleShape),
+                            .background(primary.copy(alpha = 0.15f))
+                            .border(BorderStroke(1.dp, primary.copy(alpha = 0.3f)), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             painter = painterResource(id = R.drawable.ic_settings_account),
                             contentDescription = null,
-                            tint = CoralPrimary,
+                            tint = primary,
                             modifier = Modifier.size(20.dp)
                         )
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
                         text = "Account Details",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 18.sp
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
                 }
             },
@@ -497,34 +374,37 @@ fun SettingsScreen(
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         text = "Email: ${user?.email ?: "Not signed in"}",
-                        fontSize = 14.sp,
+                        style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     if (!user?.displayName.isNullOrBlank()) {
                         Text(
                             text = "Name: ${user?.displayName}",
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                     Text(
                         text = "Status: Free Member",
-                        fontSize = 14.sp,
-                        color = CoralPrimary,
-                        fontWeight = FontWeight.SemiBold
+                        style = MaterialTheme.typography.labelLarge,
+                        color = primary
                     )
                 }
             },
             confirmButton = {
                 TextButton(
                     onClick = { showAccountDialog = false },
-                    colors = ButtonDefaults.textButtonColors(contentColor = CoralPrimary)
+                    colors = ButtonDefaults.textButtonColors(contentColor = primary)
                 ) {
-                    Text(text = "Close", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "Close",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold
+                    )
                 }
             },
-            containerColor = Color(0xFF1E1E24),
-            shape = RoundedCornerShape(16.dp)
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            shape = MaterialTheme.shapes.medium
         )
     }
 }
@@ -547,27 +427,23 @@ private fun SettingItemRow(
         Icon(
             painter = painterResource(id = iconRes),
             contentDescription = title,
-            tint = Color.White.copy(alpha = 0.85f),
+            tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.85f),
             modifier = Modifier.size(24.dp)
         )
         Spacer(modifier = Modifier.width(20.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    fontWeight = FontWeight.SemiBold,
-                    fontSize = 15.5.sp
-                ),
-                color = Color.White
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
             )
             if (!subtitle.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = subtitle,
-                    style = MaterialTheme.typography.bodySmall.copy(
-                        fontSize = 12.sp
-                    ),
-                    color = Color.White.copy(alpha = 0.5f)
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -577,7 +453,7 @@ private fun SettingItemRow(
 @Composable
 private fun SettingDivider() {
     HorizontalDivider(
-        color = Color.White.copy(alpha = 0.07f),
+        color = MaterialTheme.colorScheme.outlineVariant,
         thickness = 0.8.dp,
         modifier = Modifier.fillMaxWidth()
     )
@@ -631,10 +507,10 @@ private fun getAppVersionString(context: Context): String {
     }
 }
 
-@Preview(showBackground = true, backgroundColor = 0xFF121214)
+@Preview(showBackground = true)
 @Composable
 private fun SettingsScreenPreview() {
-    PGuardTheme(darkTheme = true) {
+    PGuardTheme {
         SettingsScreen(
             user = null,
             onLogout = {}

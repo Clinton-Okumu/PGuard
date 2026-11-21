@@ -128,6 +128,12 @@ func (h *BlocklistHandler) HandleCreateBlocklistItem(w http.ResponseWriter, r *h
 
 	// Case 1: Bulk creation
 	if len(req.Items) > 0 {
+		if len(req.Items) > 200 {
+			_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{
+				"error": "Bulk blocklist creation is limited to 200 items per request",
+			})
+			return
+		}
 		var toCreate []store.BlocklistItem
 		for _, raw := range req.Items {
 			if !store.IsValidBlockType(raw.Type) {

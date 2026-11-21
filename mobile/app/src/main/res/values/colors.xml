@@ -3,5 +3,5 @@
     <!-- Launcher background matching our Coral Brand identity -->
     <color name="ic_launcher_background">#FFFF5252</color>
     <!-- Background color for the system splash screen -->
-    <color name="splash_background">#121212</color>
+    <color name="splash_background">#121214</color>
 </resources>

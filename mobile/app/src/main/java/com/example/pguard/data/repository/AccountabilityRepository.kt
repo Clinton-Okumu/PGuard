@@ -1,5 +1,6 @@
 package com.example.pguard.data.repository
 
+import com.example.pguard.core.common.runSuspendCatching
 import com.example.pguard.core.network.api.AccountabilityApiService
 import com.example.pguard.core.network.model.AcceptInviteRequest
 import com.example.pguard.core.network.model.AccountabilityPartnerDto
@@ -9,6 +10,9 @@ import com.example.pguard.core.network.model.RecordEventRequest
 import com.example.pguard.core.network.model.RequestUnlockCodeRequest
 import com.example.pguard.core.network.model.RequestUnlockCodeResponse
 import com.example.pguard.core.network.model.SecurityAlertDto
+import com.example.pguard.core.network.model.VerifyUnlockCodeRequest
+import com.example.pguard.core.network.model.VerifyUnlockCodeResponse
+import kotlinx.coroutines.CancellationException
 
 class AccountabilityRepository(
     private val accountabilityApiService: AccountabilityApiService
@@ -30,7 +34,7 @@ class AccountabilityRepository(
     }
 
     suspend fun fetchPartner(): Result<PartnerStatusResponse> {
-        return runCatching {
+        return runSuspendCatching {
             accountabilityApiService.getPartner()
         }
     }
@@ -42,6 +46,8 @@ class AccountabilityRepository(
             )
             val partner = response.partner ?: throw IllegalStateException(response.error ?: "Failed to create partner invite")
             Result.success(partner)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(Exception(extractErrorMessage(e), e))
         }
@@ -52,20 +58,22 @@ class AccountabilityRepository(
             val response = accountabilityApiService.acceptInvite(AcceptInviteRequest(inviteCode = code))
             val partner = response.partner ?: throw IllegalStateException(response.error ?: "Failed to accept invite")
             Result.success(partner)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             Result.failure(Exception(extractErrorMessage(e), e))
         }
     }
 
     suspend fun disconnectPartner(): Result<Unit> {
-        return runCatching {
+        return runSuspendCatching {
             accountabilityApiService.disconnectPartner()
             Unit
         }
     }
 
     suspend fun recordSecurityEvent(eventType: String, message: String): Result<SecurityAlertDto> {
-        return runCatching {
+        return runSuspendCatching {
             val response = accountabilityApiService.recordEvent(
                 RecordEventRequest(eventType = eventType, message = message)
             )
@@ -74,20 +82,40 @@ class AccountabilityRepository(
     }
 
     suspend fun fetchSecurityEvents(limit: Int = 20): Result<List<SecurityAlertDto>> {
-        return runCatching {
+        return runSuspendCatching {
             accountabilityApiService.getEvents(limit).events
         }
     }
 
     suspend fun requestUnlockCode(featureName: String): Result<RequestUnlockCodeResponse> {
-        return runCatching {
+        return try {
             val response = accountabilityApiService.requestUnlockCode(
                 RequestUnlockCodeRequest(featureName = featureName)
             )
             if (response.error != null) {
                 throw IllegalStateException(response.error)
             }
-            response
+            Result.success(response)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(Exception(extractErrorMessage(e), e))
+        }
+    }
+
+    suspend fun verifyUnlockCode(code: String): Result<VerifyUnlockCodeResponse> {
+        return try {
+            val response = accountabilityApiService.verifyUnlockCode(
+                VerifyUnlockCodeRequest(code = code.trim())
+            )
+            if (!response.verified) {
+                throw IllegalStateException(response.error ?: "Invalid or expired approval code")
+            }
+            Result.success(response)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(Exception(extractErrorMessage(e), e))
         }
     }
 }
