@@ -1,5 +1,6 @@
 package com.example.pguard.presentation.habits
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -68,6 +69,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.DialogProperties
 import com.example.pguard.R
 import com.example.pguard.core.network.NetworkClient
 import com.example.pguard.core.network.model.CreateHabitRequest
@@ -152,20 +154,9 @@ fun HabitsScreen(
     // Persistent habits list (supports removing hardcoded habits & adding new custom ones)
     val habits = remember { mutableStateListOf<PersistentHabit>() }
 
-    fun refreshAll() {
-        streakStatus = HabitsManager.getStreakStatus(context)
-        urgesPrevented = HabitsManager.getUrgesPrevented(context)
-        weeklyConsistency = HabitsManager.getWeeklyConsistency(context)
-        habits.clear()
-        habits.addAll(HabitsManager.getHabits(context))
-        refreshKey++
-    }
-
-    LaunchedEffect(Unit) {
-        refreshAll()
-    }
-
-    // Modal and dialog states
+    // Gamification & Dialog states
+    var uncelebratedMilestone by remember { mutableStateOf<MilestoneBadge?>(null) }
+    var showDailyStoicDialog by remember { mutableStateOf(false) }
     var showSosIntervention by remember { mutableStateOf(false) }
     var showRelapseDialog by remember { mutableStateOf(false) }
     var showAddHabitDialog by remember { mutableStateOf(false) }
@@ -182,6 +173,37 @@ fun HabitsScreen(
             MilestoneBadge(30, "1 Month", "True Freedom", R.drawable.ic_crown, GoldColor),
             MilestoneBadge(90, "90 Days", "Mastery", R.drawable.ic_milestone_diamond, Color(0xFF00E5FF))
         )
+    }
+
+    fun refreshAll() {
+        streakStatus = HabitsManager.getStreakStatus(context)
+        urgesPrevented = HabitsManager.getUrgesPrevented(context)
+        weeklyConsistency = HabitsManager.getWeeklyConsistency(context)
+        habits.clear()
+        habits.addAll(HabitsManager.getHabits(context))
+        refreshKey++
+    }
+
+    // Initial Load + Backend Sync + Milestone/Stoic Check on App Entry
+    LaunchedEffect(Unit) {
+        refreshAll()
+
+        // Sync streak and relapse dates with backend to link calendar data
+        HabitsManager.syncCalendarWithBackend(context)
+        refreshAll()
+
+        // Gamification: check for newly achieved milestone to celebrate upon entering app
+        val uncelebratedDays = HabitsManager.getUncelebratedMilestone(
+            context,
+            streakStatus.streakDays,
+            milestones.map { it.targetDays }
+        )
+        if (uncelebratedDays != null) {
+            uncelebratedMilestone = milestones.firstOrNull { it.targetDays == uncelebratedDays }
+        } else if (HabitsManager.shouldShowDailyStoic(context)) {
+            // If no milestone popup, show Daily Stoic Reminder upon entering app
+            showDailyStoicDialog = true
+        }
     }
 
     Box(
@@ -246,18 +268,56 @@ fun HabitsScreen(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 4. Milestone Badges Section
+            // 4. Milestone Badges Section (Gamified & Interactive)
             MilestonesSection(
                 currentStreak = streakStatus.streakDays,
                 milestones = milestones,
+                onBadgeClick = { badge ->
+                    if (streakStatus.streakDays >= badge.targetDays) {
+                        uncelebratedMilestone = badge
+                    }
+                },
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 5. Daily Stoic Mindset Card
-            DailyMindsetCard(modifier = Modifier.padding(horizontal = 16.dp))
+            // 5. Daily Stoic Mindset Card (Click to open full Stoic Reminder Modal)
+            DailyMindsetCard(
+                onCardClick = { showDailyStoicDialog = true },
+                modifier = Modifier.padding(horizontal = 16.dp)
+            )
         }
+    }
+
+    // GAMIFIED MILESTONE CELEBRATION MODAL (Pops up when entering app after meeting a milestone)
+    if (uncelebratedMilestone != null) {
+        val badge = uncelebratedMilestone!!
+        MilestoneCelebrationDialog(
+            milestone = badge,
+            onClaimBadge = {
+                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                HabitsManager.markMilestoneCelebrated(context, badge.targetDays)
+                uncelebratedMilestone = null
+
+                // If daily stoic hasn't been shown today, display it right after milestone celebration
+                if (HabitsManager.shouldShowDailyStoic(context)) {
+                    showDailyStoicDialog = true
+                }
+            }
+        )
+    }
+
+    // DAILY STOIC REMINDER MODAL (Pops up when entering app once per day, or upon tapping card)
+    if (showDailyStoicDialog) {
+        val stoicQuote = remember { HabitsManager.getDailyStoicQuote() }
+        DailyStoicReminderDialog(
+            stoicQuote = stoicQuote,
+            onDismiss = {
+                HabitsManager.markDailyStoicShown(context)
+                showDailyStoicDialog = false
+            }
+        )
     }
 
     // 2-MINUTE URGE INTERVENTION MODAL (Focus Mode for 2 mins + Box Breathing + Habit Redirect)
@@ -278,7 +338,7 @@ fun HabitsScreen(
         )
     }
 
-    // MONTHLY PROGRESS CALENDAR MODAL (Full monthly calendar view linked to streak & relapses)
+    // MONTHLY PROGRESS CALENDAR MODAL (Full monthly calendar view linked to backend streak & relapses)
     if (showMonthlyCalendarDialog) {
         MonthlyProgressCalendarDialog(
             onDismiss = { showMonthlyCalendarDialog = false }
@@ -689,7 +749,7 @@ private fun WeeklyConsistencyCard(
                             color = Color.White
                         )
                         Text(
-                            text = "Tap to view monthly calendar 📅",
+                            text = "Linked to backend • Tap for Calendar 📅",
                             fontSize = 11.sp,
                             color = Color.White.copy(alpha = 0.45f)
                         )
@@ -781,9 +841,15 @@ private fun MonthlyProgressCalendarDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
     val now = Calendar.getInstance()
     var selectedYear by remember { mutableIntStateOf(now.get(Calendar.YEAR)) }
     var selectedMonth by remember { mutableIntStateOf(now.get(Calendar.MONTH)) }
+
+    // Sync with backend when viewing month
+    LaunchedEffect(selectedYear, selectedMonth) {
+        HabitsManager.syncCalendarWithBackend(context)
+    }
 
     val monthData = remember(selectedYear, selectedMonth) {
         HabitsManager.getMonthCalendar(context, selectedYear, selectedMonth)
@@ -870,7 +936,6 @@ private fun MonthlyProgressCalendarDialog(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 // Calendar Grid: Offset blanks + Days
-                val totalCells = monthData.firstDayOfWeekOffset + monthData.days.size
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(7),
                     modifier = Modifier
@@ -1353,6 +1418,7 @@ private fun AddHabitDialog(
 private fun MilestonesSection(
     currentStreak: Int,
     milestones: List<MilestoneBadge>,
+    onBadgeClick: (MilestoneBadge) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val unlockedCount = milestones.count { currentStreak >= it.targetDays }
@@ -1425,7 +1491,11 @@ private fun MilestonesSection(
             ) {
                 items(milestones) { badge ->
                     val isUnlocked = currentStreak >= badge.targetDays
-                    MilestoneCardItem(badge = badge, isUnlocked = isUnlocked)
+                    MilestoneCardItem(
+                        badge = badge,
+                        isUnlocked = isUnlocked,
+                        onClick = { onBadgeClick(badge) }
+                    )
                 }
             }
         }
@@ -1433,7 +1503,11 @@ private fun MilestonesSection(
 }
 
 @Composable
-private fun MilestoneCardItem(badge: MilestoneBadge, isUnlocked: Boolean) {
+private fun MilestoneCardItem(
+    badge: MilestoneBadge,
+    isUnlocked: Boolean,
+    onClick: () -> Unit
+) {
     Column(
         modifier = Modifier
             .width(108.dp)
@@ -1444,6 +1518,7 @@ private fun MilestoneCardItem(badge: MilestoneBadge, isUnlocked: Boolean) {
                 color = if (isUnlocked) badge.badgeColor.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.06f),
                 shape = RoundedCornerShape(14.dp)
             )
+            .clickable(onClick = onClick)
             .padding(vertical = 12.dp, horizontal = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -1489,34 +1564,305 @@ private fun MilestoneCardItem(badge: MilestoneBadge, isUnlocked: Boolean) {
     }
 }
 
+// GAMIFIED MILESTONE CELEBRATION MODAL
 @Composable
-private fun DailyMindsetCard(modifier: Modifier = Modifier) {
+private fun MilestoneCelebrationDialog(
+    milestone: MilestoneBadge,
+    onClaimBadge: () -> Unit
+) {
+    val scaleAnim by animateFloatAsState(
+        targetValue = 1f,
+        animationSpec = tween(durationMillis = 600),
+        label = "celebrationScale"
+    )
+
+    AlertDialog(
+        onDismissRequest = onClaimBadge,
+        title = null,
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Sparkling / Glowing Circular Badge
+                Box(
+                    modifier = Modifier
+                        .size(110.dp)
+                        .graphicsLayer {
+                            scaleX = scaleAnim
+                            scaleY = scaleAnim
+                        }
+                        .clip(CircleShape)
+                        .background(milestone.badgeColor.copy(alpha = 0.18f))
+                        .border(3.dp, milestone.badgeColor, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(id = milestone.iconRes),
+                        contentDescription = null,
+                        tint = milestone.badgeColor,
+                        modifier = Modifier.size(54.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                Row(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(GoldColor.copy(alpha = 0.15f))
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "🎉 NEW MILESTONE UNLOCKED!",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = GoldColor,
+                        letterSpacing = 0.6.sp
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "${milestone.title} • ${milestone.subtitle}",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                val description = when (milestone.targetDays) {
+                    1 -> "You broke the impulsive loop and proved to yourself you have what it takes. The hardest hurdle is behind you."
+                    3 -> "72 hours of sheer discipline! The initial storm has passed, and your dopamine baseline is stabilizing."
+                    7 -> "1 full week of freedom! Major neural pathways are beginning to rewire. Feel the clarity."
+                    14 -> "2 weeks of unbroken resolve! You are building iron willpower and taking control of your mind."
+                    30 -> "30 Days clean! A massive transformation. You are living as a truly free individual."
+                    90 -> "90 Days of mastery! A complete lifestyle evolution. Unstoppable."
+                    else -> "You achieved a landmark of discipline. Keep forging your fortress of strength."
+                }
+
+                Text(
+                    text = description,
+                    fontSize = 13.sp,
+                    color = Color.White.copy(alpha = 0.8f),
+                    textAlign = TextAlign.Center,
+                    lineHeight = 18.sp
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Color(0xFF26262E),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Target: ${milestone.targetDays} Days",
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.6f)
+                        )
+                        Text(
+                            text = "UNLOCKED 🏆",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = EmeraldGreen
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onClaimBadge,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(46.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = CoralPrimary,
+                    contentColor = Color.White
+                )
+            ) {
+                Text(
+                    text = "Claim Badge 🏆",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                )
+            }
+        },
+        containerColor = Color(0xFF1E1E24),
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
+// DAILY STOIC REMINDER DIALOG
+@Composable
+private fun DailyStoicReminderDialog(
+    stoicQuote: StoicQuote,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(GoldColor.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_lightbulb),
+                        contentDescription = null,
+                        tint = GoldColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "Daily Stoic Anchor",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "Mindset of the Day",
+                        fontSize = 11.5.sp,
+                        color = CoralPrimary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF24242C),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = stoicQuote.quote,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                            lineHeight = 22.sp
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "— ${stoicQuote.author}",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = GoldColor
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                Text(
+                    text = "TODAY'S INTENTION",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = CoralPrimary,
+                    letterSpacing = 0.6.sp
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = stoicQuote.reflection,
+                    fontSize = 12.5.sp,
+                    color = Color.White.copy(alpha = 0.8f),
+                    lineHeight = 17.sp
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onDismiss,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = CoralPrimary,
+                    contentColor = Color.White
+                )
+            ) {
+                Text(
+                    text = "Embrace Mindset & Continue",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp
+                )
+            }
+        },
+        containerColor = Color(0xFF1E1E24),
+        shape = RoundedCornerShape(20.dp)
+    )
+}
+
+@Composable
+private fun DailyMindsetCard(
+    onCardClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val stoic = remember { HabitsManager.getDailyStoicQuote() }
+
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onCardClick),
         shape = RoundedCornerShape(16.dp),
         color = CardBackground,
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
     ) {
         Column(modifier = Modifier.padding(18.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    painter = painterResource(id = R.drawable.ic_lightbulb),
-                    contentDescription = null,
-                    tint = GoldColor,
-                    modifier = Modifier.size(17.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_lightbulb),
+                        contentDescription = null,
+                        tint = GoldColor,
+                        modifier = Modifier.size(17.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "DAILY STOIC REMINDER",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.sp,
+                        color = CoralPrimary,
+                        letterSpacing = 0.8.sp
+                    )
+                }
                 Text(
-                    text = "DAILY STOIC REMINDER",
-                    fontWeight = FontWeight.Bold,
+                    text = "Tap to read 📖",
                     fontSize = 11.sp,
-                    color = CoralPrimary,
-                    letterSpacing = 0.8.sp
+                    color = Color.White.copy(alpha = 0.45f)
                 )
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "“He who conquers himself is mightier than he who conquers a city.”",
+                text = stoic.quote,
                 style = MaterialTheme.typography.bodyMedium.copy(
                     fontSize = 14.sp,
                     lineHeight = 20.sp,
@@ -1526,7 +1872,7 @@ private fun DailyMindsetCard(modifier: Modifier = Modifier) {
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "— Marcus Aurelius",
+                text = "— ${stoic.author}",
                 fontSize = 12.sp,
                 color = Color.White.copy(alpha = 0.45f)
             )
@@ -1545,6 +1891,11 @@ private fun UrgeInterventionModal(
     var isRunning by remember { mutableStateOf(true) }
     val haptic = LocalHapticFeedback.current
 
+    // Lock down phone: intercept back button so user cannot exit during the 2 minutes
+    BackHandler(enabled = true) {
+        // Enforce phone lockdown
+    }
+
     LaunchedEffect(isRunning) {
         while (isRunning && timerSeconds > 0) {
             delay(1000L)
@@ -1552,7 +1903,6 @@ private fun UrgeInterventionModal(
         }
     }
 
-    // 16s Box Breathing cycle
     val cycleTime = (120 - timerSeconds) % 16
     val (phaseText, targetScale) = when (cycleTime) {
         in 0..3 -> "Inhale deeply (4s)" to 1.25f
@@ -1572,7 +1922,16 @@ private fun UrgeInterventionModal(
     val formattedTime = String.format("%d:%02d", minutes, seconds)
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            // Cannot dismiss by clicking outside during 2-minute lockdown
+            if (timerSeconds <= 0) {
+                onDismiss()
+            }
+        },
+        properties = DialogProperties(
+            dismissOnBackPress = false,
+            dismissOnClickOutside = false
+        ),
         title = {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1597,26 +1956,28 @@ private fun UrgeInterventionModal(
                     Spacer(modifier = Modifier.width(10.dp))
                     Column {
                         Text(
-                            text = "2-Min Urge Lockdown",
+                            text = "Phone Locked (2 Min)",
                             fontWeight = FontWeight.Bold,
                             fontSize = 16.sp,
                             color = Color.White
                         )
                         Text(
-                            text = "Focus Mode Active",
+                            text = "Urge Protocol • Focus Active",
                             fontSize = 11.5.sp,
                             color = CoralPrimary,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
                 }
-                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_close),
-                        contentDescription = "Close",
-                        tint = Color.White.copy(alpha = 0.5f),
-                        modifier = Modifier.size(18.dp)
-                    )
+                if (timerSeconds <= 0) {
+                    IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_close),
+                            contentDescription = "Close",
+                            tint = Color.White.copy(alpha = 0.5f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
         },
@@ -1626,7 +1987,10 @@ private fun UrgeInterventionModal(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Distracting apps are locked down just like Focus Mode for the next 2 minutes. Ride the urge wave until it breaks.",
+                    text = if (timerSeconds > 0)
+                        "Phone is locked down from use for 2 minutes just like Focus Mode. Non-essential apps and notifications are blocked."
+                    else
+                        "You survived the peak urge wave! Your dopamine receptors are resting. Claim your victory below.",
                     fontSize = 12.5.sp,
                     color = Color.White.copy(alpha = 0.75f),
                     textAlign = TextAlign.Center,
@@ -1635,7 +1999,6 @@ private fun UrgeInterventionModal(
 
                 Spacer(modifier = Modifier.height(18.dp))
 
-                // Pulsating breathing circle
                 Box(
                     modifier = Modifier.size(130.dp),
                     contentAlignment = Alignment.Center
@@ -1648,8 +2011,8 @@ private fun UrgeInterventionModal(
                                 scaleY = animatedScale
                             }
                             .clip(CircleShape)
-                            .background(CoralPrimary.copy(alpha = 0.12f))
-                            .border(2.dp, CoralPrimary, CircleShape)
+                            .background(if (timerSeconds > 0) CoralPrimary.copy(alpha = 0.12f) else EmeraldGreen.copy(alpha = 0.15f))
+                            .border(2.dp, if (timerSeconds > 0) CoralPrimary else EmeraldGreen, CircleShape)
                     )
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
@@ -1659,17 +2022,16 @@ private fun UrgeInterventionModal(
                             color = Color.White
                         )
                         Text(
-                            text = phaseText,
+                            text = if (timerSeconds > 0) phaseText else "Wave Defeated!",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = CoralPrimary
+                            color = if (timerSeconds > 0) CoralPrimary else EmeraldGreen
                         )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(18.dp))
 
-                // Instant Habit Redirect
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -1721,7 +2083,6 @@ private fun UrgeInterventionModal(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                // Stoic reminder snippet
                 Surface(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
@@ -1746,32 +2107,74 @@ private fun UrgeInterventionModal(
             }
         },
         confirmButton = {
-            Button(
-                onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onUrgeOvercome()
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp),
-                shape = RoundedCornerShape(10.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = EmeraldGreen,
-                    contentColor = Color.White
-                )
-            ) {
-                Icon(
-                    painter = painterResource(id = R.drawable.ic_check_circle),
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "I Survived It (+1 Urge Won)",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.5.sp
-                )
+            if (timerSeconds <= 0) {
+                Button(
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onUrgeOvercome()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(46.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = EmeraldGreen,
+                        contentColor = Color.White
+                    )
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_check_circle),
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "I Survived It (+1 Urge Won) 🏆",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp
+                    )
+                }
+            } else {
+                Button(
+                    onClick = {},
+                    enabled = false,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(44.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        disabledContainerColor = Color(0xFF26262E),
+                        disabledContentColor = Color.White.copy(alpha = 0.4f)
+                    )
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_feature_shield),
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.4f),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Phone Locked (${formattedTime})",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.5.sp
+                    )
+                }
+            }
+        },
+        dismissButton = {
+            if (timerSeconds > 0) {
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.padding(top = 2.dp)
+                ) {
+                    Text(
+                        text = "Emergency Unlock",
+                        fontSize = 11.5.sp,
+                        color = Color.White.copy(alpha = 0.35f)
+                    )
+                }
             }
         },
         containerColor = Color(0xFF1E1E24),

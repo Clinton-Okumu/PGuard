@@ -478,6 +478,151 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
     }
 
     /**
+     * Emergency 2-Minute Urge Lockdown Overlay Window:
+     * Displayed when the user is undergoing the 2-minute urge protocol and locks the phone from use.
+     */
+    fun showUrgeLockdownOverlay(
+        appName: String,
+        remainingSeconds: Int
+    ) {
+        runOnMainThread {
+            try {
+                if (isFullScreenShowing) return@runOnMainThread
+
+                hideAllImmediate()
+
+                val root = object : FrameLayout(service) {
+                    init {
+                        isFocusable = true
+                        isFocusableInTouchMode = true
+                    }
+
+                    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                        // Absorb back key to enforce lockdown
+                        if (event.keyCode == KeyEvent.KEYCODE_BACK && event.action == KeyEvent.ACTION_UP) {
+                            return true
+                        }
+                        return super.dispatchKeyEvent(event)
+                    }
+                }
+
+                val hasBlur = isCrossWindowBlurSupported()
+                val bgColor = if (hasBlur) 0xEE0D0F14.toInt() else 0xFF0D0F14.toInt()
+                root.setBackgroundColor(bgColor)
+
+                val contentLayout = LinearLayout(service).apply {
+                    orientation = LinearLayout.VERTICAL
+                    gravity = Gravity.CENTER_HORIZONTAL
+                    setPadding(dpToPx(24f), dpToPx(32f), dpToPx(24f), dpToPx(32f))
+                }
+
+                root.addView(
+                    contentLayout,
+                    FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
+                )
+
+                // 1. Lockdown Icon Box
+                val iconBox = FrameLayout(service).apply {
+                    val bg = GradientDrawable().apply {
+                        cornerRadius = dpToPx(22f).toFloat()
+                        setColor(COLOR_CORAL)
+                    }
+                    background = bg
+                }
+                val iconBoxParams = LinearLayout.LayoutParams(dpToPx(84f), dpToPx(84f)).apply {
+                    bottomMargin = dpToPx(18f)
+                }
+                val lockIcon = ImageView(service).apply {
+                    setImageResource(R.drawable.ic_feature_shield)
+                    scaleType = ImageView.ScaleType.FIT_CENTER
+                }
+                iconBox.addView(lockIcon, FrameLayout.LayoutParams(dpToPx(48f), dpToPx(48f), Gravity.CENTER))
+                contentLayout.addView(iconBox, iconBoxParams)
+
+                // 2. Title
+                val titleView = TextView(service).apply {
+                    text = "Phone Locked (2-Min Urge Protocol)"
+                    setTextColor(Color.WHITE)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 20f)
+                    typeface = Typeface.DEFAULT_BOLD
+                    gravity = Gravity.CENTER
+                }
+                contentLayout.addView(titleView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dpToPx(8f)
+                })
+
+                // 3. Message with Time Remaining
+                val mins = remainingSeconds / 60
+                val secs = remainingSeconds % 60
+                val timeStr = String.format("%d:%02d", mins, secs)
+
+                val messageView = TextView(service).apply {
+                    text = "Your phone is locked down from use for 2 minutes ($timeStr remaining) to break the impulsive craving loop. Breathe and stay strong."
+                    setTextColor(COLOR_TEXT_MUTED)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f)
+                    gravity = Gravity.CENTER
+                    setLineSpacing(dpToPx(2f).toFloat(), 1.15f)
+                }
+                contentLayout.addView(messageView, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                    bottomMargin = dpToPx(24f)
+                })
+
+                // 4. Return to Urge Protocol (PGuard) Button
+                val returnButton = Button(service).apply {
+                    text = "Return to Urge Breathing Protocol"
+                    setTextColor(Color.WHITE)
+                    setTextSize(TypedValue.COMPLEX_UNIT_SP, 14.5f)
+                    typeface = Typeface.DEFAULT_BOLD
+                    isAllCaps = false
+                    val btnBg = GradientDrawable().apply {
+                        cornerRadius = dpToPx(14f).toFloat()
+                        setColor(COLOR_CORAL)
+                    }
+                    background = btnBg
+                    setOnClickListener {
+                        dismissFullScreenAndExecute {
+                            try {
+                                val launchIntent = service.packageManager.getLaunchIntentForPackage(service.packageName)
+                                if (launchIntent != null) {
+                                    launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                                    service.startActivity(launchIntent)
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+                }
+                contentLayout.addView(returnButton, LinearLayout.LayoutParams(
+                    (service.resources.displayMetrics.widthPixels * 0.84f).toInt(),
+                    dpToPx(50f)
+                ))
+
+                val layoutParams = WindowManager.LayoutParams(
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT
+                )
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    try {
+                        layoutParams.flags = layoutParams.flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
+                        layoutParams.blurBehindRadius = dpToPx(40f)
+                    } catch (_: Exception) {}
+                }
+
+                windowManager.addView(root, layoutParams)
+                activeViews.add(root)
+                isFullScreenShowing = true
+                Log.i(TAG, "Urge lockdown overlay displayed.")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to display urge lockdown overlay: ${e.message}")
+            }
+        }
+    }
+
+    /**
      * Tier 1: Container-Level Mask for Native Feed Items.
      * Uses synchronous tracking and immediate cleanup to ensure it NEVER sticks on screen.
      */

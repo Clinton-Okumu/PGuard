@@ -399,17 +399,10 @@ class PGuardAccessibilityService : AccessibilityService() {
             overlayManager.hideContainerOverlay()
         }
 
-        // 0. Emergency Urge Lockdown (2-minute focus lockdown during peak urges)
+        // 0. Emergency Urge Lockdown (2-minute focus lockdown during peak urges: locks phone from use)
         if (com.example.pguard.presentation.focus.FocusModeManager.isUrgeLockdownActive(this)) {
-            val urgeSchedule = com.example.pguard.presentation.focus.FocusSchedule(
-                id = "urge_lockdown",
-                startHour = 0,
-                startMinute = 0,
-                endHour = 0,
-                endMinute = 2
-            )
-            if (!com.example.pguard.presentation.focus.FocusModeManager.isPackageAllowed(this, packageName, urgeSchedule)) {
-                triggerFocusBlock(packageName, urgeSchedule)
+            if (!com.example.pguard.presentation.focus.FocusModeManager.isPackageAllowedDuringUrgeLockdown(this, packageName)) {
+                triggerUrgeLockdownBlock(packageName)
                 return
             }
         }
@@ -1144,6 +1137,29 @@ class PGuardAccessibilityService : AccessibilityService() {
                 val backHandled = performGlobalAction(GLOBAL_ACTION_BACK)
                 if (!backHandled) performGlobalAction(GLOBAL_ACTION_HOME)
             }
+        )
+    }
+
+    private fun triggerUrgeLockdownBlock(packageName: String) {
+        HabitsManager.recordBlockInterception(applicationContext)
+
+        if (overlayManager.isFullScreenShowing) {
+            return
+        }
+
+        val remaining = com.example.pguard.presentation.focus.FocusModeManager.getUrgeLockdownRemainingSeconds(this)
+        val appName = try {
+            val pm = packageManager
+            val info = pm.getApplicationInfo(packageName, 0)
+            pm.getApplicationLabel(info).toString()
+        } catch (_: Exception) {
+            packageName
+        }
+
+        Log.w(TAG, "BLOCKED: 2-Minute Urge Lockdown Active. Phone locked from use: $appName")
+        overlayManager.showUrgeLockdownOverlay(
+            appName = appName,
+            remainingSeconds = remaining
         )
     }
 

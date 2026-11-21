@@ -90,6 +90,42 @@ object FocusModeManager {
         return getActiveSchedule(context, cal) != null || isUrgeLockdownActive(context)
     }
 
+    /**
+     * Determines whether a package is permitted during the 2-minute emergency urge lockdown.
+     * To enforce full phone lockdown from use, only PGuard (the urge breathing protocol)
+     * and emergency calls are permitted. All launchers and other apps are locked.
+     */
+    fun isPackageAllowedDuringUrgeLockdown(context: Context, packageName: String): Boolean {
+        val lower = packageName.lowercase()
+        val appPkg = context.packageName.lowercase()
+
+        // 1. PGuard itself is always permitted
+        if (lower == appPkg) return true
+
+        // 2. Emergency phone dialer / in-call UI is permitted for critical safety
+        val defaultDialer = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val telecomManager = context.getSystemService(Context.TELECOM_SERVICE) as? android.telecom.TelecomManager
+            telecomManager?.defaultDialerPackage
+        } else null
+
+        if (!defaultDialer.isNullOrBlank() && lower == defaultDialer.lowercase()) {
+            return true
+        }
+        if (lower.contains("dialer") || lower.contains("incallui") || lower.contains("telecom")) {
+            return true
+        }
+
+        // 3. Keyboards / Input methods
+        try {
+            val imm = context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            val imes = imm?.enabledInputMethodList?.map { it.packageName.lowercase() } ?: emptyList()
+            if (imes.contains(lower)) return true
+        } catch (_: Exception) {}
+
+        // Everything else (Launchers, browsers, social media, games, etc.) is strictly locked down!
+        return false
+    }
+
     fun startUrgeLockdown(context: Context, durationSeconds: Int = 120) {
         val until = System.currentTimeMillis() + (durationSeconds * 1000L)
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

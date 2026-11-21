@@ -3,6 +3,7 @@ package com.example.pguard.presentation.habits
 import android.content.Context
 import android.content.SharedPreferences
 import android.provider.Settings
+import com.example.pguard.core.network.NetworkClient
 import com.example.pguard.engine.accessibility.PGuardAccessibilityService
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -51,6 +52,12 @@ data class MonthCalendarData(
     val consistencyPercent: Int
 )
 
+data class StoicQuote(
+    val quote: String,
+    val author: String,
+    val reflection: String
+)
+
 @Serializable
 data class PersistentHabit(
     val id: String,
@@ -70,11 +77,51 @@ object HabitsManager {
     private const val KEY_RELAPSE_DATES = "relapse_dates_set"
     private const val KEY_LAST_INTERCEPTION_TIME = "last_interception_timestamp"
     private const val KEY_HABITS_JSON = "persistent_habits_json"
+    private const val KEY_CELEBRATED_MILESTONES = "celebrated_milestones_set"
+    private const val KEY_LAST_STOIC_SHOWN_DATE = "last_stoic_shown_date"
 
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
     }
+
+    private val stoicQuotes = listOf(
+        StoicQuote(
+            quote = "“He who conquers himself is mightier than he who conquers a city.”",
+            author = "Marcus Aurelius",
+            reflection = "When urges appear, pause. Self-mastery is not about avoiding temptation; it is the quiet strength to choose your response."
+        ),
+        StoicQuote(
+            quote = "“You have power over your mind — not outside events. Realize this, and you will find strength.”",
+            author = "Marcus Aurelius",
+            reflection = "External notifications and triggers have no authority over your thumbs. You alone decide your next action."
+        ),
+        StoicQuote(
+            quote = "“No man is free who is not master of himself.”",
+            author = "Epictetus",
+            reflection = "Freedom is having the discipline to honor the promises you made to yourself when temptation knocks."
+        ),
+        StoicQuote(
+            quote = "“Difficulties strengthen the mind, as labor does the body.”",
+            author = "Seneca",
+            reflection = "The friction you feel when resisting an urge is neural resistance training. Every pause rewires your brain."
+        ),
+        StoicQuote(
+            quote = "“We suffer more often in imagination than in reality.”",
+            author = "Seneca",
+            reflection = "The phantom discomfort of an unfulfilled urge lasts only 2 minutes. The clarity of staying clean lasts forever."
+        ),
+        StoicQuote(
+            quote = "“How long are you going to wait before you demand the best for yourself?”",
+            author = "Epictetus",
+            reflection = "Today is your life in miniature. Win today, and you win everything."
+        ),
+        StoicQuote(
+            quote = "“The soul becomes dyed with the color of its thoughts.”",
+            author = "Marcus Aurelius",
+            reflection = "Fill your mind with focus, calm, and purpose today. Starve the noise."
+        )
+    )
 
     private fun getPrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -328,6 +375,77 @@ object HabitsManager {
         )
     }
 
+    // --- BACKEND CALENDAR & STREAK SYNC ---
+
+    suspend fun syncCalendarWithBackend(context: Context) {
+        try {
+            val api = NetworkClient.getHabitsApiService(context)
+            val streakRes = api.getStreak()
+            streakRes.streak?.let { streak ->
+                val prefs = getPrefs(context)
+                val editor = prefs.edit()
+                if (streak.longestStreakDays > getBestStreakDays(context)) {
+                    editor.putInt(KEY_BEST_STREAK, streak.longestStreakDays)
+                }
+                editor.apply()
+            }
+
+            val historyRes = api.getRelapseHistory(limit = 100)
+            val prefs = getPrefs(context)
+            val existingRelapses = prefs.getStringSet(KEY_RELAPSE_DATES, emptySet())?.toMutableSet() ?: mutableSetOf()
+            historyRes.relapses.forEach { log ->
+                log.createdAt?.take(10)?.let { dateStr ->
+                    if (dateStr.length == 10) {
+                        existingRelapses.add(dateStr)
+                    }
+                }
+            }
+            prefs.edit().putStringSet(KEY_RELAPSE_DATES, existingRelapses).apply()
+        } catch (_: Exception) {
+            // Graceful fallback to local cache
+        }
+    }
+
+    // --- GAMIFIED MILESTONES CELEBRATION ---
+
+    fun isMilestoneCelebrated(context: Context, targetDays: Int): Boolean {
+        val prefs = getPrefs(context)
+        val celebrated = prefs.getStringSet(KEY_CELEBRATED_MILESTONES, emptySet()) ?: emptySet()
+        return celebrated.contains(targetDays.toString())
+    }
+
+    fun markMilestoneCelebrated(context: Context, targetDays: Int) {
+        val prefs = getPrefs(context)
+        val celebrated = prefs.getStringSet(KEY_CELEBRATED_MILESTONES, emptySet())?.toMutableSet() ?: mutableSetOf()
+        celebrated.add(targetDays.toString())
+        prefs.edit().putStringSet(KEY_CELEBRATED_MILESTONES, celebrated).apply()
+    }
+
+    fun getUncelebratedMilestone(context: Context, currentStreak: Int, milestoneDays: List<Int>): Int? {
+        val prefs = getPrefs(context)
+        val celebrated = prefs.getStringSet(KEY_CELEBRATED_MILESTONES, emptySet()) ?: emptySet()
+        return milestoneDays
+            .filter { currentStreak >= it && !celebrated.contains(it.toString()) }
+            .maxOrNull()
+    }
+
+    // --- DAILY STOIC REMINDERS ---
+
+    fun getDailyStoicQuote(): StoicQuote {
+        val dayOfYear = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
+        return stoicQuotes[dayOfYear % stoicQuotes.size]
+    }
+
+    fun shouldShowDailyStoic(context: Context): Boolean {
+        val prefs = getPrefs(context)
+        val lastDate = prefs.getString(KEY_LAST_STOIC_SHOWN_DATE, null)
+        return lastDate != todayDateString()
+    }
+
+    fun markDailyStoicShown(context: Context) {
+        getPrefs(context).edit().putString(KEY_LAST_STOIC_SHOWN_DATE, todayDateString()).apply()
+    }
+
     // --- DAILY HABITS PERSISTENCE & WORKFLOW ---
 
     fun getHabits(context: Context): List<PersistentHabit> {
@@ -336,7 +454,6 @@ object HabitsManager {
         val today = todayDateString()
 
         if (jsonStr.isNullOrBlank()) {
-            // First time: provide starter habits (user can remove all of them)
             val starterHabits = listOf(
                 PersistentHabit(id = "1", title = "Drink 2.5L Water", iconKey = "water", currentStreak = 3, isCompletedToday = false),
                 PersistentHabit(id = "2", title = "Workout / Exercise", iconKey = "fitness", currentStreak = 5, isCompletedToday = false),
@@ -348,7 +465,6 @@ object HabitsManager {
 
         return try {
             val list = json.decodeFromString<List<PersistentHabit>>(jsonStr)
-            // Daily reset logic: if lastCompletedDate != today, mark isCompletedToday = false
             val updated = list.map { habit ->
                 if (habit.lastCompletedDate != today && habit.isCompletedToday) {
                     habit.copy(isCompletedToday = false)
