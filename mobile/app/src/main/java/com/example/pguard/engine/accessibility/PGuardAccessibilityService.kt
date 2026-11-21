@@ -14,6 +14,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
 import com.example.pguard.engine.filter.ContentFilter
 import com.example.pguard.presentation.blocked.BlockedActivity
+import com.example.pguard.presentation.habits.HabitsManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Locale
@@ -648,6 +649,8 @@ class PGuardAccessibilityService : AccessibilityService() {
         lastBlockedUrl = target
         lastBlockedTimestamp = now
 
+        HabitsManager.recordBlockInterception(applicationContext)
+
         Log.w(TAG, "BLOCKED restricted content detected: $target (browser=$isBrowserContext)")
 
         // 1. Standard Scrollable Feeds in native apps (not web browsers):
@@ -824,6 +827,7 @@ class PGuardAccessibilityService : AccessibilityService() {
             return
         }
         lastShortsBlockedTimestamp = now
+        HabitsManager.recordBlockInterception(applicationContext)
 
         Log.w(TAG, "BLOCKED: YouTube Shorts detected, showing full-screen overlay")
         overlayManager.showFullScreenOverlay(
@@ -957,6 +961,7 @@ class PGuardAccessibilityService : AccessibilityService() {
             return
         }
         lastWhatsAppBlockedTimestamp = now
+        HabitsManager.recordBlockInterception(applicationContext)
 
         Log.w(TAG, "BLOCKED: $reason, showing full-screen overlay")
         overlayManager.showFullScreenOverlay(
@@ -991,6 +996,7 @@ class PGuardAccessibilityService : AccessibilityService() {
             return
         }
         lastTikTokBlockedTimestamp = now
+        HabitsManager.recordBlockInterception(applicationContext)
 
         Log.w(TAG, "BLOCKED: TikTok application opened, showing full-screen overlay")
         overlayManager.showFullScreenOverlay(
@@ -1110,6 +1116,7 @@ class PGuardAccessibilityService : AccessibilityService() {
             return
         }
         lastInstagramBlockedTimestamp = now
+        HabitsManager.recordBlockInterception(applicationContext)
 
         Log.w(TAG, "BLOCKED: Instagram Reels detected, showing full-screen overlay")
         overlayManager.showFullScreenOverlay(
@@ -1128,6 +1135,7 @@ class PGuardAccessibilityService : AccessibilityService() {
     private fun triggerFocusBlock(packageName: String, schedule: com.example.pguard.presentation.focus.FocusSchedule) {
         // Instant neutralization: immediately boot back to Home so the unallowed app cannot even open
         performGlobalAction(GLOBAL_ACTION_HOME)
+        HabitsManager.recordBlockInterception(applicationContext)
 
         if (overlayManager.isFullScreenShowing) {
             return
@@ -1157,6 +1165,7 @@ class PGuardAccessibilityService : AccessibilityService() {
             return
         }
         lastAppBlockedTimestamp = now
+        HabitsManager.recordBlockInterception(applicationContext)
 
         val appName = try {
             val pm = packageManager

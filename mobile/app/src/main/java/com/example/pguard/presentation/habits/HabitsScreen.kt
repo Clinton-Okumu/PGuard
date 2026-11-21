@@ -2,6 +2,7 @@ package com.example.pguard.presentation.habits
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -22,18 +23,19 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
@@ -50,13 +52,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -68,26 +74,6 @@ import kotlinx.coroutines.delay
 private val CardBackground = Color(0xFF18181C)
 private val GoldColor = Color(0xFFFFB800)
 private val EmeraldGreen = Color(0xFF4CAF50)
-
-private val TabHeaderShape = GenericShape { size, _ ->
-    val cut = 18f
-    val radius = 32f
-    moveTo(0f, size.height)
-    lineTo(0f, radius)
-    arcTo(
-        rect = Rect(0f, 0f, radius * 2, radius * 2),
-        startAngleDegrees = 180f,
-        sweepAngleDegrees = 90f,
-        forceMoveTo = false
-    )
-    lineTo(size.width - cut - 8f, 0f)
-    quadraticTo(
-        size.width - cut, 0f,
-        size.width - cut + 4f, 4f
-    )
-    lineTo(size.width, size.height)
-    close()
-}
 
 data class HabitItem(
     val id: String,
@@ -117,14 +103,25 @@ data class SelectableHabitIcon(
 fun HabitsScreen(
     modifier: Modifier = Modifier
 ) {
-    // Clean streak state
-    var streakDays by remember { mutableIntStateOf(7) }
-    var bestStreak by remember { mutableIntStateOf(14) }
-    var urgesPrevented by remember { mutableIntStateOf(23) }
+    val context = LocalContext.current
 
-    // Dialog states
-    var showSosDialog by remember { mutableStateOf(false) }
-    var showResetDialog by remember { mutableStateOf(false) }
+    // Blocker-connected streak and habit state from HabitsManager
+    var streakDays by remember { mutableIntStateOf(HabitsManager.getStreakDays(context)) }
+    var bestStreak by remember { mutableIntStateOf(HabitsManager.getBestStreakDays(context)) }
+    var urgesPrevented by remember { mutableIntStateOf(HabitsManager.getUrgesPrevented(context)) }
+    var weeklyConsistency by remember { mutableStateOf(HabitsManager.getWeeklyConsistency(context)) }
+
+    // Synchronize on recomposition/entry
+    LaunchedEffect(Unit) {
+        streakDays = HabitsManager.getStreakDays(context)
+        bestStreak = HabitsManager.getBestStreakDays(context)
+        urgesPrevented = HabitsManager.getUrgesPrevented(context)
+        weeklyConsistency = HabitsManager.getWeeklyConsistency(context)
+    }
+
+    // Modal and dialog states
+    var showSosIntervention by remember { mutableStateOf(false) }
+    var showRelapseDialog by remember { mutableStateOf(false) }
     var showAddHabitDialog by remember { mutableStateOf(false) }
 
     // Habits collection with Material vector icons & tailored theme colors
@@ -132,7 +129,7 @@ fun HabitsScreen(
         mutableStateListOf(
             HabitItem("1", "Morning Meditation", R.drawable.ic_habit_meditation, Color(0xFF64B5F6), 30, 7, true),
             HabitItem("2", "Read Self-Development", R.drawable.ic_habit_book, Color(0xFFFFB74D), 30, 6, true),
-            HabitItem("3", "Workout / Exercise", R.drawable.ic_habit_fitness, CoralPrimary, 21, 4, true),
+            HabitItem("3", "Workout / Exercise", R.drawable.ic_habit_fitness, CoralPrimary, 21, 4, false),
             HabitItem("4", "Drink 2.5L Water", R.drawable.ic_habit_water, Color(0xFF4FC3F7), 21, 5, false),
             HabitItem("5", "No Screens 1h Before Bed", R.drawable.ic_habit_noscreen, Color(0xFFBA68C8), 30, 3, false)
         )
@@ -163,27 +160,27 @@ fun HabitsScreen(
         ) {
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 1. Hero Clean Streak Card
+            // 1. Hero Clean Streak Card (Reset moved to overflow menu, SOS button gets full prominent width)
             CleanStreakHeroCard(
                 streakDays = streakDays,
                 bestStreak = bestStreak,
                 urgesPrevented = urgesPrevented,
-                onSosClick = { showSosDialog = true },
-                onResetClick = { showResetDialog = true },
+                onSosClick = { showSosIntervention = true },
+                onResetClick = { showRelapseDialog = true },
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 2. Weekly Consistency Row
+            // 2. Weekly Consistency Row (Connected to real blockers and relapse tracking)
             WeeklyConsistencyCard(
-                currentStreak = streakDays,
+                weeklyStatus = weeklyConsistency,
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 3. Daily Habits Tracker Card
+            // 3. Daily Habits Tracker Card (Unified card header)
             HabitsTrackerSection(
                 habits = habits,
                 onToggleHabit = { habit ->
@@ -201,7 +198,7 @@ fun HabitsScreen(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 4. Milestone Badges Road
+            // 4. Milestone Badges Section (Unified card header & fixed label truncation)
             MilestonesSection(
                 currentStreak = streakDays,
                 milestones = milestones,
@@ -210,59 +207,36 @@ fun HabitsScreen(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 5. Daily Mindset Card
+            // 5. Daily Stoic Mindset Card
             DailyMindsetCard(modifier = Modifier.padding(horizontal = 16.dp))
         }
     }
 
-    // SOS Urge Emergency Dialog
-    if (showSosDialog) {
-        UrgeSurfingDialog(
-            onDismiss = { showSosDialog = false },
+    // Interactive Urge Intervention Modal (Box breathing timer, instant habit redirect, stoic quote & haptic feedback)
+    if (showSosIntervention) {
+        val incompleteHabit = habits.firstOrNull { !it.isCompletedToday }
+        UrgeInterventionModal(
+            incompleteHabit = incompleteHabit,
+            onDismiss = { showSosIntervention = false },
             onUrgeOvercome = {
-                urgesPrevented += 1
-                showSosDialog = false
+                HabitsManager.recordUrgeSurvived(context)
+                urgesPrevented = HabitsManager.getUrgesPrevented(context)
+                showSosIntervention = false
             }
         )
     }
 
-    // Reset Streak Dialog
-    if (showResetDialog) {
-        AlertDialog(
-            onDismissRequest = { showResetDialog = false },
-            title = {
-                Text(
-                    text = "Reset Clean Streak?",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
-                )
-            },
-            text = {
-                Text(
-                    text = "Every stumble is a step forward if you learn from it. You can restart with fresh determination today.",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        if (streakDays > bestStreak) bestStreak = streakDays
-                        streakDays = 0
-                        showResetDialog = false
-                    },
-                    colors = ButtonDefaults.textButtonColors(contentColor = CoralPrimary)
-                ) {
-                    Text("Restart Streak", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showResetDialog = false }) {
-                    Text("Cancel", color = Color.White.copy(alpha = 0.7f))
-                }
-            },
-            containerColor = Color(0xFF1E1E24),
-            shape = RoundedCornerShape(16.dp)
+    // 2-Step Reflective Relapse Modal (Friction + Trigger Identification + Optional Reflection)
+    if (showRelapseDialog) {
+        ReflectiveRelapseDialog(
+            onDismiss = { showRelapseDialog = false },
+            onConfirmReset = { trigger, note ->
+                HabitsManager.resetStreak(context, trigger, note)
+                streakDays = HabitsManager.getStreakDays(context)
+                bestStreak = HabitsManager.getBestStreakDays(context)
+                weeklyConsistency = HabitsManager.getWeeklyConsistency(context)
+                showRelapseDialog = false
+            }
         )
     }
 
@@ -290,7 +264,8 @@ fun HabitsScreen(
                 Text(
                     text = "New Habit",
                     fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
+                    fontSize = 18.sp,
+                    color = Color.White
                 )
             },
             text = {
@@ -332,13 +307,16 @@ fun HabitsScreen(
                     OutlinedTextField(
                         value = newTitle,
                         onValueChange = { newTitle = it },
-                        placeholder = { Text("e.g. Morning stretch") },
+                        placeholder = { Text("e.g. Morning stretch", color = Color.White.copy(alpha = 0.4f)) },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = CoralPrimary,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.25f)
-                        )
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.25f),
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(10.dp)
                     )
                 }
             },
@@ -412,6 +390,8 @@ private fun CleanStreakHeroCard(
     onResetClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
@@ -424,29 +404,73 @@ private fun CleanStreakHeroCard(
                 .padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Header Tag: Freedom status
-            Row(
-                modifier = Modifier
-                    .clip(CircleShape)
-                    .background(Color(0xFF26262E))
-                    .border(1.dp, CoralPrimary.copy(alpha = 0.5f), CircleShape)
-                    .padding(horizontal = 14.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // Header Row: Centered Tag + Top-Right Overflow Menu for Reset Friction
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    painter = painterResource(id = R.drawable.ic_fire),
-                    contentDescription = null,
-                    tint = CoralPrimary,
-                    modifier = Modifier.size(16.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = "CLEAN & FREE STREAK",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.5.sp,
-                    color = CoralPrimary,
-                    letterSpacing = 0.8.sp
-                )
+                // Centered Tag
+                Row(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color(0xFF26262E))
+                        .border(1.dp, CoralPrimary.copy(alpha = 0.5f), CircleShape)
+                        .padding(horizontal = 14.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_fire),
+                        contentDescription = null,
+                        tint = CoralPrimary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "CLEAN & FREE STREAK",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 11.5.sp,
+                        color = CoralPrimary,
+                        letterSpacing = 0.8.sp
+                    )
+                }
+
+                // Top-Right Overflow Menu (Places Reset behind friction)
+                Box(
+                    modifier = Modifier.align(Alignment.CenterEnd)
+                ) {
+                    IconButton(
+                        onClick = { menuExpanded = true },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_more_vert),
+                            contentDescription = "Options",
+                            tint = Color.White.copy(alpha = 0.45f),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false },
+                        modifier = Modifier.background(Color(0xFF22222A))
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = "Reset Streak...",
+                                    color = CoralPrimary,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            },
+                            onClick = {
+                                menuExpanded = false
+                                onResetClick()
+                            }
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -523,46 +547,31 @@ private fun CleanStreakHeroCard(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Emergency SOS and Reset buttons
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // Full-Width Urgent SOS Button (Safe from accidental reset taps)
+            Button(
+                onClick = onSosClick,
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = CoralPrimary,
+                    contentColor = Color.White
+                ),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
             ) {
-                OutlinedButton(
-                    onClick = onSosClick,
-                    shape = CircleShape,
-                    border = BorderStroke(1.2.dp, CoralPrimary),
-                    colors = ButtonDefaults.outlinedButtonColors(
-                        containerColor = CoralPrimary.copy(alpha = 0.12f),
-                        contentColor = CoralPrimary
-                    ),
-                    modifier = Modifier.weight(1f).height(42.dp)
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_sos),
-                        contentDescription = "Urge SOS",
-                        modifier = Modifier.size(17.dp),
-                        tint = CoralPrimary
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "I Feel an Urge (SOS)",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp
-                    )
-                }
-
-                TextButton(
-                    onClick = onResetClick,
-                    modifier = Modifier.height(42.dp)
-                ) {
-                    Text(
-                        text = "Reset",
-                        fontSize = 12.5.sp,
-                        color = Color.White.copy(alpha = 0.45f)
-                    )
-                }
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_sos),
+                    contentDescription = "Urge SOS",
+                    modifier = Modifier.size(19.dp),
+                    tint = Color.White
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "I Feel an Urge (SOS)",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.5.sp,
+                    letterSpacing = 0.3.sp
+                )
             }
         }
     }
@@ -590,9 +599,13 @@ private fun MetricColumn(title: String, value: String, color: Color) {
 
 @Composable
 private fun WeeklyConsistencyCard(
-    currentStreak: Int,
+    weeklyStatus: List<DayConsistencyStatus>,
     modifier: Modifier = Modifier
 ) {
+    val cleanDaysCount = weeklyStatus.count { it.isPastOrToday && it.isClean }
+    val totalPastDays = weeklyStatus.count { it.isPastOrToday }
+    val percentage = if (totalPastDays > 0) ((cleanDaysCount.toFloat() / totalPastDays) * 100).toInt() else 100
+
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
@@ -609,58 +622,103 @@ private fun WeeklyConsistencyCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Weekly Consistency",
-                    style = MaterialTheme.typography.titleSmall.copy(
-                        fontWeight = FontWeight.SemiBold,
-                        fontSize = 14.sp
-                    ),
-                    color = Color.White
-                )
-                Text(
-                    text = "This Week: 100%",
-                    fontSize = 12.sp,
-                    color = EmeraldGreen,
-                    fontWeight = FontWeight.Bold
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(EmeraldGreen.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_check_circle),
+                            contentDescription = null,
+                            tint = EmeraldGreen,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Weekly Consistency",
+                        style = MaterialTheme.typography.titleSmall.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.5.sp
+                        ),
+                        color = Color.White
+                    )
+                }
+
+                // Subtle badge
+                Row(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(EmeraldGreen.copy(alpha = 0.12f))
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (percentage == 100) "0 bypass attempts • $percentage%" else "$percentage% Clean",
+                        fontSize = 11.sp,
+                        color = EmeraldGreen,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            val days = listOf("M", "T", "W", "T", "F", "S", "S")
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                days.forEachIndexed { index, day ->
-                    val isCompleted = index <= 6 // Completed days
+                weeklyStatus.forEach { status ->
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = day,
+                            text = status.dayLetter,
                             fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.White.copy(alpha = 0.5f)
+                            fontWeight = if (status.isToday) FontWeight.Bold else FontWeight.Medium,
+                            color = if (status.isToday) CoralPrimary else Color.White.copy(alpha = 0.5f)
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Box(
                             modifier = Modifier
                                 .size(32.dp)
                                 .clip(CircleShape)
-                                .background(if (isCompleted) EmeraldGreen.copy(alpha = 0.15f) else Color(0xFF26262E))
+                                .background(
+                                    when {
+                                        !status.isPastOrToday -> Color(0xFF222228)
+                                        status.isClean -> EmeraldGreen.copy(alpha = 0.15f)
+                                        else -> CoralPrimary.copy(alpha = 0.15f)
+                                    }
+                                )
                                 .border(
-                                    width = 1.dp,
-                                    color = if (isCompleted) EmeraldGreen else Color.White.copy(alpha = 0.1f),
+                                    width = if (status.isToday) 1.5.dp else 1.dp,
+                                    color = when {
+                                        status.isToday -> CoralPrimary
+                                        !status.isPastOrToday -> Color.White.copy(alpha = 0.08f)
+                                        status.isClean -> EmeraldGreen
+                                        else -> CoralPrimary
+                                    },
                                     shape = CircleShape
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (isCompleted) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_check_circle),
-                                    contentDescription = null,
-                                    tint = EmeraldGreen,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                            if (status.isPastOrToday) {
+                                if (status.isClean) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_check_circle),
+                                        contentDescription = null,
+                                        tint = EmeraldGreen,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                } else {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_close),
+                                        contentDescription = null,
+                                        tint = CoralPrimary,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -686,41 +744,48 @@ private fun HabitsTrackerSection(
         color = CardBackground,
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            // Header Bar with Trapezoid Tab
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 6.dp)
+        ) {
+            // Sleek Unified Header matching WeeklyConsistencyCard
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .clip(TabHeaderShape)
-                        .background(Color(0xFF383842))
-                        .padding(start = 16.dp, end = 26.dp, top = 8.dp, bottom = 8.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(CoralPrimary.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Icon(
                             painter = painterResource(id = R.drawable.ic_target),
                             contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "Daily Habits",
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 14.5.sp
-                            ),
-                            color = Color.White
+                            tint = CoralPrimary,
+                            modifier = Modifier.size(17.dp)
                         )
                     }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Daily Habits",
+                        style = MaterialTheme.typography.titleMedium.copy(
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.5.sp
+                        ),
+                        color = Color.White
+                    )
                 }
 
                 IconButton(
                     onClick = onAddHabitClick,
-                    modifier = Modifier.padding(end = 8.dp)
+                    modifier = Modifier.size(32.dp)
                 ) {
                     Icon(
                         painter = painterResource(id = R.drawable.ic_add),
@@ -735,7 +800,7 @@ private fun HabitsTrackerSection(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
+                    .padding(horizontal = 16.dp, vertical = 4.dp)
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -756,7 +821,10 @@ private fun HabitsTrackerSection(
                 Spacer(modifier = Modifier.height(6.dp))
                 LinearProgressIndicator(
                     progress = { progress },
-                    modifier = Modifier.fillMaxWidth().height(6.dp).clip(CircleShape),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(CircleShape),
                     color = if (progress == 1f) EmeraldGreen else CoralPrimary,
                     trackColor = Color.White.copy(alpha = 0.08f)
                 )
@@ -797,7 +865,9 @@ private fun HabitRowItem(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f).padding(end = 10.dp)
+            modifier = Modifier
+                .weight(1f)
+                .padding(end = 10.dp)
         ) {
             Box(
                 modifier = Modifier
@@ -875,34 +945,65 @@ private fun MilestonesSection(
     milestones: List<MilestoneBadge>,
     modifier: Modifier = Modifier
 ) {
+    val unlockedCount = milestones.count { currentStreak >= it.targetDays }
+
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
         color = CardBackground,
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
     ) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            Box(
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 6.dp)
+        ) {
+            // Sleek Unified Header matching WeeklyConsistencyCard
+            Row(
                 modifier = Modifier
-                    .clip(TabHeaderShape)
-                    .background(Color(0xFF383842))
-                    .padding(start = 16.dp, end = 26.dp, top = 8.dp, bottom = 8.dp)
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_trophy),
-                        contentDescription = null,
-                        tint = GoldColor,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(GoldColor.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_trophy),
+                            contentDescription = null,
+                            tint = GoldColor,
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
                     Text(
                         text = "Milestones & Badges",
                         style = MaterialTheme.typography.titleMedium.copy(
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.SemiBold,
                             fontSize = 14.5.sp
                         ),
                         color = Color.White
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(GoldColor.copy(alpha = 0.12f))
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "$unlockedCount of ${milestones.size} Unlocked",
+                        fontSize = 11.5.sp,
+                        color = GoldColor,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -910,8 +1011,8 @@ private fun MilestonesSection(
             LazyRow(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(milestones) { badge ->
                     val isUnlocked = currentStreak >= badge.targetDays
@@ -934,12 +1035,12 @@ private fun MilestoneCardItem(badge: MilestoneBadge, isUnlocked: Boolean) {
                 color = if (isUnlocked) badge.badgeColor.copy(alpha = 0.5f) else Color.White.copy(alpha = 0.06f),
                 shape = RoundedCornerShape(14.dp)
             )
-            .padding(vertical = 14.dp, horizontal = 8.dp),
+            .padding(vertical = 12.dp, horizontal = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(
             modifier = Modifier
-                .size(42.dp)
+                .size(40.dp)
                 .clip(CircleShape)
                 .background(if (isUnlocked) badge.badgeColor.copy(alpha = 0.16f) else Color(0xFF26262E)),
             contentAlignment = Alignment.Center
@@ -948,22 +1049,25 @@ private fun MilestoneCardItem(badge: MilestoneBadge, isUnlocked: Boolean) {
                 painter = painterResource(id = badge.iconRes),
                 contentDescription = badge.title,
                 tint = if (isUnlocked) badge.badgeColor else Color.White.copy(alpha = 0.3f),
-                modifier = Modifier.size(22.dp)
+                modifier = Modifier.size(20.dp)
             )
         }
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(7.dp))
         Text(
             text = badge.title,
             fontWeight = FontWeight.Bold,
-            fontSize = 13.sp,
+            fontSize = 12.5.sp,
             color = if (isUnlocked) badge.badgeColor else Color.White.copy(alpha = 0.45f),
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            maxLines = 1
         )
         Text(
             text = badge.subtitle,
-            fontSize = 11.sp,
-            color = Color.White.copy(alpha = 0.4f),
-            textAlign = TextAlign.Center
+            fontSize = 10.sp,
+            color = Color.White.copy(alpha = 0.45f),
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            softWrap = false
         )
         Spacer(modifier = Modifier.height(6.dp))
         Text(
@@ -1022,12 +1126,14 @@ private fun DailyMindsetCard(modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun UrgeSurfingDialog(
+private fun UrgeInterventionModal(
+    incompleteHabit: HabitItem?,
     onDismiss: () -> Unit,
     onUrgeOvercome: () -> Unit
 ) {
     var timerSeconds by remember { mutableIntStateOf(60) }
     var isRunning by remember { mutableStateOf(true) }
+    val haptic = LocalHapticFeedback.current
 
     LaunchedEffect(isRunning) {
         while (isRunning && timerSeconds > 0) {
@@ -1036,29 +1142,64 @@ private fun UrgeSurfingDialog(
         }
     }
 
-    val breathPhase = when ((60 - timerSeconds) % 16) {
-        in 0..3 -> "Inhale slowly (4s)..."
-        in 4..7 -> "Hold breath (4s)..."
-        in 8..11 -> "Exhale slowly (4s)..."
-        else -> "Rest & reset (4s)..."
+    // 16s Box Breathing cycle:
+    // 0..3: Inhale (scale up to 1.25)
+    // 4..7: Hold (hold scale 1.25)
+    // 8..11: Exhale (scale down to 0.85)
+    // 12..15: Rest (hold scale 0.85)
+    val cycleTime = (60 - timerSeconds) % 16
+    val (phaseText, targetScale) = when (cycleTime) {
+        in 0..3 -> "Inhale deeply (4s)" to 1.25f
+        in 4..7 -> "Hold your breath (4s)" to 1.25f
+        in 8..11 -> "Exhale slowly (4s)" to 0.85f
+        else -> "Rest & center (4s)" to 0.85f
     }
+
+    val animatedScale by animateFloatAsState(
+        targetValue = targetScale,
+        animationSpec = tween(durationMillis = 3500),
+        label = "breathingScale"
+    )
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    painter = painterResource(id = R.drawable.ic_sos),
-                    contentDescription = null,
-                    tint = CoralPrimary,
-                    modifier = Modifier.size(22.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Urge Surfing (1 Min)",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(34.dp)
+                            .clip(CircleShape)
+                            .background(CoralPrimary.copy(alpha = 0.15f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_sos),
+                            contentDescription = null,
+                            tint = CoralPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Urge Protocol (60s)",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 17.sp,
+                        color = Color.White
+                    )
+                }
+                IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_close),
+                        contentDescription = "Close",
+                        tint = Color.White.copy(alpha = 0.5f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         },
         text = {
@@ -1067,53 +1208,289 @@ private fun UrgeSurfingDialog(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "An urge is like an ocean wave. It peaks for about 60 seconds and then naturally dissipates. Ride the wave.",
-                    fontSize = 13.sp,
-                    color = Color.White.copy(alpha = 0.75f),
-                    textAlign = TextAlign.Center
+                    text = "Urges peak like an ocean wave for ~60 seconds before receding. Breathe through the crest.",
+                    fontSize = 12.5.sp,
+                    color = Color.White.copy(alpha = 0.7f),
+                    textAlign = TextAlign.Center,
+                    lineHeight = 17.sp
                 )
 
                 Spacer(modifier = Modifier.height(18.dp))
 
+                // Pulsating breathing circle
                 Box(
-                    modifier = Modifier
-                        .size(110.dp)
-                        .clip(CircleShape)
-                        .background(CoralPrimary.copy(alpha = 0.12f))
-                        .border(2.dp, CoralPrimary, CircleShape),
+                    modifier = Modifier.size(130.dp),
                     contentAlignment = Alignment.Center
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(110.dp)
+                            .graphicsLayer {
+                                scaleX = animatedScale
+                                scaleY = animatedScale
+                            }
+                            .clip(CircleShape)
+                            .background(CoralPrimary.copy(alpha = 0.12f))
+                            .border(2.dp, CoralPrimary, CircleShape)
+                    )
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             text = "${timerSeconds}s",
                             fontSize = 32.sp,
-                            fontWeight = FontWeight.Bold,
+                            fontWeight = FontWeight.ExtraBold,
                             color = Color.White
+                        )
+                        Text(
+                            text = phaseText,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = CoralPrimary
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Instant Habit Redirect
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF26262E),
+                    border = BorderStroke(1.dp, CoralPrimary.copy(alpha = 0.35f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(CoralPrimary.copy(alpha = 0.18f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_feature_bolt),
+                                contentDescription = null,
+                                tint = CoralPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = "INSTANT HABIT REDIRECT",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.5.sp,
+                                color = CoralPrimary,
+                                letterSpacing = 0.6.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            val habitMsg = if (incompleteHabit != null) {
+                                "You haven't done ${incompleteHabit.title} yet today. Go do that right now!"
+                            } else {
+                                "Drink a tall glass of cold water or do 10 pushups right now to shift focus."
+                            }
+                            Text(
+                                text = habitMsg,
+                                fontSize = 12.sp,
+                                color = Color.White.copy(alpha = 0.9f),
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Stoic reminder snippet
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF1B1B20),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.06f))
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(
+                            text = "“He who conquers himself is mightier than he who conquers a city.”",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.White.copy(alpha = 0.8f)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "— Marcus Aurelius",
+                            fontSize = 10.5.sp,
+                            color = Color.White.copy(alpha = 0.45f)
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onUrgeOvercome()
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = EmeraldGreen,
+                    contentColor = Color.White
+                )
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_check_circle),
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "I Survived It (+1 Urge Won)",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.5.sp
+                )
+            }
+        },
+        containerColor = Color(0xFF1E1E24),
+        shape = RoundedCornerShape(18.dp)
+    )
+}
+
+@Composable
+private fun ReflectiveRelapseDialog(
+    onDismiss: () -> Unit,
+    onConfirmReset: (trigger: String, note: String) -> Unit
+) {
+    val triggers = listOf("Stress", "Late Night", "Boredom", "Social Media", "Loneliness", "Exhaustion", "Other")
+    var selectedTrigger by remember { mutableStateOf(triggers[0]) }
+    var reflectionNote by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(CoralPrimary.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_fire),
+                        contentDescription = null,
+                        tint = CoralPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(
+                        text = "Reset & Reflect",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 18.sp,
+                        color = Color.White
+                    )
+                    Text(
+                        text = "Turn a stumble into wisdom",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.5f)
+                    )
+                }
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "What triggered this lapse?",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.5.sp,
+                    color = Color.White.copy(alpha = 0.9f)
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    triggers.chunked(3).forEach { rowTriggers ->
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            rowTriggers.forEach { trigger ->
+                                val isSelected = (selectedTrigger == trigger)
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(
+                                            if (isSelected) CoralPrimary.copy(alpha = 0.2f)
+                                            else Color(0xFF26262E)
+                                        )
+                                        .border(
+                                            1.dp,
+                                            if (isSelected) CoralPrimary else Color.White.copy(alpha = 0.1f),
+                                            RoundedCornerShape(8.dp)
+                                        )
+                                        .clickable { selectedTrigger = trigger }
+                                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                                ) {
+                                    Text(
+                                        text = trigger,
+                                        fontSize = 12.sp,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) CoralPrimary else Color.White.copy(alpha = 0.7f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
 
                 Text(
-                    text = breathPhase,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    color = CoralPrimary
+                    text = "What will you do next time? (optional)",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 13.5.sp,
+                    color = Color.White.copy(alpha = 0.9f)
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = reflectionNote,
+                    onValueChange = { reflectionNote = it },
+                    placeholder = {
+                        Text(
+                            "e.g. Keep phone outside the bedroom",
+                            fontSize = 12.5.sp,
+                            color = Color.White.copy(alpha = 0.35f)
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    maxLines = 3,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = CoralPrimary,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.2f),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(10.dp)
                 )
             }
         },
         confirmButton = {
             TextButton(
-                onClick = onUrgeOvercome,
-                colors = ButtonDefaults.textButtonColors(contentColor = EmeraldGreen)
+                onClick = { onConfirmReset(selectedTrigger, reflectionNote) },
+                colors = ButtonDefaults.textButtonColors(contentColor = CoralPrimary)
             ) {
-                Text("I Overcame It (+1)", fontWeight = FontWeight.Bold)
+                Text("Log Lapse & Restart", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Close", color = Color.White.copy(alpha = 0.6f))
+                Text("Stay Strong (Cancel)", color = Color.White.copy(alpha = 0.7f))
             }
         },
         containerColor = Color(0xFF1E1E24),

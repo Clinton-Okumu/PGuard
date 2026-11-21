@@ -45,7 +45,7 @@ enum class PGuardTab(
 ) {
     BLOCKING("Blocking", R.drawable.ic_nav_blocking),
     BLOCKLIST("Blocklist", R.drawable.ic_nav_blocklist),
-    HABITS("Habits", R.drawable.ic_nav_habits),
+    HABITS("Progress", R.drawable.ic_nav_habits),
     SETTINGS("Settings", R.drawable.ic_nav_settings)
 }
 
