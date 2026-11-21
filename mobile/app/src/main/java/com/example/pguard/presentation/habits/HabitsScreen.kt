@@ -163,15 +163,19 @@ fun HabitsScreen(
     var showMonthlyCalendarDialog by remember { mutableStateOf(false) }
     var habitToDelete by remember { mutableStateOf<PersistentHabit?>(null) }
 
-    // Milestones definition
+    // Milestones definition up to 1 Year (365 Days)
     val milestones = remember {
         listOf(
             MilestoneBadge(1, "24 Hours", "First Step", R.drawable.ic_milestone_seed, EmeraldGreen),
-            MilestoneBadge(3, "3 Days", "Break Momentum", R.drawable.ic_feature_bolt, Color(0xFFFFD54F)),
+            MilestoneBadge(3, "3 Days", "Momentum", R.drawable.ic_feature_bolt, Color(0xFFFFD54F)),
             MilestoneBadge(7, "1 Week", "Neural Reset", R.drawable.ic_fire, CoralPrimary),
             MilestoneBadge(14, "2 Weeks", "Iron Will", R.drawable.ic_feature_shield, Color(0xFF64B5F6)),
-            MilestoneBadge(30, "1 Month", "True Freedom", R.drawable.ic_crown, GoldColor),
-            MilestoneBadge(90, "90 Days", "Mastery", R.drawable.ic_milestone_diamond, Color(0xFF00E5FF))
+            MilestoneBadge(30, "1 Month", "New Baseline", R.drawable.ic_target, Color(0xFF81C784)),
+            MilestoneBadge(60, "60 Days", "Unshakeable", R.drawable.ic_feature_lock, Color(0xFFFFB74D)),
+            MilestoneBadge(90, "90 Days", "Dopamine Reboot", R.drawable.ic_milestone_diamond, Color(0xFF00E5FF)),
+            MilestoneBadge(180, "6 Months", "True Master", R.drawable.ic_ribbon_badge, Color(0xFFBA68C8)),
+            MilestoneBadge(270, "9 Months", "Transcendence", R.drawable.ic_trophy, Color(0xFFFF8A65)),
+            MilestoneBadge(365, "1 Year", "Living Legend", R.drawable.ic_crown, GoldColor)
         )
     }
 
@@ -558,7 +562,8 @@ private fun CleanStreakHeroCard(
             Spacer(modifier = Modifier.height(20.dp))
 
             // Circular Streak Gauge
-            val nextMilestone = if (streakDays < 14) 14 else if (streakDays < 30) 30 else 90
+            val milestoneTargets = listOf(1, 3, 7, 14, 30, 60, 90, 180, 270, 365)
+            val nextMilestone = milestoneTargets.firstOrNull { it > streakDays } ?: 365
             val progress = if (isStreakOn) (streakDays.toFloat() / nextMilestone.toFloat()).coerceIn(0.05f, 1f) else 0f
 
             Box(
@@ -1642,8 +1647,12 @@ private fun MilestoneCelebrationDialog(
                     3 -> "72 hours of sheer discipline! The initial storm has passed, and your dopamine baseline is stabilizing."
                     7 -> "1 full week of freedom! Major neural pathways are beginning to rewire. Feel the clarity."
                     14 -> "2 weeks of unbroken resolve! You are building iron willpower and taking control of your mind."
-                    30 -> "30 Days clean! A massive transformation. You are living as a truly free individual."
-                    90 -> "90 Days of mastery! A complete lifestyle evolution. Unstoppable."
+                    30 -> "1 month clean! A new neurochemical baseline has formed. Compulsive urges have lost their grip."
+                    60 -> "60 days of relentless consistency! Your self-discipline has become second nature."
+                    90 -> "90 days of complete dopamine reboot! The brain's gray matter has structurally renewed. Pure mental clarity."
+                    180 -> "6 months of mastery! Half a year of triumph over impulse. You have built a fortress of character."
+                    270 -> "9 months of sustained freedom! Old habits are completely dissolved. You operate on purpose, not impulse."
+                    365 -> "365 DAYS • 1 FULL YEAR OF FREEDOM! A monumental, life-defining achievement. You are a living legend."
                     else -> "You achieved a landmark of discipline. Keep forging your fortress of strength."
                 }
 

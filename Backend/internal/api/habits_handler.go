@@ -46,6 +46,7 @@ var allMilestones = []struct {
 	{60, "Gold"},
 	{90, "Diamond"},
 	{180, "Master"},
+	{270, "Transcendence"},
 	{365, "Legend"},
 }
 
