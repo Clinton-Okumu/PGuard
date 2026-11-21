@@ -663,8 +663,8 @@ private fun CleanStreakHeroCard(
                     .height(48.dp)
             ) {
                 Icon(
-                    painter = painterResource(id = R.drawable.ic_sos),
-                    contentDescription = "Urge SOS",
+                    painter = painterResource(id = R.drawable.ic_feature_lock),
+                    contentDescription = "2-Min Urge Lockdown",
                     modifier = Modifier.size(19.dp),
                     tint = Color.White
                 )
@@ -1981,8 +1981,8 @@ private fun UrgeInterventionModal(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            painter = painterResource(id = R.drawable.ic_feature_shield),
-                            contentDescription = null,
+                            painter = painterResource(id = R.drawable.ic_feature_lock),
+                            contentDescription = "2-Min Lockdown",
                             tint = CoralPrimary,
                             modifier = Modifier.size(18.dp)
                         )
@@ -2049,6 +2049,13 @@ private fun UrgeInterventionModal(
                             .border(2.dp, if (timerSeconds > 0) CoralPrimary else EmeraldGreen, CircleShape)
                     )
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            painter = painterResource(id = if (timerSeconds > 0) R.drawable.ic_feature_lock else R.drawable.ic_check_circle),
+                            contentDescription = "Lockdown State",
+                            tint = if (timerSeconds > 0) CoralPrimary else EmeraldGreen,
+                            modifier = Modifier.size(22.dp)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
                         Text(
                             text = formattedTime,
                             fontSize = 28.sp,

@@ -533,7 +533,7 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                     bottomMargin = dpToPx(18f)
                 }
                 val lockIcon = ImageView(service).apply {
-                    setImageResource(R.drawable.ic_feature_shield)
+                    setImageResource(R.drawable.ic_feature_lock)
                     scaleType = ImageView.ScaleType.FIT_CENTER
                 }
                 iconBox.addView(lockIcon, FrameLayout.LayoutParams(dpToPx(48f), dpToPx(48f), Gravity.CENTER))

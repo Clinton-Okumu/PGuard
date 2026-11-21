@@ -80,6 +80,7 @@ object HabitsManager {
     private const val KEY_HABITS_JSON = "persistent_habits_json"
     private const val KEY_CELEBRATED_MILESTONES = "celebrated_milestones_set"
     private const val KEY_LAST_STOIC_SHOWN_DATE = "last_stoic_shown_date"
+    private const val KEY_PREFS_VERSION = "prefs_schema_version_v3"
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -155,14 +156,24 @@ object HabitsManager {
 
     fun initDefaultsIfNeeded(context: Context) {
         val prefs = getPrefs(context)
-        if (!prefs.contains(KEY_STREAK_START_TIME)) {
-            // Default initial clean streak starts now when user begins using the app
-            val initialStreakStart = System.currentTimeMillis()
-            prefs.edit()
-                .putLong(KEY_STREAK_START_TIME, initialStreakStart)
-                .putInt(KEY_BEST_STREAK, 0)
-                .putInt(KEY_URGES_PREVENTED, 0)
-                .apply()
+        val version = prefs.getInt(KEY_PREFS_VERSION, 0)
+        if (version < 3) {
+            val legacyBest = prefs.getInt(KEY_BEST_STREAK, 0)
+            val legacyUrges = prefs.getInt(KEY_URGES_PREVENTED, 0)
+            val legacyStart = prefs.getLong(KEY_STREAK_START_TIME, 0L)
+
+            val editor = prefs.edit()
+            // If legacy mock values were present (14 best, 23 urges, or start date was ~7 days ago) or first run
+            val isLegacyMock = legacyBest == 14 || legacyUrges == 23 ||
+                    (legacyStart > 0 && (System.currentTimeMillis() - legacyStart) in (5L * 86400000L)..(9L * 86400000L))
+
+            if (!prefs.contains(KEY_STREAK_START_TIME) || isLegacyMock || version == 0) {
+                editor.putLong(KEY_STREAK_START_TIME, System.currentTimeMillis())
+                editor.putInt(KEY_BEST_STREAK, 0)
+                editor.putInt(KEY_URGES_PREVENTED, 0)
+            }
+            editor.putInt(KEY_PREFS_VERSION, 3)
+            editor.apply()
         }
     }
 
@@ -206,20 +217,20 @@ object HabitsManager {
     fun getBestStreakDays(context: Context): Int {
         initDefaultsIfNeeded(context)
         val prefs = getPrefs(context)
-        val savedBest = prefs.getInt(KEY_BEST_STREAK, 14)
+        val savedBest = prefs.getInt(KEY_BEST_STREAK, 0)
         val current = getStreakDays(context)
         return maxOf(savedBest, current)
     }
 
     fun getUrgesPrevented(context: Context): Int {
         initDefaultsIfNeeded(context)
-        return getPrefs(context).getInt(KEY_URGES_PREVENTED, 23)
+        return getPrefs(context).getInt(KEY_URGES_PREVENTED, 0)
     }
 
     fun recordBlockInterception(context: Context) {
         initDefaultsIfNeeded(context)
         val prefs = getPrefs(context)
-        val currentCount = prefs.getInt(KEY_URGES_PREVENTED, 23)
+        val currentCount = prefs.getInt(KEY_URGES_PREVENTED, 0)
         prefs.edit()
             .putInt(KEY_URGES_PREVENTED, currentCount + 1)
             .putLong(KEY_LAST_INTERCEPTION_TIME, System.currentTimeMillis())
