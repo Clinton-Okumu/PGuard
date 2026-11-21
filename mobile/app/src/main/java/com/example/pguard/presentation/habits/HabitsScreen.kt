@@ -1,7 +1,6 @@
 package com.example.pguard.presentation.habits
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -20,6 +19,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -48,6 +50,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -62,28 +65,23 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.pguard.R
+import com.example.pguard.core.network.NetworkClient
+import com.example.pguard.core.network.model.CreateHabitRequest
+import com.example.pguard.core.network.model.UserDto
+import com.example.pguard.presentation.focus.FocusModeManager
 import com.example.pguard.presentation.theme.CoralPrimary
 import com.example.pguard.presentation.theme.PGuardTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import java.util.Calendar
 
 private val CardBackground = Color(0xFF18181C)
 private val GoldColor = Color(0xFFFFB800)
 private val EmeraldGreen = Color(0xFF4CAF50)
-
-data class HabitItem(
-    val id: String,
-    val title: String,
-    val iconRes: Int,
-    val iconTint: Color = CoralPrimary,
-    val targetDays: Int = 21,
-    var currentStreak: Int = 5,
-    var isCompletedToday: Boolean = false
-)
 
 data class MilestoneBadge(
     val targetDays: Int,
@@ -96,46 +94,85 @@ data class MilestoneBadge(
 data class SelectableHabitIcon(
     val iconRes: Int,
     val tint: Color,
-    val label: String
+    val label: String,
+    val key: String
 )
+
+fun getHabitIconRes(key: String): Int = when (key) {
+    "water" -> R.drawable.ic_habit_water
+    "fitness" -> R.drawable.ic_habit_fitness
+    "book" -> R.drawable.ic_habit_book
+    "meditation" -> R.drawable.ic_habit_meditation
+    "journal" -> R.drawable.ic_habit_journal
+    "walking" -> R.drawable.ic_habit_walking
+    "noscreen" -> R.drawable.ic_habit_noscreen
+    "target" -> R.drawable.ic_target
+    "shield" -> R.drawable.ic_feature_shield
+    "bolt" -> R.drawable.ic_feature_bolt
+    "lightbulb" -> R.drawable.ic_lightbulb
+    "trophy" -> R.drawable.ic_trophy
+    "fire" -> R.drawable.ic_fire
+    else -> R.drawable.ic_habit_book
+}
+
+fun getHabitIconTint(key: String): Color = when (key) {
+    "water" -> Color(0xFF4FC3F7)
+    "fitness" -> CoralPrimary
+    "book" -> Color(0xFFFFB74D)
+    "meditation" -> Color(0xFF64B5F6)
+    "journal" -> Color(0xFF81C784)
+    "walking" -> Color(0xFFFFD54F)
+    "noscreen" -> Color(0xFFBA68C8)
+    "target" -> Color(0xFFFF8A65)
+    "shield" -> Color(0xFF26A69A)
+    "bolt" -> Color(0xFFFFCA28)
+    "lightbulb" -> Color(0xFFFF7043)
+    "trophy" -> GoldColor
+    "fire" -> CoralPrimary
+    else -> CoralPrimary
+}
 
 @Composable
 fun HabitsScreen(
+    user: UserDto? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
 
-    // Blocker-connected streak and habit state from HabitsManager
-    var streakDays by remember { mutableIntStateOf(HabitsManager.getStreakDays(context)) }
-    var bestStreak by remember { mutableIntStateOf(HabitsManager.getBestStreakDays(context)) }
+    // Trigger state to refresh UI when streak or habits change
+    var refreshKey by remember { mutableIntStateOf(0) }
+
+    // Streak & protection status (Streak is ON only if app is doing its job & uninstall protection is ON)
+    var streakStatus by remember { mutableStateOf(HabitsManager.getStreakStatus(context)) }
     var urgesPrevented by remember { mutableIntStateOf(HabitsManager.getUrgesPrevented(context)) }
     var weeklyConsistency by remember { mutableStateOf(HabitsManager.getWeeklyConsistency(context)) }
 
-    // Synchronize on recomposition/entry
-    LaunchedEffect(Unit) {
-        streakDays = HabitsManager.getStreakDays(context)
-        bestStreak = HabitsManager.getBestStreakDays(context)
+    // Persistent habits list (supports removing hardcoded habits & adding new custom ones)
+    val habits = remember { mutableStateListOf<PersistentHabit>() }
+
+    fun refreshAll() {
+        streakStatus = HabitsManager.getStreakStatus(context)
         urgesPrevented = HabitsManager.getUrgesPrevented(context)
         weeklyConsistency = HabitsManager.getWeeklyConsistency(context)
+        habits.clear()
+        habits.addAll(HabitsManager.getHabits(context))
+        refreshKey++
+    }
+
+    LaunchedEffect(Unit) {
+        refreshAll()
     }
 
     // Modal and dialog states
     var showSosIntervention by remember { mutableStateOf(false) }
     var showRelapseDialog by remember { mutableStateOf(false) }
     var showAddHabitDialog by remember { mutableStateOf(false) }
+    var showMonthlyCalendarDialog by remember { mutableStateOf(false) }
+    var habitToDelete by remember { mutableStateOf<PersistentHabit?>(null) }
 
-    // Habits collection with Material vector icons & tailored theme colors
-    val habits = remember {
-        mutableStateListOf(
-            HabitItem("1", "Morning Meditation", R.drawable.ic_habit_meditation, Color(0xFF64B5F6), 30, 7, true),
-            HabitItem("2", "Read Self-Development", R.drawable.ic_habit_book, Color(0xFFFFB74D), 30, 6, true),
-            HabitItem("3", "Workout / Exercise", R.drawable.ic_habit_fitness, CoralPrimary, 21, 4, false),
-            HabitItem("4", "Drink 2.5L Water", R.drawable.ic_habit_water, Color(0xFF4FC3F7), 21, 5, false),
-            HabitItem("5", "No Screens 1h Before Bed", R.drawable.ic_habit_noscreen, Color(0xFFBA68C8), 30, 3, false)
-        )
-    }
-
-    // Milestones with Material vector icons
+    // Milestones definition
     val milestones = remember {
         listOf(
             MilestoneBadge(1, "24 Hours", "First Step", R.drawable.ic_milestone_seed, EmeraldGreen),
@@ -160,37 +197,48 @@ fun HabitsScreen(
         ) {
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 1. Hero Clean Streak Card (Reset moved to overflow menu, SOS button gets full prominent width)
+            // 1. Hero Clean Streak Card (Streak is ON if app is doing its job; OFF if uninstall protection is off)
             CleanStreakHeroCard(
-                streakDays = streakDays,
-                bestStreak = bestStreak,
+                streakStatus = streakStatus,
                 urgesPrevented = urgesPrevented,
-                onSosClick = { showSosIntervention = true },
+                onSosClick = {
+                    // Start 2-Minute Urge Lockdown (like Focus Mode for 2 minutes)
+                    FocusModeManager.startUrgeLockdown(context, durationSeconds = 120)
+                    showSosIntervention = true
+                },
                 onResetClick = { showRelapseDialog = true },
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 2. Weekly Consistency Row (Connected to real blockers and relapse tracking)
+            // 2. Weekly Consistency Row (Linked directly to streak, click opens Monthly Calendar View)
             WeeklyConsistencyCard(
                 weeklyStatus = weeklyConsistency,
+                onOpenMonthlyCalendar = { showMonthlyCalendarDialog = true },
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 3. Daily Habits Tracker Card (Unified card header)
+            // 3. Daily Habits Tracker Card (Fully dynamic: remove hardcoded habits, add custom ones, backend synced)
             HabitsTrackerSection(
                 habits = habits,
                 onToggleHabit = { habit ->
-                    val index = habits.indexOfFirst { it.id == habit.id }
-                    if (index != -1) {
-                        val item = habits[index]
-                        val newState = !item.isCompletedToday
-                        val newStreak = if (newState) item.currentStreak + 1 else maxOf(0, item.currentStreak - 1)
-                        habits[index] = item.copy(isCompletedToday = newState, currentStreak = newStreak)
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    val updatedList = HabitsManager.toggleHabit(context, habit.id)
+                    habits.clear()
+                    habits.addAll(updatedList)
+
+                    // Asynchronously sync with backend if online
+                    coroutineScope.launch {
+                        runCatching {
+                            NetworkClient.getHabitsApiService(context).toggleHabit(habit.id.toLongOrNull() ?: 0)
+                        }
                     }
+                },
+                onDeleteHabit = { habit ->
+                    habitToDelete = habit
                 },
                 onAddHabitClick = { showAddHabitDialog = true },
                 modifier = Modifier.padding(horizontal = 16.dp)
@@ -198,9 +246,9 @@ fun HabitsScreen(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // 4. Milestone Badges Section (Unified card header & fixed label truncation)
+            // 4. Milestone Badges Section
             MilestonesSection(
-                currentStreak = streakDays,
+                currentStreak = streakStatus.streakDays,
                 milestones = milestones,
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
@@ -212,191 +260,131 @@ fun HabitsScreen(
         }
     }
 
-    // Interactive Urge Intervention Modal (Box breathing timer, instant habit redirect, stoic quote & haptic feedback)
+    // 2-MINUTE URGE INTERVENTION MODAL (Focus Mode for 2 mins + Box Breathing + Habit Redirect)
     if (showSosIntervention) {
         val incompleteHabit = habits.firstOrNull { !it.isCompletedToday }
         UrgeInterventionModal(
             incompleteHabit = incompleteHabit,
-            onDismiss = { showSosIntervention = false },
+            onDismiss = {
+                FocusModeManager.stopUrgeLockdown(context)
+                showSosIntervention = false
+            },
             onUrgeOvercome = {
+                FocusModeManager.stopUrgeLockdown(context)
                 HabitsManager.recordUrgeSurvived(context)
-                urgesPrevented = HabitsManager.getUrgesPrevented(context)
+                refreshAll()
                 showSosIntervention = false
             }
         )
     }
 
-    // 2-Step Reflective Relapse Modal (Friction + Trigger Identification + Optional Reflection)
-    if (showRelapseDialog) {
-        ReflectiveRelapseDialog(
-            onDismiss = { showRelapseDialog = false },
-            onConfirmReset = { trigger, note ->
-                HabitsManager.resetStreak(context, trigger, note)
-                streakDays = HabitsManager.getStreakDays(context)
-                bestStreak = HabitsManager.getBestStreakDays(context)
-                weeklyConsistency = HabitsManager.getWeeklyConsistency(context)
-                showRelapseDialog = false
-            }
+    // MONTHLY PROGRESS CALENDAR MODAL (Full monthly calendar view linked to streak & relapses)
+    if (showMonthlyCalendarDialog) {
+        MonthlyProgressCalendarDialog(
+            onDismiss = { showMonthlyCalendarDialog = false }
         )
     }
 
-    // Add Habit Dialog with Material Vector Icon Picker
-    if (showAddHabitDialog) {
-        var newTitle by remember { mutableStateOf("") }
-
-        val iconOptions = remember {
-            listOf(
-                SelectableHabitIcon(R.drawable.ic_habit_meditation, Color(0xFF64B5F6), "Meditate"),
-                SelectableHabitIcon(R.drawable.ic_habit_book, Color(0xFFFFB74D), "Read"),
-                SelectableHabitIcon(R.drawable.ic_habit_fitness, CoralPrimary, "Fitness"),
-                SelectableHabitIcon(R.drawable.ic_habit_water, Color(0xFF4FC3F7), "Water"),
-                SelectableHabitIcon(R.drawable.ic_habit_journal, Color(0xFF81C784), "Journal"),
-                SelectableHabitIcon(R.drawable.ic_habit_walking, Color(0xFFFFD54F), "Walk"),
-                SelectableHabitIcon(R.drawable.ic_habit_noscreen, Color(0xFFBA68C8), "Detox"),
-                SelectableHabitIcon(R.drawable.ic_target, Color(0xFFFF8A65), "Focus")
-            )
-        }
-        var selectedIcon by remember { mutableStateOf(iconOptions[0]) }
-
+    // DELETE HABIT CONFIRMATION DIALOG
+    if (habitToDelete != null) {
+        val habit = habitToDelete!!
         AlertDialog(
-            onDismissRequest = { showAddHabitDialog = false },
+            onDismissRequest = { habitToDelete = null },
             title = {
-                Text(
-                    text = "New Habit",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp,
-                    color = Color.White
-                )
+                Text("Delete Habit?", fontWeight = FontWeight.Bold, color = Color.White)
             },
             text = {
-                Column {
-                    Text(
-                        text = "Choose category icon:",
-                        fontSize = 13.sp,
-                        color = Color.White.copy(alpha = 0.7f)
-                    )
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        iconOptions.take(4).forEach { option ->
-                            HabitIconChoice(
-                                iconOption = option,
-                                isSelected = (selectedIcon == option),
-                                onSelect = { selectedIcon = option }
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        iconOptions.drop(4).take(4).forEach { option ->
-                            HabitIconChoice(
-                                iconOption = option,
-                                isSelected = (selectedIcon == option),
-                                onSelect = { selectedIcon = option }
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    OutlinedTextField(
-                        value = newTitle,
-                        onValueChange = { newTitle = it },
-                        placeholder = { Text("e.g. Morning stretch", color = Color.White.copy(alpha = 0.4f)) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = CoralPrimary,
-                            unfocusedBorderColor = Color.White.copy(alpha = 0.25f),
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White
-                        ),
-                        shape = RoundedCornerShape(10.dp)
-                    )
-                }
+                Text(
+                    "Are you sure you want to remove \"${habit.title}\"? This action cannot be undone.",
+                    color = Color.White.copy(alpha = 0.8f),
+                    fontSize = 14.sp
+                )
             },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        if (newTitle.isNotBlank()) {
-                            habits.add(
-                                HabitItem(
-                                    id = System.currentTimeMillis().toString(),
-                                    title = newTitle.trim(),
-                                    iconRes = selectedIcon.iconRes,
-                                    iconTint = selectedIcon.tint,
-                                    currentStreak = 0,
-                                    isCompletedToday = false
-                                )
-                            )
+                        val updated = HabitsManager.deleteHabit(context, habit.id)
+                        habits.clear()
+                        habits.addAll(updated)
+                        habitToDelete = null
+
+                        // Sync with backend
+                        coroutineScope.launch {
+                            runCatching {
+                                NetworkClient.getHabitsApiService(context).deleteHabit(habit.id.toLongOrNull() ?: 0)
+                            }
                         }
-                        showAddHabitDialog = false
                     },
                     colors = ButtonDefaults.textButtonColors(contentColor = CoralPrimary)
                 ) {
-                    Text("Add", fontWeight = FontWeight.Bold)
+                    Text("Delete", fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showAddHabitDialog = false }) {
-                    Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+                TextButton(onClick = { habitToDelete = null }) {
+                    Text("Cancel", color = Color.White.copy(alpha = 0.6f))
                 }
             },
             containerColor = Color(0xFF1E1E24),
             shape = RoundedCornerShape(16.dp)
         )
     }
-}
 
-@Composable
-private fun HabitIconChoice(
-    iconOption: SelectableHabitIcon,
-    isSelected: Boolean,
-    onSelect: () -> Unit
-) {
-    Box(
-        modifier = Modifier
-            .size(42.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (isSelected) iconOption.tint.copy(alpha = 0.2f) else Color(0xFF26262E))
-            .border(
-                width = if (isSelected) 1.5.dp else 1.dp,
-                color = if (isSelected) iconOption.tint else Color.White.copy(alpha = 0.08f),
-                shape = RoundedCornerShape(12.dp)
-            )
-            .clickable(onClick = onSelect),
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            painter = painterResource(id = iconOption.iconRes),
-            contentDescription = iconOption.label,
-            tint = if (isSelected) iconOption.tint else Color.White.copy(alpha = 0.6f),
-            modifier = Modifier.size(20.dp)
+    // 2-Step Reflective Relapse Modal
+    if (showRelapseDialog) {
+        ReflectiveRelapseDialog(
+            onDismiss = { showRelapseDialog = false },
+            onConfirmReset = { trigger, note ->
+                HabitsManager.resetStreak(context, trigger, note)
+                refreshAll()
+                showRelapseDialog = false
+            }
+        )
+    }
+
+    // Add Habit Dialog with Extended Icon Palette
+    if (showAddHabitDialog) {
+        AddHabitDialog(
+            onDismiss = { showAddHabitDialog = false },
+            onConfirmAdd = { title, iconKey, targetDays ->
+                val newHabit = HabitsManager.addHabit(context, title, iconKey, targetDays)
+                habits.add(newHabit)
+                showAddHabitDialog = false
+
+                // Sync with backend
+                coroutineScope.launch {
+                    runCatching {
+                        NetworkClient.getHabitsApiService(context).createHabit(
+                            CreateHabitRequest(title = title, icon = iconKey)
+                        )
+                    }
+                }
+            }
         )
     }
 }
 
 @Composable
 private fun CleanStreakHeroCard(
-    streakDays: Int,
-    bestStreak: Int,
+    streakStatus: StreakStatus,
     urgesPrevented: Int,
     onSosClick: () -> Unit,
     onResetClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
+    val isStreakOn = streakStatus.isStreakActive
+    val streakDays = streakStatus.streakDays
+    val bestStreak = streakStatus.bestStreakDays
 
     Surface(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         color = CardBackground,
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (isStreakOn) Color.White.copy(alpha = 0.08f) else CoralPrimary.copy(alpha = 0.4f)
+        )
     ) {
         Column(
             modifier = Modifier
@@ -404,37 +392,41 @@ private fun CleanStreakHeroCard(
                 .padding(20.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Header Row: Centered Tag + Top-Right Overflow Menu for Reset Friction
+            // Header Row: Status Badge + Overflow Menu
             Box(
                 modifier = Modifier.fillMaxWidth(),
                 contentAlignment = Alignment.Center
             ) {
-                // Centered Tag
+                // Status Badge
                 Row(
                     modifier = Modifier
                         .clip(CircleShape)
-                        .background(Color(0xFF26262E))
-                        .border(1.dp, CoralPrimary.copy(alpha = 0.5f), CircleShape)
+                        .background(if (isStreakOn) EmeraldGreen.copy(alpha = 0.15f) else CoralPrimary.copy(alpha = 0.15f))
+                        .border(
+                            1.dp,
+                            if (isStreakOn) EmeraldGreen.copy(alpha = 0.6f) else CoralPrimary.copy(alpha = 0.6f),
+                            CircleShape
+                        )
                         .padding(horizontal = 14.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        painter = painterResource(id = R.drawable.ic_fire),
+                        painter = painterResource(id = if (isStreakOn) R.drawable.ic_fire else R.drawable.ic_feature_shield),
                         contentDescription = null,
-                        tint = CoralPrimary,
-                        modifier = Modifier.size(16.dp)
+                        tint = if (isStreakOn) EmeraldGreen else CoralPrimary,
+                        modifier = Modifier.size(15.dp)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "CLEAN & FREE STREAK",
+                        text = if (isStreakOn) "STREAK ACTIVE • PROTECTED" else "STREAK OFF • UNPROTECTED",
                         fontWeight = FontWeight.Bold,
-                        fontSize = 11.5.sp,
-                        color = CoralPrimary,
+                        fontSize = 11.sp,
+                        color = if (isStreakOn) EmeraldGreen else CoralPrimary,
                         letterSpacing = 0.8.sp
                     )
                 }
 
-                // Top-Right Overflow Menu (Places Reset behind friction)
+                // Top-Right Overflow Menu for Reset
                 Box(
                     modifier = Modifier.align(Alignment.CenterEnd)
                 ) {
@@ -473,11 +465,41 @@ private fun CleanStreakHeroCard(
                 }
             }
 
+            // Warning Banner if streak is off because uninstall protection is off
+            if (!isStreakOn && streakStatus.inactiveReason != null) {
+                Spacer(modifier = Modifier.height(14.dp))
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = CoralPrimary.copy(alpha = 0.12f),
+                    border = BorderStroke(1.dp, CoralPrimary.copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_feature_shield),
+                            contentDescription = null,
+                            tint = CoralPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = streakStatus.inactiveReason,
+                            fontSize = 11.5.sp,
+                            color = Color.White.copy(alpha = 0.9f),
+                            lineHeight = 15.sp
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Large Circular Streak Gauge
+            // Circular Streak Gauge
             val nextMilestone = if (streakDays < 14) 14 else if (streakDays < 30) 30 else 90
-            val progress = (streakDays.toFloat() / nextMilestone.toFloat()).coerceIn(0.05f, 1f)
+            val progress = if (isStreakOn) (streakDays.toFloat() / nextMilestone.toFloat()).coerceIn(0.05f, 1f) else 0f
 
             Box(
                 modifier = Modifier.size(160.dp),
@@ -495,33 +517,49 @@ private fun CleanStreakHeroCard(
                 CircularProgressIndicator(
                     progress = { progress },
                     modifier = Modifier.fillMaxSize(),
-                    color = CoralPrimary,
+                    color = if (isStreakOn) CoralPrimary else Color.White.copy(alpha = 0.2f),
                     strokeWidth = 10.dp,
                     strokeCap = StrokeCap.Round
                 )
 
                 // Inner content
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "$streakDays",
-                        fontSize = 44.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color.White
-                    )
-                    Text(
-                        text = if (streakDays == 1) "DAY FREE" else "DAYS FREE",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = CoralPrimary,
-                        letterSpacing = 1.sp
-                    )
+                    if (isStreakOn) {
+                        Text(
+                            text = "$streakDays",
+                            fontSize = 44.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = if (streakDays == 1) "DAY FREE" else "DAYS FREE",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = CoralPrimary,
+                            letterSpacing = 1.sp
+                        )
+                    } else {
+                        Text(
+                            text = "PAUSED",
+                            fontSize = 26.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = CoralPrimary
+                        )
+                        Text(
+                            text = "STREAK OFF",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White.copy(alpha = 0.5f),
+                            letterSpacing = 0.8.sp
+                        )
+                    }
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
             Text(
-                text = "$streakDays of $nextMilestone days to next milestone",
+                text = if (isStreakOn) "$streakDays of $nextMilestone days to next milestone" else "Enable protection to resume streak counting",
                 fontSize = 12.5.sp,
                 color = Color.White.copy(alpha = 0.6f)
             )
@@ -538,7 +576,7 @@ private fun CleanStreakHeroCard(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                MetricColumn(title = "CURRENT", value = "$streakDays d", color = CoralPrimary)
+                MetricColumn(title = "CURRENT", value = if (isStreakOn) "$streakDays d" else "0 d", color = if (isStreakOn) CoralPrimary else Color.White.copy(alpha = 0.4f))
                 Box(modifier = Modifier.height(28.dp).width(1.dp).background(Color.White.copy(alpha = 0.1f)))
                 MetricColumn(title = "BEST", value = "$bestStreak d", color = GoldColor)
                 Box(modifier = Modifier.height(28.dp).width(1.dp).background(Color.White.copy(alpha = 0.1f)))
@@ -547,7 +585,7 @@ private fun CleanStreakHeroCard(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Full-Width Urgent SOS Button (Safe from accidental reset taps)
+            // 2-Minute Emergency Urge Focus Lockdown CTA
             Button(
                 onClick = onSosClick,
                 shape = RoundedCornerShape(14.dp),
@@ -567,7 +605,7 @@ private fun CleanStreakHeroCard(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "I Feel an Urge (SOS)",
+                    text = "I Feel an Urge (2m Lockdown)",
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.5.sp,
                     letterSpacing = 0.3.sp
@@ -600,6 +638,7 @@ private fun MetricColumn(title: String, value: String, color: Color) {
 @Composable
 private fun WeeklyConsistencyCard(
     weeklyStatus: List<DayConsistencyStatus>,
+    onOpenMonthlyCalendar: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val cleanDaysCount = weeklyStatus.count { it.isPastOrToday && it.isClean }
@@ -607,7 +646,9 @@ private fun WeeklyConsistencyCard(
     val percentage = if (totalPastDays > 0) ((cleanDaysCount.toFloat() / totalPastDays) * 100).toInt() else 100
 
     Surface(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpenMonthlyCalendar),
         shape = RoundedCornerShape(16.dp),
         color = CardBackground,
         border = BorderStroke(1.dp, Color.White.copy(alpha = 0.08f))
@@ -638,14 +679,21 @@ private fun WeeklyConsistencyCard(
                         )
                     }
                     Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = "Weekly Consistency",
-                        style = MaterialTheme.typography.titleSmall.copy(
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 14.5.sp
-                        ),
-                        color = Color.White
-                    )
+                    Column {
+                        Text(
+                            text = "Weekly Consistency",
+                            style = MaterialTheme.typography.titleSmall.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 14.5.sp
+                            ),
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Tap to view monthly calendar 📅",
+                            fontSize = 11.sp,
+                            color = Color.White.copy(alpha = 0.45f)
+                        )
+                    }
                 }
 
                 // Subtle badge
@@ -657,7 +705,7 @@ private fun WeeklyConsistencyCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (percentage == 100) "0 bypass attempts • $percentage%" else "$percentage% Clean",
+                        text = if (percentage == 100) "100% Clean" else "$percentage% Clean",
                         fontSize = 11.sp,
                         color = EmeraldGreen,
                         fontWeight = FontWeight.Bold
@@ -729,9 +777,201 @@ private fun WeeklyConsistencyCard(
 }
 
 @Composable
+private fun MonthlyProgressCalendarDialog(
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val now = Calendar.getInstance()
+    var selectedYear by remember { mutableIntStateOf(now.get(Calendar.YEAR)) }
+    var selectedMonth by remember { mutableIntStateOf(now.get(Calendar.MONTH)) }
+
+    val monthData = remember(selectedYear, selectedMonth) {
+        HabitsManager.getMonthCalendar(context, selectedYear, selectedMonth)
+    }
+
+    val dayLetters = listOf("M", "T", "W", "T", "F", "S", "S")
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = {
+                        if (selectedMonth == 0) {
+                            selectedMonth = 11
+                            selectedYear--
+                        } else {
+                            selectedMonth--
+                        }
+                    },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_arrow_back),
+                        contentDescription = "Previous Month",
+                        tint = Color.White.copy(alpha = 0.7f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+
+                Text(
+                    text = monthData.monthName,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = Color.White
+                )
+
+                IconButton(
+                    onClick = {
+                        if (selectedMonth == 11) {
+                            selectedMonth = 0
+                            selectedYear++
+                        } else {
+                            selectedMonth++
+                        }
+                    },
+                    modifier = Modifier.size(32.dp)
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_chevron_right),
+                        contentDescription = "Next Month",
+                        tint = Color.White.copy(alpha = 0.7f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        },
+        text = {
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // Day of Week Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    dayLetters.forEach { letter ->
+                        Box(
+                            modifier = Modifier.width(36.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = letter,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White.copy(alpha = 0.45f)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Calendar Grid: Offset blanks + Days
+                val totalCells = monthData.firstDayOfWeekOffset + monthData.days.size
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(7),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(230.dp),
+                    userScrollEnabled = false,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    // Empty leading slots for offset
+                    items(monthData.firstDayOfWeekOffset) {
+                        Box(modifier = Modifier.size(36.dp))
+                    }
+
+                    // Actual month days
+                    items(monthData.days) { day ->
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        day.isFuture -> Color.Transparent
+                                        day.isRelapse -> CoralPrimary.copy(alpha = 0.2f)
+                                        day.isClean -> EmeraldGreen.copy(alpha = 0.18f)
+                                        else -> Color(0xFF24242C)
+                                    }
+                                )
+                                .border(
+                                    width = if (day.isToday) 1.5.dp else 1.dp,
+                                    color = when {
+                                        day.isToday -> CoralPrimary
+                                        day.isRelapse -> CoralPrimary
+                                        day.isClean -> EmeraldGreen
+                                        else -> Color.White.copy(alpha = 0.06f)
+                                    },
+                                    shape = CircleShape
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "${day.dayNumber}",
+                                fontSize = 12.sp,
+                                fontWeight = if (day.isToday || day.isClean) FontWeight.Bold else FontWeight.Normal,
+                                color = when {
+                                    day.isToday -> CoralPrimary
+                                    day.isClean -> EmeraldGreen
+                                    day.isRelapse -> CoralPrimary
+                                    day.isFuture -> Color.White.copy(alpha = 0.2f)
+                                    else -> Color.White.copy(alpha = 0.5f)
+                                }
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Monthly Summary Card
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF22222A),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceAround
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("Clean Days", fontSize = 11.sp, color = Color.White.copy(alpha = 0.5f))
+                            Text("${monthData.cleanCount}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = EmeraldGreen)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("Relapses", fontSize = 11.sp, color = Color.White.copy(alpha = 0.5f))
+                            Text("${monthData.relapseCount}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = if (monthData.relapseCount == 0) EmeraldGreen else CoralPrimary)
+                        }
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("Consistency", fontSize = 11.sp, color = Color.White.copy(alpha = 0.5f))
+                            Text("${monthData.consistencyPercent}%", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = GoldColor)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = Color.White.copy(alpha = 0.8f), fontWeight = FontWeight.Bold)
+            }
+        },
+        containerColor = Color(0xFF1B1B22),
+        shape = RoundedCornerShape(18.dp)
+    )
+}
+
+@Composable
 private fun HabitsTrackerSection(
-    habits: List<HabitItem>,
-    onToggleHabit: (HabitItem) -> Unit,
+    habits: List<PersistentHabit>,
+    onToggleHabit: (PersistentHabit) -> Unit,
+    onDeleteHabit: (PersistentHabit) -> Unit,
     onAddHabitClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -749,7 +989,7 @@ private fun HabitsTrackerSection(
                 .fillMaxWidth()
                 .padding(bottom = 6.dp)
         ) {
-            // Sleek Unified Header matching WeeklyConsistencyCard
+            // Header Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -796,53 +1036,85 @@ private fun HabitsTrackerSection(
                 }
             }
 
-            // Progress bar
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = "$completedCount of ${habits.size} completed",
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.6f)
-                    )
-                    Text(
-                        text = "${(progress * 100).toInt()}%",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (progress == 1f) EmeraldGreen else CoralPrimary
-                    )
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                LinearProgressIndicator(
-                    progress = { progress },
+            if (habits.isEmpty()) {
+                // Empty state when user removes all habits
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(6.dp)
-                        .clip(CircleShape),
-                    color = if (progress == 1f) EmeraldGreen else CoralPrimary,
-                    trackColor = Color.White.copy(alpha = 0.08f)
-                )
-            }
-
-            // Habits list
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-            ) {
-                habits.forEachIndexed { index, habit ->
-                    HabitRowItem(
-                        habit = habit,
-                        onToggle = { onToggleHabit(habit) }
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_target),
+                        contentDescription = null,
+                        tint = Color.White.copy(alpha = 0.3f),
+                        modifier = Modifier.size(36.dp)
                     )
-                    if (index < habits.lastIndex) {
-                        HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text(
+                        text = "No Daily Habits Yet",
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.sp,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Tap + to add positive daily routines that replace compulsive triggers.",
+                        fontSize = 12.sp,
+                        color = Color.White.copy(alpha = 0.5f),
+                        textAlign = TextAlign.Center
+                    )
+                }
+            } else {
+                // Progress bar
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = "$completedCount of ${habits.size} completed",
+                            fontSize = 12.sp,
+                            color = Color.White.copy(alpha = 0.6f)
+                        )
+                        Text(
+                            text = "${(progress * 100).toInt()}%",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (progress == 1f) EmeraldGreen else CoralPrimary
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(CircleShape),
+                        color = if (progress == 1f) EmeraldGreen else CoralPrimary,
+                        trackColor = Color.White.copy(alpha = 0.08f)
+                    )
+                }
+
+                // Habits list
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                ) {
+                    habits.forEachIndexed { index, habit ->
+                        HabitRowItem(
+                            habit = habit,
+                            onToggle = { onToggleHabit(habit) },
+                            onDelete = { onDeleteHabit(habit) }
+                        )
+                        if (index < habits.lastIndex) {
+                            HorizontalDivider(color = Color.White.copy(alpha = 0.06f))
+                        }
                     }
                 }
             }
@@ -852,9 +1124,13 @@ private fun HabitsTrackerSection(
 
 @Composable
 private fun HabitRowItem(
-    habit: HabitItem,
-    onToggle: () -> Unit
+    habit: PersistentHabit,
+    onToggle: () -> Unit,
+    onDelete: () -> Unit
 ) {
+    val iconRes = getHabitIconRes(habit.iconKey)
+    val iconTint = getHabitIconTint(habit.iconKey)
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -865,22 +1141,20 @@ private fun HabitRowItem(
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .weight(1f)
-                .padding(end = 10.dp)
+            modifier = Modifier.weight(1f).padding(end = 8.dp)
         ) {
             Box(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(habit.iconTint.copy(alpha = 0.14f))
-                    .border(1.dp, habit.iconTint.copy(alpha = 0.25f), RoundedCornerShape(12.dp)),
+                    .background(iconTint.copy(alpha = 0.14f))
+                    .border(1.dp, iconTint.copy(alpha = 0.25f), RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    painter = painterResource(id = habit.iconRes),
+                    painter = painterResource(id = iconRes),
                     contentDescription = habit.title,
-                    tint = habit.iconTint,
+                    tint = iconTint,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -914,29 +1188,165 @@ private fun HabitRowItem(
             }
         }
 
-        // Circular completion check
-        Box(
-            modifier = Modifier
-                .size(28.dp)
-                .clip(CircleShape)
-                .background(if (habit.isCompletedToday) EmeraldGreen else Color.Transparent)
-                .border(
-                    width = 1.5.dp,
-                    color = if (habit.isCompletedToday) EmeraldGreen else Color.White.copy(alpha = 0.3f),
-                    shape = CircleShape
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            if (habit.isCompletedToday) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Delete Action Button
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(32.dp)
+            ) {
                 Icon(
-                    painter = painterResource(id = R.drawable.ic_check_circle),
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
+                    painter = painterResource(id = R.drawable.ic_delete),
+                    contentDescription = "Delete Habit",
+                    tint = Color.White.copy(alpha = 0.3f),
+                    modifier = Modifier.size(17.dp)
                 )
+            }
+
+            Spacer(modifier = Modifier.width(6.dp))
+
+            // Completion Checkmark
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(if (habit.isCompletedToday) EmeraldGreen else Color.Transparent)
+                    .border(
+                        width = 1.5.dp,
+                        color = if (habit.isCompletedToday) EmeraldGreen else Color.White.copy(alpha = 0.3f),
+                        shape = CircleShape
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                if (habit.isCompletedToday) {
+                    Icon(
+                        painter = painterResource(id = R.drawable.ic_check_circle),
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
             }
         }
     }
+}
+
+@Composable
+private fun AddHabitDialog(
+    onDismiss: () -> Unit,
+    onConfirmAdd: (title: String, iconKey: String, targetDays: Int) -> Unit
+) {
+    var newTitle by remember { mutableStateOf("") }
+
+    val iconOptions = remember {
+        listOf(
+            SelectableHabitIcon(R.drawable.ic_habit_water, Color(0xFF4FC3F7), "Water", "water"),
+            SelectableHabitIcon(R.drawable.ic_habit_fitness, CoralPrimary, "Fitness", "fitness"),
+            SelectableHabitIcon(R.drawable.ic_habit_book, Color(0xFFFFB74D), "Read", "book"),
+            SelectableHabitIcon(R.drawable.ic_habit_meditation, Color(0xFF64B5F6), "Meditate", "meditation"),
+            SelectableHabitIcon(R.drawable.ic_habit_journal, Color(0xFF81C784), "Journal", "journal"),
+            SelectableHabitIcon(R.drawable.ic_habit_walking, Color(0xFFFFD54F), "Walk", "walking"),
+            SelectableHabitIcon(R.drawable.ic_habit_noscreen, Color(0xFFBA68C8), "Detox", "noscreen"),
+            SelectableHabitIcon(R.drawable.ic_target, Color(0xFFFF8A65), "Focus", "target"),
+            SelectableHabitIcon(R.drawable.ic_feature_shield, Color(0xFF26A69A), "Shield", "shield"),
+            SelectableHabitIcon(R.drawable.ic_feature_bolt, Color(0xFFFFCA28), "Energy", "bolt"),
+            SelectableHabitIcon(R.drawable.ic_lightbulb, Color(0xFFFF7043), "Rest", "lightbulb"),
+            SelectableHabitIcon(R.drawable.ic_trophy, GoldColor, "Goal", "trophy"),
+            SelectableHabitIcon(R.drawable.ic_fire, CoralPrimary, "Discipline", "fire")
+        )
+    }
+    var selectedIcon by remember { mutableStateOf(iconOptions[0]) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                text = "New Habit",
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp,
+                color = Color.White
+            )
+        },
+        text = {
+            Column {
+                Text(
+                    text = "Choose category icon:",
+                    fontSize = 13.sp,
+                    color = Color.White.copy(alpha = 0.7f)
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Scrollable/wrap grid of icons
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(5),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(110.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(iconOptions) { option ->
+                        val isSelected = (selectedIcon.key == option.key)
+                        Box(
+                            modifier = Modifier
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(if (isSelected) option.tint.copy(alpha = 0.25f) else Color(0xFF26262E))
+                                .border(
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    color = if (isSelected) option.tint else Color.White.copy(alpha = 0.08f),
+                                    shape = RoundedCornerShape(12.dp)
+                                )
+                                .clickable { selectedIcon = option },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                painter = painterResource(id = option.iconRes),
+                                contentDescription = option.label,
+                                tint = if (isSelected) option.tint else Color.White.copy(alpha = 0.5f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                OutlinedTextField(
+                    value = newTitle,
+                    onValueChange = { newTitle = it },
+                    placeholder = { Text("e.g. Read 15 mins daily", color = Color.White.copy(alpha = 0.35f)) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = CoralPrimary,
+                        unfocusedBorderColor = Color.White.copy(alpha = 0.25f),
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White
+                    ),
+                    shape = RoundedCornerShape(10.dp)
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (newTitle.isNotBlank()) {
+                        onConfirmAdd(newTitle.trim(), selectedIcon.key, 30)
+                    }
+                },
+                colors = ButtonDefaults.textButtonColors(contentColor = CoralPrimary)
+            ) {
+                Text("Add", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel", color = Color.White.copy(alpha = 0.7f))
+            }
+        },
+        containerColor = Color(0xFF1E1E24),
+        shape = RoundedCornerShape(16.dp)
+    )
 }
 
 @Composable
@@ -958,7 +1368,6 @@ private fun MilestonesSection(
                 .fillMaxWidth()
                 .padding(bottom = 6.dp)
         ) {
-            // Sleek Unified Header matching WeeklyConsistencyCard
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1127,11 +1536,12 @@ private fun DailyMindsetCard(modifier: Modifier = Modifier) {
 
 @Composable
 private fun UrgeInterventionModal(
-    incompleteHabit: HabitItem?,
+    incompleteHabit: PersistentHabit?,
     onDismiss: () -> Unit,
     onUrgeOvercome: () -> Unit
 ) {
-    var timerSeconds by remember { mutableIntStateOf(60) }
+    // 2-minute (120s) urge focus lockdown timer
+    var timerSeconds by remember { mutableIntStateOf(120) }
     var isRunning by remember { mutableStateOf(true) }
     val haptic = LocalHapticFeedback.current
 
@@ -1142,12 +1552,8 @@ private fun UrgeInterventionModal(
         }
     }
 
-    // 16s Box Breathing cycle:
-    // 0..3: Inhale (scale up to 1.25)
-    // 4..7: Hold (hold scale 1.25)
-    // 8..11: Exhale (scale down to 0.85)
-    // 12..15: Rest (hold scale 0.85)
-    val cycleTime = (60 - timerSeconds) % 16
+    // 16s Box Breathing cycle
+    val cycleTime = (120 - timerSeconds) % 16
     val (phaseText, targetScale) = when (cycleTime) {
         in 0..3 -> "Inhale deeply (4s)" to 1.25f
         in 4..7 -> "Hold your breath (4s)" to 1.25f
@@ -1160,6 +1566,10 @@ private fun UrgeInterventionModal(
         animationSpec = tween(durationMillis = 3500),
         label = "breathingScale"
     )
+
+    val minutes = timerSeconds / 60
+    val seconds = timerSeconds % 60
+    val formattedTime = String.format("%d:%02d", minutes, seconds)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1178,19 +1588,27 @@ private fun UrgeInterventionModal(
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            painter = painterResource(id = R.drawable.ic_sos),
+                            painter = painterResource(id = R.drawable.ic_feature_shield),
                             contentDescription = null,
                             tint = CoralPrimary,
                             modifier = Modifier.size(18.dp)
                         )
                     }
                     Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = "Urge Protocol (60s)",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 17.sp,
-                        color = Color.White
-                    )
+                    Column {
+                        Text(
+                            text = "2-Min Urge Lockdown",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "Focus Mode Active",
+                            fontSize = 11.5.sp,
+                            color = CoralPrimary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
                 IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
                     Icon(
@@ -1208,9 +1626,9 @@ private fun UrgeInterventionModal(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "Urges peak like an ocean wave for ~60 seconds before receding. Breathe through the crest.",
+                    text = "Distracting apps are locked down just like Focus Mode for the next 2 minutes. Ride the urge wave until it breaks.",
                     fontSize = 12.5.sp,
-                    color = Color.White.copy(alpha = 0.7f),
+                    color = Color.White.copy(alpha = 0.75f),
                     textAlign = TextAlign.Center,
                     lineHeight = 17.sp
                 )
@@ -1235,8 +1653,8 @@ private fun UrgeInterventionModal(
                     )
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "${timerSeconds}s",
-                            fontSize = 32.sp,
+                            text = formattedTime,
+                            fontSize = 28.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color.White
                         )
@@ -1289,7 +1707,7 @@ private fun UrgeInterventionModal(
                             val habitMsg = if (incompleteHabit != null) {
                                 "You haven't done ${incompleteHabit.title} yet today. Go do that right now!"
                             } else {
-                                "Drink a tall glass of cold water or do 10 pushups right now to shift focus."
+                                "Drink a cold glass of water or do 10 pushups right now to shift focus."
                             }
                             Text(
                                 text = habitMsg,

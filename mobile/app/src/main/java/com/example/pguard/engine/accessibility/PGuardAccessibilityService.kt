@@ -399,7 +399,22 @@ class PGuardAccessibilityService : AccessibilityService() {
             overlayManager.hideContainerOverlay()
         }
 
-        // 0. Focus Mode Scheduled App Blocking
+        // 0. Emergency Urge Lockdown (2-minute focus lockdown during peak urges)
+        if (com.example.pguard.presentation.focus.FocusModeManager.isUrgeLockdownActive(this)) {
+            val urgeSchedule = com.example.pguard.presentation.focus.FocusSchedule(
+                id = "urge_lockdown",
+                startHour = 0,
+                startMinute = 0,
+                endHour = 0,
+                endMinute = 2
+            )
+            if (!com.example.pguard.presentation.focus.FocusModeManager.isPackageAllowed(this, packageName, urgeSchedule)) {
+                triggerFocusBlock(packageName, urgeSchedule)
+                return
+            }
+        }
+
+        // 1. Focus Mode Scheduled App Blocking
         val activeFocusSchedule = com.example.pguard.presentation.focus.FocusModeManager.getActiveSchedule(this)
         if (activeFocusSchedule != null && !com.example.pguard.presentation.focus.FocusModeManager.isPackageAllowed(this, packageName, activeFocusSchedule)) {
             triggerFocusBlock(packageName, activeFocusSchedule)

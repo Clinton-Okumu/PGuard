@@ -19,6 +19,7 @@ object FocusModeManager {
     private const val TAG = "FocusModeManager"
     private const val PREFS_NAME = "pguard_focus_mode_prefs"
     private const val KEY_SCHEDULES = "focus_schedules_json"
+    private const val KEY_URGE_LOCKDOWN_UNTIL = "urge_lockdown_until"
 
     const val MAX_FREE_SCHEDULES = Int.MAX_VALUE
 
@@ -86,7 +87,33 @@ object FocusModeManager {
     }
 
     fun isFocusModeActiveNow(context: Context, cal: Calendar = Calendar.getInstance()): Boolean {
-        return getActiveSchedule(context, cal) != null
+        return getActiveSchedule(context, cal) != null || isUrgeLockdownActive(context)
+    }
+
+    fun startUrgeLockdown(context: Context, durationSeconds: Int = 120) {
+        val until = System.currentTimeMillis() + (durationSeconds * 1000L)
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().putLong(KEY_URGE_LOCKDOWN_UNTIL, until).apply()
+        Log.i(TAG, "Started 2-min urge lockdown until $until")
+    }
+
+    fun stopUrgeLockdown(context: Context) {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        prefs.edit().remove(KEY_URGE_LOCKDOWN_UNTIL).apply()
+        Log.i(TAG, "Stopped urge lockdown")
+    }
+
+    fun isUrgeLockdownActive(context: Context): Boolean {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val until = prefs.getLong(KEY_URGE_LOCKDOWN_UNTIL, 0L)
+        return System.currentTimeMillis() < until
+    }
+
+    fun getUrgeLockdownRemainingSeconds(context: Context): Int {
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val until = prefs.getLong(KEY_URGE_LOCKDOWN_UNTIL, 0L)
+        val remainingMs = until - System.currentTimeMillis()
+        return if (remainingMs > 0) ((remainingMs + 999L) / 1000L).toInt() else 0
     }
 
     /**
