@@ -706,9 +706,9 @@ private fun WeeklyConsistencyCard(
     onOpenMonthlyCalendar: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val cleanDaysCount = weeklyStatus.count { it.isPastOrToday && it.isClean }
-    val totalPastDays = weeklyStatus.count { it.isPastOrToday }
-    val percentage = if (totalPastDays > 0) ((cleanDaysCount.toFloat() / totalPastDays) * 100).toInt() else 100
+    val trackedPastDays = weeklyStatus.filter { it.isTracked && it.isPastOrToday }
+    val cleanDaysCount = trackedPastDays.count { it.isClean }
+    val percentage = if (trackedPastDays.isNotEmpty()) ((cleanDaysCount.toFloat() / trackedPastDays.size) * 100).toInt() else 100
 
     Surface(
         modifier = modifier
@@ -754,7 +754,7 @@ private fun WeeklyConsistencyCard(
                             color = Color.White
                         )
                         Text(
-                            text = "Linked to backend • Tap for Calendar 📅",
+                            text = "Linked to streak • Tap for Calendar 📅",
                             fontSize = 11.sp,
                             color = Color.White.copy(alpha = 0.45f)
                         )
@@ -770,7 +770,7 @@ private fun WeeklyConsistencyCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (percentage == 100) "100% Clean" else "$percentage% Clean",
+                        text = if (trackedPastDays.isEmpty()) "Tracking Starts Today" else if (percentage == 100) "100% Clean" else "$percentage% Clean",
                         fontSize = 11.sp,
                         color = EmeraldGreen,
                         fontWeight = FontWeight.Bold
@@ -790,7 +790,7 @@ private fun WeeklyConsistencyCard(
                             text = status.dayLetter,
                             fontSize = 12.sp,
                             fontWeight = if (status.isToday) FontWeight.Bold else FontWeight.Medium,
-                            color = if (status.isToday) CoralPrimary else Color.White.copy(alpha = 0.5f)
+                            color = if (status.isToday) CoralPrimary else Color.White.copy(alpha = if (status.isTracked) 0.5f else 0.25f)
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Box(
@@ -799,7 +799,7 @@ private fun WeeklyConsistencyCard(
                                 .clip(CircleShape)
                                 .background(
                                     when {
-                                        !status.isPastOrToday -> Color(0xFF222228)
+                                        !status.isTracked || !status.isPastOrToday -> Color(0xFF222228)
                                         status.isClean -> EmeraldGreen.copy(alpha = 0.15f)
                                         else -> CoralPrimary.copy(alpha = 0.15f)
                                     }
@@ -808,7 +808,7 @@ private fun WeeklyConsistencyCard(
                                     width = if (status.isToday) 1.5.dp else 1.dp,
                                     color = when {
                                         status.isToday -> CoralPrimary
-                                        !status.isPastOrToday -> Color.White.copy(alpha = 0.08f)
+                                        !status.isTracked || !status.isPastOrToday -> Color.White.copy(alpha = 0.08f)
                                         status.isClean -> EmeraldGreen
                                         else -> CoralPrimary
                                     },
@@ -816,7 +816,7 @@ private fun WeeklyConsistencyCard(
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (status.isPastOrToday) {
+                            if (status.isTracked && status.isPastOrToday) {
                                 if (status.isClean) {
                                     Icon(
                                         painter = painterResource(id = R.drawable.ic_check_circle),
@@ -832,6 +832,13 @@ private fun WeeklyConsistencyCard(
                                         modifier = Modifier.size(15.dp)
                                     )
                                 }
+                            } else if (!status.isTracked && status.isPastOrToday) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(4.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.18f))
+                                )
                             }
                         }
                     }
@@ -964,6 +971,7 @@ private fun MonthlyProgressCalendarDialog(
                                 .background(
                                     when {
                                         day.isFuture -> Color.Transparent
+                                        !day.isWithinStreak -> Color(0xFF1E1E24)
                                         day.isRelapse -> CoralPrimary.copy(alpha = 0.2f)
                                         day.isClean -> EmeraldGreen.copy(alpha = 0.18f)
                                         else -> Color(0xFF24242C)
@@ -973,6 +981,7 @@ private fun MonthlyProgressCalendarDialog(
                                     width = if (day.isToday) 1.5.dp else 1.dp,
                                     color = when {
                                         day.isToday -> CoralPrimary
+                                        !day.isWithinStreak -> Color.White.copy(alpha = 0.04f)
                                         day.isRelapse -> CoralPrimary
                                         day.isClean -> EmeraldGreen
                                         else -> Color.White.copy(alpha = 0.06f)
@@ -987,6 +996,7 @@ private fun MonthlyProgressCalendarDialog(
                                 fontWeight = if (day.isToday || day.isClean) FontWeight.Bold else FontWeight.Normal,
                                 color = when {
                                     day.isToday -> CoralPrimary
+                                    !day.isWithinStreak -> Color.White.copy(alpha = 0.25f)
                                     day.isClean -> EmeraldGreen
                                     day.isRelapse -> CoralPrimary
                                     day.isFuture -> Color.White.copy(alpha = 0.2f)
@@ -1024,6 +1034,21 @@ private fun MonthlyProgressCalendarDialog(
                             Text("${monthData.consistencyPercent}%", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = GoldColor)
                         }
                     }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // Streak Tracking Legend
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "● Green = Clean  ● Red = Relapse  ○ Faint = Pre-streak",
+                        fontSize = 10.5.sp,
+                        color = Color.White.copy(alpha = 0.4f)
+                    )
                 }
             }
         },

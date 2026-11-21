@@ -19,6 +19,7 @@ data class DayConsistencyStatus(
     val dateString: String,
     val isPastOrToday: Boolean,
     val isToday: Boolean,
+    val isTracked: Boolean = true,
     val isClean: Boolean,
     val isRelapse: Boolean = false
 )
@@ -155,14 +156,20 @@ object HabitsManager {
     fun initDefaultsIfNeeded(context: Context) {
         val prefs = getPrefs(context)
         if (!prefs.contains(KEY_STREAK_START_TIME)) {
-            // Default initial clean streak: 7 days ago so users start with initial momentum
-            val initialStreakStart = System.currentTimeMillis() - (7L * 24 * 60 * 60 * 1000L)
+            // Default initial clean streak starts now when user begins using the app
+            val initialStreakStart = System.currentTimeMillis()
             prefs.edit()
                 .putLong(KEY_STREAK_START_TIME, initialStreakStart)
-                .putInt(KEY_BEST_STREAK, 14)
-                .putInt(KEY_URGES_PREVENTED, 23)
+                .putInt(KEY_BEST_STREAK, 0)
+                .putInt(KEY_URGES_PREVENTED, 0)
                 .apply()
         }
+    }
+
+    fun getStreakStartDateString(context: Context): String {
+        initDefaultsIfNeeded(context)
+        val startTime = getPrefs(context).getLong(KEY_STREAK_START_TIME, System.currentTimeMillis())
+        return SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date(startTime))
     }
 
     fun getStreakStatus(context: Context): StreakStatus {
@@ -246,6 +253,7 @@ object HabitsManager {
         val prefs = getPrefs(context)
         val relapseDates = prefs.getStringSet(KEY_RELAPSE_DATES, emptySet()) ?: emptySet()
         val isAppDoingJob = isAppDoingItsJob(context)
+        val streakStartDate = getStreakStartDateString(context)
 
         val calendar = Calendar.getInstance()
         val currentDayOfYear = calendar.get(Calendar.DAY_OF_YEAR)
@@ -270,8 +278,11 @@ object HabitsManager {
             val isPastOrToday = isPast || isToday
             val hadRelapse = relapseDates.contains(dateStr)
 
+            // Tracking begins when streak begins
+            val isTracked = dateStr >= streakStartDate
+
             // If today, requires the app doing its job (uninstall protection ON)
-            val isClean = isPastOrToday && !hadRelapse && (!isToday || isAppDoingJob)
+            val isClean = isTracked && isPastOrToday && !hadRelapse && (!isToday || isAppDoingJob)
 
             result.add(
                 DayConsistencyStatus(
@@ -280,8 +291,9 @@ object HabitsManager {
                     dateString = dateStr,
                     isPastOrToday = isPastOrToday,
                     isToday = isToday,
+                    isTracked = isTracked,
                     isClean = isClean,
-                    isRelapse = hadRelapse
+                    isRelapse = isTracked && hadRelapse
                 )
             )
 
@@ -296,7 +308,7 @@ object HabitsManager {
         val prefs = getPrefs(context)
         val relapseDates = prefs.getStringSet(KEY_RELAPSE_DATES, emptySet()) ?: emptySet()
         val isAppDoingJob = isAppDoingItsJob(context)
-        val streakStartTime = prefs.getLong(KEY_STREAK_START_TIME, System.currentTimeMillis())
+        val streakStartDate = getStreakStartDateString(context)
 
         val nowCal = Calendar.getInstance()
         val currentDay = nowCal.get(Calendar.DAY_OF_MONTH)
@@ -330,7 +342,6 @@ object HabitsManager {
         for (d in 1..daysInMonth) {
             cal.set(Calendar.DAY_OF_MONTH, d)
             val dateStr = dateFormat.format(cal.time)
-            val dayTime = cal.timeInMillis
 
             val isToday = (d == currentDay && month == currentMonth && year == currentYear)
             val isPast = (year < currentYear) ||
@@ -339,12 +350,12 @@ object HabitsManager {
             val isFuture = !isPast && !isToday
 
             val hadRelapse = relapseDates.contains(dateStr)
-            val isWithinStreak = dayTime >= streakStartTime
+            val isWithinStreak = dateStr >= streakStartDate
 
-            val isClean = (isPast || isToday) && !hadRelapse && (!isToday || isAppDoingJob)
+            val isClean = isWithinStreak && (isPast || isToday) && !hadRelapse && (!isToday || isAppDoingJob)
 
             if (isClean && (isPast || isToday)) cleanCount++
-            if (hadRelapse) relapseCount++
+            if (isWithinStreak && hadRelapse) relapseCount++
 
             days.add(
                 MonthCalendarDay(
@@ -355,13 +366,13 @@ object HabitsManager {
                     isFuture = isFuture,
                     isWithinStreak = isWithinStreak,
                     isClean = isClean,
-                    isRelapse = hadRelapse
+                    isRelapse = isWithinStreak && hadRelapse
                 )
             )
         }
 
-        val totalPastDays = days.count { it.isPast || it.isToday }
-        val consistencyPercent = if (totalPastDays > 0) ((cleanCount.toFloat() / totalPastDays) * 100).toInt() else 100
+        val totalTrackedDays = days.count { it.isWithinStreak && (it.isPast || it.isToday) }
+        val consistencyPercent = if (totalTrackedDays > 0) ((cleanCount.toFloat() / totalTrackedDays) * 100).toInt() else 100
 
         return MonthCalendarData(
             year = year,
