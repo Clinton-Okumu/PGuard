@@ -1,0 +1,448 @@
+---
+---
+
+<!-- Solid Brand Hero Banner (transitions into white theme below) -->
+<section class="hero-banner">
+  <div class="hero-bg-grid" aria-hidden="true"></div>
+
+  <div class="hero-container">
+    <!-- Left Column: Laurel Badge, 2-Line Headline, CTA -->
+    <div class="hero-content">
+      <div class="laurel-badge" aria-label="Top-rated Android privacy and focus app">
+        <svg class="laurel-leaf laurel-left" viewBox="0 0 28 54" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M22 50C12 43 6 31 6 18C6 11 8 5 12 2" stroke="var(--color-laurel-gold)" stroke-width="1.8" stroke-linecap="round"/>
+          <ellipse cx="14" cy="43" rx="4" ry="2.2" transform="rotate(-30 14 43)" fill="var(--color-laurel-gold)"/>
+          <ellipse cx="10" cy="34" rx="4.2" ry="2.2" transform="rotate(-15 10 34)" fill="var(--color-laurel-gold)"/>
+          <ellipse cx="9" cy="24" rx="4.2" ry="2.2" transform="rotate(5 9 24)" fill="var(--color-laurel-gold)"/>
+          <ellipse cx="11" cy="14" rx="4" ry="2.1" transform="rotate(25 11 14)" fill="var(--color-laurel-gold)"/>
+          <ellipse cx="16" cy="7" rx="3.4" ry="1.9" transform="rotate(45 16 7)" fill="var(--color-laurel-gold)"/>
+        </svg>
+
+        <div class="laurel-text">
+          <span class="laurel-kicker">DIGITAL WELLBEING</span>
+          <span class="laurel-main">PGuard</span>
+          <span class="laurel-sub">recovery &amp; focus</span>
+          <div class="laurel-stars" aria-hidden="true">
+            ★★★★★
+          </div>
+        </div>
+
+        <svg class="laurel-leaf laurel-right" viewBox="0 0 28 54" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M6 50C16 43 22 31 22 18C22 11 20 5 16 2" stroke="var(--color-laurel-gold)" stroke-width="1.8" stroke-linecap="round"/>
+          <ellipse cx="14" cy="43" rx="4" ry="2.2" transform="rotate(30 14 43)" fill="var(--color-laurel-gold)"/>
+          <ellipse cx="18" cy="34" rx="4.2" ry="2.2" transform="rotate(15 18 34)" fill="var(--color-laurel-gold)"/>
+          <ellipse cx="19" cy="24" rx="4.2" ry="2.2" transform="rotate(-5 19 24)" fill="var(--color-laurel-gold)"/>
+          <ellipse cx="17" cy="14" rx="4" ry="2.1" transform="rotate(-25 17 14)" fill="var(--color-laurel-gold)"/>
+          <ellipse cx="12" cy="7" rx="3.4" ry="1.9" transform="rotate(-45 12 7)" fill="var(--color-laurel-gold)"/>
+        </svg>
+      </div>
+
+      <h1 class="hero-title">
+        <span class="highlight">Quit</span> porn &amp; noise.<br />
+        Reclaim focus.
+      </h1>
+
+      <div class="hero-actions">
+        <a href="#download" class="hero-cta-button">
+          Download now
+        </a>
+      </div>
+    </div>
+
+    <!-- Right Column: Overlapping Tilted Phone Mockups + Floating Card -->
+    <div class="hero-visuals">
+      <div class="phone-showcase">
+        <div class="orbit-ring orbit-ring-1" aria-hidden="true"></div>
+        <div class="orbit-ring orbit-ring-2" aria-hidden="true"></div>
+
+        <!-- Back Phone -->
+        <div class="phone-frame phone-back">
+          <div class="phone-screen">
+            <img
+              src="/progress.webp"
+              alt="PGuard habit progress and recovery tracking screen"
+              class="phone-screenshot"
+            />
+          </div>
+        </div>
+
+        <!-- Front Phone -->
+        <div class="phone-frame phone-front">
+          <div class="phone-screen">
+            <img
+              src="/blocking.webp"
+              alt="PGuard real-time blocking shield screen"
+              class="phone-screenshot"
+            />
+          </div>
+        </div>
+
+        <!-- Floating White Pop-out Card -->
+        <div class="floating-card" aria-hidden="true">
+          <div class="floating-card-header">
+            <span class="floating-badge">ACTIVE SHIELD</span>
+            <span class="floating-status-dot"></span>
+          </div>
+          <div class="floating-card-title">Daily Protection</div>
+          <div class="floating-progress-track">
+            <div class="floating-progress-fill"></div>
+          </div>
+          <div class="floating-card-footer">
+            <span>100% Blocked</span>
+            <span class="floating-accent">24/7 Guard</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<style>
+  .hero-banner {
+    position: relative;
+    width: 100%;
+    overflow: hidden;
+    background-color: var(--color-brand-canvas);
+    color: var(--color-on-brand-canvas);
+    padding-top: var(--nav-height);
+  }
+
+  .hero-bg-grid {
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(var(--color-brand-dot-grid) 1px, transparent 1px);
+    background-size: 28px 28px;
+    mask-image: radial-gradient(ellipse 80% 75% at 65% 50%, black 20%, transparent 100%);
+    -webkit-mask-image: radial-gradient(ellipse 80% 75% at 65% 50%, black 20%, transparent 100%);
+    pointer-events: none;
+  }
+
+  .hero-container {
+    position: relative;
+    z-index: 1;
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: 36px 28px 64px;
+    min-height: 580px;
+    display: grid;
+    grid-template-columns: 1fr 1.1fr;
+    align-items: center;
+    gap: 40px;
+  }
+
+  .hero-content {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .laurel-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 22px;
+    user-select: none;
+  }
+
+  .laurel-leaf {
+    width: 24px;
+    height: 46px;
+    flex-shrink: 0;
+  }
+
+  .laurel-text {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    line-height: 1.15;
+  }
+
+  .laurel-kicker {
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    color: var(--color-on-brand-canvas-muted);
+    text-transform: uppercase;
+  }
+
+  .laurel-main {
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: var(--color-on-brand-canvas);
+    letter-spacing: -0.02em;
+    margin-top: 2px;
+  }
+
+  .laurel-sub {
+    font-size: 0.64rem;
+    font-weight: 500;
+    color: var(--color-on-brand-canvas-subtle);
+  }
+
+  .laurel-stars {
+    font-size: 0.72rem;
+    letter-spacing: 1.5px;
+    color: var(--color-laurel-gold);
+    margin-top: 2px;
+  }
+
+  .hero-title {
+    font-size: clamp(2.6rem, 4.4vw, 3.65rem);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+    margin: 0 0 32px;
+    color: var(--color-on-brand-canvas);
+  }
+
+  .hero-title .highlight {
+    color: var(--color-laurel-gold);
+  }
+
+  .hero-actions {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .hero-cta-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--color-gold);
+    color: var(--color-text-primary);
+    font-size: 1.02rem;
+    font-weight: 700;
+    padding: 15px 38px;
+    border-radius: var(--radius-full);
+    box-shadow: 0 12px 28px var(--shadow-canvas-sm);
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast), filter var(--transition-fast);
+  }
+
+  .hero-cta-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 16px 34px var(--shadow-canvas-md);
+    filter: brightness(1.05);
+  }
+
+  .hero-cta-button:active {
+    transform: translateY(0);
+  }
+
+  .hero-visuals {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+
+  .phone-showcase {
+    position: relative;
+    width: 100%;
+    max-width: 490px;
+    height: 515px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .orbit-ring {
+    position: absolute;
+    border-radius: 50%;
+    border: 1px solid var(--color-brand-orbit);
+    pointer-events: none;
+  }
+
+  .orbit-ring-1 {
+    width: 390px;
+    height: 390px;
+  }
+
+  .orbit-ring-2 {
+    width: 490px;
+    height: 490px;
+    border-style: dashed;
+    border-color: var(--color-brand-orbit-dashed);
+  }
+
+  .phone-frame {
+    position: absolute;
+    border-radius: 36px;
+    padding: 8px;
+    background: linear-gradient(145deg, var(--color-brand-bezel-light) 0%, var(--color-brand-bezel-dark) 100%);
+    border: 2px solid var(--color-brand-bezel-border);
+    box-shadow:
+      0 28px 60px var(--shadow-canvas-lg),
+      0 8px 20px var(--shadow-canvas-sm);
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .phone-screen {
+    width: 100%;
+    aspect-ratio: 1080 / 2316;
+    border-radius: 28px;
+    overflow: hidden;
+    background: var(--color-screen-bg);
+  }
+
+  .phone-screenshot {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .phone-front {
+    width: 224px;
+    z-index: 2;
+    left: 24px;
+    top: 12px;
+    transform: rotate(-6deg);
+  }
+
+  .phone-back {
+    width: 204px;
+    z-index: 1;
+    right: 32px;
+    top: 44px;
+    transform: rotate(7deg);
+  }
+
+  .floating-card {
+    position: absolute;
+    right: 6px;
+    bottom: 76px;
+    z-index: 3;
+    width: 196px;
+    background: var(--color-bg);
+    color: var(--color-text-primary);
+    border-radius: var(--radius-md);
+    padding: 14px 16px;
+    box-shadow: 0 20px 44px var(--shadow-canvas-md);
+    transform: rotate(3deg);
+    transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  .floating-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+  }
+
+  .floating-badge {
+    font-size: 0.64rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: var(--color-primary);
+  }
+
+  .floating-status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background-color: var(--color-success);
+    box-shadow: 0 0 0 3px var(--color-success-ring);
+  }
+
+  .floating-card-title {
+    font-size: 0.9rem;
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+
+  .floating-progress-track {
+    width: 100%;
+    height: 6px;
+    background-color: var(--color-surface);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+
+  .floating-progress-fill {
+    width: 86%;
+    height: 100%;
+    background: linear-gradient(90deg, var(--color-primary) 0%, var(--color-secondary) 100%);
+    border-radius: var(--radius-full);
+  }
+
+  .floating-card-footer {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+  }
+
+  .floating-accent {
+    color: var(--color-primary);
+  }
+
+  .phone-showcase:hover .phone-front {
+    transform: rotate(-4deg) translateY(-4px);
+  }
+
+  .phone-showcase:hover .phone-back {
+    transform: rotate(9deg) translateY(-2px);
+  }
+
+  .phone-showcase:hover .floating-card {
+    transform: rotate(1deg) translateY(-4px);
+  }
+
+  @media (max-width: 960px) {
+    .hero-container {
+      grid-template-columns: 1fr;
+      text-align: center;
+      padding: 36px 24px 64px;
+      gap: 44px;
+    }
+
+    .hero-content {
+      align-items: center;
+    }
+
+    .phone-showcase {
+      max-width: 400px;
+      height: 460px;
+    }
+
+    .phone-front {
+      width: 196px;
+      left: 16px;
+    }
+
+    .phone-back {
+      width: 178px;
+      right: 18px;
+    }
+
+    .floating-card {
+      width: 170px;
+      bottom: 60px;
+      right: 6px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .phone-showcase {
+      max-width: 320px;
+      height: 390px;
+    }
+
+    .phone-front {
+      width: 162px;
+      left: 8px;
+    }
+
+    .phone-back {
+      width: 148px;
+      right: 10px;
+    }
+
+    .floating-card {
+      display: none;
+    }
+  }
+</style>

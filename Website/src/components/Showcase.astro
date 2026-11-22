@@ -1,0 +1,441 @@
+---
+const benefits = [
+  {
+    text: 'Freedom from shame, guilt, and mindless scrolling',
+    color: 'var(--color-badge-purple)',
+    icon: 'person',
+  },
+  {
+    text: 'Get your energy, attention, and motivation back',
+    color: 'var(--color-gold)',
+    icon: 'bolt',
+  },
+  {
+    text: 'Build healthier relationships and daily routines',
+    color: 'var(--color-primary)',
+    icon: 'heart',
+  },
+  {
+    text: 'Recover your natural focus and mental clarity',
+    color: 'var(--color-badge-blue)',
+    icon: 'pulse',
+  },
+];
+---
+
+<section class="showcase-section">
+  <!-- Sweeping Curved Wave Transition from Testimonials -->
+  <div class="wave-transition" aria-hidden="true">
+    <svg
+      class="wave-svg"
+      viewBox="0 0 1440 240"
+      preserveAspectRatio="none"
+      xmlns="http://www.w3.org/2000/svg"
+    >
+      <path
+        d="M0 0 C120 155 480 120 860 155 C1200 185 1380 205 1440 240 L0 240 Z"
+        fill="var(--color-brand-showcase)"
+      />
+    </svg>
+  </div>
+
+  <!-- Overlapping Upright Phone Mockups Straddling the Wave -->
+  <div class="showcase-phones-wrapper">
+    <div class="showcase-phones">
+      <!-- Back Left Phone -->
+      <div class="showcase-phone phone-left">
+        <div class="showcase-screen">
+          <img
+            src="/blocklist.webp"
+            alt="PGuard custom blocklist screen"
+            class="showcase-img"
+            loading="lazy"
+          />
+        </div>
+      </div>
+
+      <!-- Front Right Phone -->
+      <div class="showcase-phone phone-right">
+        <div class="showcase-screen">
+          <img
+            src="/settigs.webp"
+            alt="PGuard settings and accountability screen"
+            class="showcase-img"
+            loading="lazy"
+          />
+        </div>
+      </div>
+
+      <!-- Floating White Pop-out Card across Front Phone -->
+      <div class="popout-card" aria-hidden="true">
+        <div class="popout-thumb">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            <path d="m9 12 2 2 4-4" />
+          </svg>
+        </div>
+        <div class="popout-body">
+          <div class="popout-title">Accountability Guard</div>
+          <div class="popout-desc">60-second typing challenge active before any rule change.</div>
+          <div class="popout-bar">
+            <div class="popout-bar-fill"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Copy & Scalloped Benefits List -->
+  <div class="showcase-content">
+    <div class="showcase-header">
+      <h2 class="showcase-title">
+        Become your best self with the{' '}
+        <span class="highlight">all-in-one digital wellbeing &amp; porn recovery</span>{' '}
+        app.
+      </h2>
+      <p class="showcase-kicker">On-device privacy, zero cloud tracking</p>
+      <p class="showcase-reviews">
+        Built for lasting <span class="highlight">5-star</span> focus and freedom
+      </p>
+    </div>
+
+    <ul class="benefits-list">
+      {benefits.map((item) => (
+        <li class="benefit-item">
+          <div class="scallop-badge" style={`color: ${item.color};`} aria-hidden="true">
+            <!-- 10-lobed scalloped seal shape -->
+            <svg class="scallop-bg" viewBox="0 0 64 64" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+              <path d="M32 2 C36.5 2 39.2 6.2 43.2 7.5 C47.2 8.8 51.8 6.8 54.8 10.2 C57.8 13.6 55.6 18.2 57.5 22.1 C59.4 26 63.2 28.4 63.2 32.8 C63.2 37.2 59.4 39.6 57.5 43.5 C55.6 47.4 57.8 52 54.8 55.4 C51.8 58.8 47.2 56.8 43.2 58.1 C39.2 59.4 36.5 63.6 32 63.6 C27.5 63.6 24.8 59.4 20.8 58.1 C16.8 56.8 12.2 58.8 9.2 55.4 C6.2 52 8.4 47.4 6.5 43.5 C4.6 39.6 0.8 37.2 0.8 32.8 C0.8 28.4 4.6 26 6.5 22.1 C8.4 18.2 6.2 13.6 9.2 10.2 C12.2 6.8 16.8 8.8 20.8 7.5 C24.8 6.2 27.5 2 32 2 Z" />
+            </svg>
+            <div class="scallop-icon">
+              {item.icon === 'person' && (
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="6" r="2.5" fill="currentColor" stroke="none" />
+                  <path d="M6 8l6 4 6-4" />
+                  <path d="M12 12v5" />
+                  <path d="M9 21l3-4 3 4" />
+                </svg>
+              )}
+              {item.icon === 'bolt' && (
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M13 2L4.5 13.5h6.5L10 22l9.5-12h-6.5L13 2z" />
+                </svg>
+              )}
+              {item.icon === 'heart' && (
+                <svg width="23" height="23" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" />
+                </svg>
+              )}
+              {item.icon === 'pulse' && (
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 12h4l2.5-6 4 12 2.5-6h5" />
+                </svg>
+              )}
+            </div>
+          </div>
+          <span class="benefit-text">{item.text}</span>
+        </li>
+      ))}
+    </ul>
+  </div>
+</section>
+
+<style>
+  .showcase-section {
+    position: relative;
+    width: 100%;
+    background-color: var(--color-brand-showcase);
+    color: var(--color-on-brand-canvas);
+    padding-bottom: 104px;
+    overflow-x: clip;
+  }
+
+  /* ==========================================================================
+     Curved Wave Transition
+     ========================================================================== */
+  .wave-transition {
+    position: relative;
+    width: 100%;
+    background-color: var(--color-surface-lowest);
+    line-height: 0;
+  }
+
+  .wave-svg {
+    width: 100%;
+    height: 210px;
+    display: block;
+  }
+
+  /* ==========================================================================
+     Upright Overlapping Phones Straddling the Wave
+     ========================================================================== */
+  .showcase-phones-wrapper {
+    position: relative;
+    z-index: 2;
+    max-width: var(--max-width);
+    margin: -255px auto 72px;
+    padding: 0 24px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .showcase-phones {
+    position: relative;
+    width: 440px;
+    height: 460px;
+  }
+
+  .showcase-phone {
+    position: absolute;
+    border-radius: 34px;
+    padding: 8px;
+    background-color: var(--color-brand-showcase-bezel);
+    border: 2px solid var(--color-brand-glass-border);
+    box-shadow: 0 24px 54px var(--shadow-canvas-md);
+  }
+
+  .showcase-screen {
+    width: 100%;
+    aspect-ratio: 1080 / 2316;
+    border-radius: 26px;
+    overflow: hidden;
+    background-color: var(--color-screen-bg);
+  }
+
+  .showcase-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .phone-left {
+    width: 210px;
+    top: 0;
+    left: 24px;
+    z-index: 1;
+  }
+
+  .phone-right {
+    width: 210px;
+    top: 64px;
+    right: 24px;
+    z-index: 2;
+  }
+
+  /* Floating White Pop-out Card */
+  .popout-card {
+    position: absolute;
+    left: 136px;
+    top: 224px;
+    z-index: 3;
+    width: 288px;
+    background-color: var(--color-bg);
+    color: var(--color-text-primary);
+    border-radius: var(--radius-md);
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    box-shadow: 0 18px 42px var(--shadow-canvas-md);
+  }
+
+  .popout-thumb {
+    width: 56px;
+    height: 56px;
+    flex-shrink: 0;
+    border-radius: var(--radius-sm);
+    background-color: var(--color-coral-container);
+    color: var(--color-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .popout-body {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .popout-title {
+    font-size: 0.82rem;
+    font-weight: 800;
+    margin-bottom: 2px;
+    color: var(--color-text-primary);
+  }
+
+  .popout-desc {
+    font-size: 0.68rem;
+    line-height: 1.35;
+    color: var(--color-text-secondary);
+    margin-bottom: 7px;
+  }
+
+  .popout-bar {
+    width: 100%;
+    height: 5px;
+    background-color: var(--color-surface);
+    border-radius: var(--radius-full);
+    overflow: hidden;
+  }
+
+  .popout-bar-fill {
+    width: 78%;
+    height: 100%;
+    background-color: var(--color-primary);
+    border-radius: var(--radius-full);
+  }
+
+  /* ==========================================================================
+     Copy & Benefits List
+     ========================================================================== */
+  .showcase-content {
+    max-width: 680px;
+    margin: 0 auto;
+    padding: 0 28px;
+  }
+
+  .showcase-header {
+    margin-bottom: 64px;
+  }
+
+  .showcase-title {
+    font-size: clamp(1.85rem, 3.2vw, 2.35rem);
+    font-weight: 800;
+    letter-spacing: -0.015em;
+    line-height: 1.32;
+    margin: 0 0 20px;
+    color: var(--color-on-brand-canvas);
+  }
+
+  .showcase-title .highlight,
+  .showcase-reviews .highlight {
+    color: var(--color-laurel-gold);
+  }
+
+  .showcase-kicker {
+    font-size: 1.05rem;
+    font-style: italic;
+    color: var(--color-on-brand-canvas-muted);
+    margin: 0 0 18px;
+  }
+
+  .showcase-reviews {
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--color-on-brand-canvas);
+    margin: 0;
+  }
+
+  /* Benefits Vertical Stack */
+  .benefits-list {
+    list-style: none;
+    padding: 0;
+    margin: 0 auto;
+    max-width: 520px;
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
+  }
+
+  .benefit-item {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .scallop-badge {
+    position: relative;
+    width: 66px;
+    height: 66px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    filter: drop-shadow(0 8px 16px var(--shadow-canvas-sm));
+  }
+
+  .scallop-bg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+
+  .scallop-icon {
+    position: relative;
+    z-index: 1;
+    color: var(--color-on-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .benefit-text {
+    font-size: 1.06rem;
+    font-weight: 600;
+    line-height: 1.45;
+    color: var(--color-on-brand-canvas);
+  }
+
+  /* ==========================================================================
+     Responsive
+     ========================================================================== */
+  @media (max-width: 768px) {
+    .wave-svg {
+      height: 130px;
+    }
+
+    .showcase-phones-wrapper {
+      margin-top: -165px;
+      margin-bottom: 52px;
+    }
+
+    .showcase-phones {
+      width: 340px;
+      height: 390px;
+    }
+
+    .phone-left {
+      width: 168px;
+      left: 12px;
+    }
+
+    .phone-right {
+      width: 168px;
+      right: 12px;
+      top: 48px;
+    }
+
+    .popout-card {
+      width: 236px;
+      left: 88px;
+      top: 176px;
+      padding: 10px 12px;
+    }
+
+    .popout-thumb {
+      width: 44px;
+      height: 44px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .popout-card {
+      display: none;
+    }
+
+    .benefit-item {
+      gap: 18px;
+    }
+
+    .scallop-badge {
+      width: 56px;
+      height: 56px;
+    }
+
+    .benefit-text {
+      font-size: 0.98rem;
+    }
+  }
+</style>

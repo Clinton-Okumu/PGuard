@@ -1,0 +1,142 @@
+:root,
+html.light {
+  /* ==========================================================================
+     PGuard Brand Colors (from mobile Color.kt)
+     ========================================================================== */
+  --color-primary: #FF5252;              /* CoralPrimary */
+  --color-primary-hover: #E64545;
+  --color-secondary: #FF7043;            /* CoralSecondary */
+  --color-tertiary: #FF8A65;             /* CoralTertiary */
+  --color-coral-deep: #E64A19;           /* CoralDeep */
+  --color-coral-container: #FFF0F0;      /* Soft coral tint for light theme */
+  --color-on-coral-container: #D32F2F;   /* Crisp coral text on light container */
+  --color-on-primary: #FFFFFF;
+
+  /* ==========================================================================
+     Brand Canvas Bookends (Hero & Footer)
+     ========================================================================== */
+  --color-brand-canvas: #D94444;
+  --color-brand-canvas-elevated: #C23838;
+  --color-brand-showcase: #D94444;
+  --color-brand-showcase-bezel: #EE7676;
+  --color-brand-horizon-hill: #F5DADA;
+  --color-brand-bezel-light: #EE7676;
+  --color-brand-bezel-dark: #E05C5C;
+  --color-brand-bezel-border: rgba(255, 255, 255, 0.28);
+
+  --color-on-brand-canvas: #FFFFFF;
+  --color-on-brand-canvas-muted: rgba(255, 255, 255, 0.85);
+  --color-on-brand-canvas-subtle: rgba(255, 255, 255, 0.72);
+  --color-on-brand-canvas-faint: rgba(255, 255, 255, 0.55);
+
+  --color-brand-glass-bg: rgba(255, 255, 255, 0.14);
+  --color-brand-glass-bg-hover: rgba(255, 255, 255, 0.24);
+  --color-brand-glass-border: rgba(255, 255, 255, 0.22);
+  --color-brand-glass-border-hover: rgba(255, 255, 255, 0.42);
+  --color-brand-badge-bg: rgba(255, 255, 255, 0.06);
+  --color-brand-badge-bg-hover: rgba(255, 255, 255, 0.14);
+
+  --color-brand-dot-grid: rgba(255, 255, 255, 0.06);
+  --color-brand-orbit: rgba(255, 138, 101, 0.16);
+  --color-brand-orbit-dashed: rgba(255, 255, 255, 0.08);
+  --color-laurel-gold: #F5D782;
+
+  /* ==========================================================================
+     Light / White Theme Surfaces
+     ========================================================================== */
+  --color-bg: #FFFFFF;                   /* Clean White Background */
+  --color-surface-lowest: #FAFAFC;
+  --color-surface-low: #F5F5F7;
+  --color-surface: #EFEFF4;
+  --color-surface-high: #E5E5EC;
+  --color-surface-highest: #D8D8E0;
+  --color-surface-coral-bezel: #FFE2E2;
+  --color-surface-lavender: #EAE6FF;
+  --color-screen-bg: #121214;            /* App screenshot backing */
+
+  /* ==========================================================================
+     Text, Outlines & Status (Light Theme)
+     ========================================================================== */
+  --color-text-primary: #121214;         /* Dark Ink Text */
+  --color-text-secondary: #585862;       /* Muted Charcoal */
+  --color-text-muted: #8E8E98;
+  --color-outline: #D8D8E0;
+  --color-outline-variant: rgba(18, 18, 20, 0.08);
+  --color-error: #E53935;
+
+  /* Semantic Brand Accents */
+  --color-success: #4CAF50;              /* SuccessGreen */
+  --color-success-ring: rgba(76, 175, 80, 0.2);
+  --color-gold: #FFB800;                 /* PremiumGold */
+  --color-info: #2196F3;                 /* InfoBlue */
+  --color-badge-purple: #8B6DFF;
+  --color-badge-blue: #5BB8FF;
+
+  /* Shadows */
+  --shadow-primary-sm: rgba(255, 82, 82, 0.28);
+  --shadow-primary-md: rgba(255, 82, 82, 0.36);
+  --shadow-primary-lg: rgba(255, 82, 82, 0.48);
+  --shadow-canvas-lg: rgba(14, 5, 6, 0.45);
+  --shadow-canvas-md: rgba(14, 5, 6, 0.32);
+  --shadow-canvas-sm: rgba(14, 5, 6, 0.25);
+  --shadow-card: rgba(18, 18, 20, 0.06);
+  --shadow-card-active: rgba(18, 18, 20, 0.1);
+
+  /* ==========================================================================
+     Shapes / Radii (from mobile Shape.kt)
+     ========================================================================== */
+  --radius-xs: 8px;
+  --radius-sm: 12px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* Layout */
+  --nav-height: 76px;
+  --max-width: 1140px;
+  --transition-fast: 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Optional Dark Theme Override */
+html.dark {
+  --color-coral-container: #3D191B;
+  --color-on-coral-container: #FFDADA;
+  --color-bg: #121214;
+  --color-surface-lowest: #141416;
+  --color-surface-low: #18181C;
+  --color-surface: #1E1E24;
+  --color-surface-high: #26262E;
+  --color-surface-highest: #34343E;
+  --color-text-primary: #F5F5F7;
+  --color-text-secondary: #B3B3BC;
+  --color-outline: #3A3A44;
+  --color-outline-variant: rgba(255, 255, 255, 0.08);
+}
+
+/* Base resets & typography */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: light;
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}

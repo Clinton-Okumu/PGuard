@@ -14,5 +14,3 @@ Backend/bin/
 Backend/.env
 *.env
 
-# Separate repositories
-Website/

@@ -1,0 +1,366 @@
+---
+const testimonials = [
+  {
+    quote:
+      "This app is really great. I've finally got my late-night doomscrolling and porn triggers under control.",
+    author: 'Tom',
+    meta: 'Age 20. 48-day streak.',
+  },
+  {
+    quote:
+      'I wasted years to porn and endless Shorts. This app is the only thing that has actually helped me reset my focus.',
+    author: 'James',
+    meta: 'Age 22. 90-day streak.',
+  },
+  {
+    quote:
+      'My confidence and screen habits are transformed. I feel present, focused, and back in control of my time.',
+    author: 'Samuel',
+    meta: 'Age 26. 120-day streak.',
+  },
+  {
+    quote:
+      'The 60-second typing challenge and Reels blocker stopped every impulsive relapse and mindless scroll before it started.',
+    author: 'Daniel',
+    meta: 'Age 24. 75-day streak.',
+  },
+];
+---
+
+<section id="learn" class="testimonials-section">
+  <div class="testimonials-container">
+    <!-- Headline block matching reference alignment & highlight -->
+    <div class="testimonials-header">
+      <h2 class="testimonials-title">
+        Simple, science-based tools helping thousands achieve{' '}
+        <span class="highlight">lasting digital wellbeing and freedom from porn.</span>
+      </h2>
+    </div>
+
+    <!-- 3-Card Carousel Stage -->
+    <div class="carousel-stage" id="testimonialStage">
+      <div class="cards-track" id="testimonialCards">
+        <!-- Rendered & ordered dynamically by client script, with SSR initial state -->
+        <article class="testimonial-card is-side" data-slot="left" role="button" tabindex="0" aria-label="Previous testimonial">
+          <div class="quote-mark" aria-hidden="true">“</div>
+          <p class="quote-text">{testimonials[0].quote}</p>
+          <div class="quote-footer">
+            <span class="quote-author">{testimonials[0].author}</span>
+            <span class="quote-meta">{testimonials[0].meta}</span>
+          </div>
+        </article>
+
+        <article class="testimonial-card is-center" data-slot="center">
+          <div class="quote-mark" aria-hidden="true">“</div>
+          <p class="quote-text">{testimonials[1].quote}</p>
+          <div class="quote-footer">
+            <span class="quote-author">{testimonials[1].author}</span>
+            <span class="quote-meta">{testimonials[1].meta}</span>
+          </div>
+        </article>
+
+        <article class="testimonial-card is-side" data-slot="right" role="button" tabindex="0" aria-label="Next testimonial">
+          <div class="quote-mark" aria-hidden="true">“</div>
+          <p class="quote-text">{testimonials[2].quote}</p>
+          <div class="quote-footer">
+            <span class="quote-author">{testimonials[2].author}</span>
+            <span class="quote-meta">{testimonials[2].meta}</span>
+          </div>
+        </article>
+      </div>
+
+      <!-- Pagination Dots -->
+      <div class="carousel-dots" role="tablist" aria-label="Testimonial slides">
+        {testimonials.map((_, idx) => (
+          <button
+            type="button"
+            class={`carousel-dot ${idx === 1 ? 'is-active' : ''}`}
+            data-index={idx}
+            aria-label={`Show testimonial ${idx + 1}`}
+            aria-selected={idx === 1 ? 'true' : 'false'}
+          />
+        ))}
+      </div>
+    </div>
+  </div>
+</section>
+
+<script define:vars={{ testimonials }}>
+  let activeIndex = 1;
+  const total = testimonials.length;
+
+  const stage = document.getElementById('testimonialStage');
+  const leftCard = stage?.querySelector('[data-slot="left"]');
+  const centerCard = stage?.querySelector('[data-slot="center"]');
+  const rightCard = stage?.querySelector('[data-slot="right"]');
+  const dots = stage?.querySelectorAll('.carousel-dot');
+
+  function updateCard(cardEl, item) {
+    if (!cardEl) return;
+    const textEl = cardEl.querySelector('.quote-text');
+    const authorEl = cardEl.querySelector('.quote-author');
+    const metaEl = cardEl.querySelector('.quote-meta');
+    if (textEl) textEl.textContent = item.quote;
+    if (authorEl) authorEl.textContent = item.author;
+    if (metaEl) metaEl.textContent = item.meta;
+  }
+
+  function renderCarousel(newIndex) {
+    activeIndex = (newIndex + total) % total;
+    const prevIndex = (activeIndex - 1 + total) % total;
+    const nextIndex = (activeIndex + 1) % total;
+
+    updateCard(leftCard, testimonials[prevIndex]);
+    updateCard(centerCard, testimonials[activeIndex]);
+    updateCard(rightCard, testimonials[nextIndex]);
+
+    dots?.forEach((dot, idx) => {
+      const active = idx === activeIndex;
+      dot.classList.toggle('is-active', active);
+      dot.setAttribute('aria-selected', String(active));
+    });
+  }
+
+  leftCard?.addEventListener('click', () => renderCarousel(activeIndex - 1));
+  rightCard?.addEventListener('click', () => renderCarousel(activeIndex + 1));
+
+  leftCard?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      renderCarousel(activeIndex - 1);
+    }
+  });
+
+  rightCard?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      renderCarousel(activeIndex + 1);
+    }
+  });
+
+  dots?.forEach((dot) => {
+    dot.addEventListener('click', () => {
+      const idx = Number(dot.getAttribute('data-index'));
+      if (!Number.isNaN(idx)) renderCarousel(idx);
+    });
+  });
+</script>
+
+<style>
+  .testimonials-section {
+    width: 100%;
+    background-color: var(--color-surface-lowest);
+    padding: 96px 0 84px;
+    overflow-x: clip;
+  }
+
+  .testimonials-container {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: 0 28px;
+  }
+
+  .testimonials-header {
+    max-width: 900px;
+    margin: 0 auto 64px;
+  }
+
+  .testimonials-title {
+    font-size: clamp(1.75rem, 3vw, 2.35rem);
+    font-weight: 800;
+    letter-spacing: -0.012em;
+    line-height: 1.38;
+    color: var(--color-text-primary);
+    margin: 0;
+  }
+
+  .testimonials-title .highlight {
+    color: var(--color-primary);
+  }
+
+  /* ==========================================================================
+     3-Card Carousel Stage
+     ========================================================================== */
+  .carousel-stage {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .cards-track {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    width: 100%;
+    max-width: 980px;
+    margin-bottom: 44px;
+  }
+
+  .testimonial-card {
+    background-color: var(--color-bg);
+    border: 1px solid var(--color-outline-variant);
+    border-radius: var(--radius-xl);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: transform var(--transition-fast), box-shadow var(--transition-fast), opacity var(--transition-fast);
+  }
+
+  .testimonial-card.is-center {
+    flex: 0 0 430px;
+    min-height: 324px;
+    padding: 40px 44px 36px;
+    box-shadow: 0 24px 60px var(--shadow-card-active);
+    z-index: 2;
+  }
+
+  .testimonial-card.is-side {
+    flex: 0 0 215px;
+    min-height: 224px;
+    padding: 24px 24px 22px;
+    box-shadow: 0 12px 32px var(--shadow-card);
+    opacity: 0.92;
+    cursor: pointer;
+    z-index: 1;
+  }
+
+  .testimonial-card.is-side:hover {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+
+  .quote-mark {
+    font-family: Georgia, serif;
+    font-weight: 900;
+    line-height: 0.8;
+    color: var(--color-gold);
+    user-select: none;
+  }
+
+  .is-center .quote-mark {
+    font-size: 4rem;
+    margin-bottom: 14px;
+  }
+
+  .is-side .quote-mark {
+    font-size: 2.4rem;
+    margin-bottom: 10px;
+  }
+
+  .quote-text {
+    font-style: italic;
+    color: var(--color-text-primary);
+    margin: 0;
+  }
+
+  .is-center .quote-text {
+    font-size: 1.22rem;
+    line-height: 1.62;
+    letter-spacing: 0.005em;
+    font-weight: 500;
+    margin-bottom: 32px;
+  }
+
+  .is-side .quote-text {
+    font-size: 0.78rem;
+    line-height: 1.58;
+    letter-spacing: 0.005em;
+    font-weight: 500;
+    margin-bottom: 20px;
+  }
+
+  .quote-footer {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .is-center .quote-author {
+    font-size: 0.94rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+  }
+
+  .is-center .quote-meta {
+    font-size: 0.84rem;
+    color: var(--color-text-muted);
+  }
+
+  .is-side .quote-author {
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+  }
+
+  .is-side .quote-meta {
+    font-size: 0.65rem;
+    color: var(--color-text-muted);
+  }
+
+  /* ==========================================================================
+     Pagination Dots
+     ========================================================================== */
+  .carousel-dots {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+  }
+
+  .carousel-dot {
+    width: 11px;
+    height: 11px;
+    padding: 0;
+    border-radius: var(--radius-full);
+    border: 2px solid var(--color-primary);
+    background-color: transparent;
+    cursor: pointer;
+    transition: width var(--transition-fast), background-color var(--transition-fast), opacity var(--transition-fast);
+    opacity: 0.65;
+  }
+
+  .carousel-dot:hover {
+    opacity: 1;
+  }
+
+  .carousel-dot.is-active {
+    width: 28px;
+    background-color: var(--color-primary);
+    opacity: 1;
+  }
+
+  /* ==========================================================================
+     Responsive
+     ========================================================================== */
+  @media (max-width: 960px) {
+    .testimonial-card.is-side {
+      display: none;
+    }
+
+    .testimonial-card.is-center {
+      flex: 1 1 auto;
+      max-width: 460px;
+      width: 100%;
+    }
+  }
+
+  @media (max-width: 560px) {
+    .testimonials-section {
+      padding: 68px 0 60px;
+    }
+
+    .testimonials-header {
+      margin-bottom: 40px;
+    }
+
+    .testimonial-card.is-center {
+      padding: 28px 24px;
+      min-height: 260px;
+    }
+
+    .is-center .quote-text {
+      font-size: 1.08rem;
+    }
+  }
+</style>
