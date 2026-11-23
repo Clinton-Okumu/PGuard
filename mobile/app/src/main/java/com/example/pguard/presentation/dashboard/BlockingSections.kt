@@ -1,15 +1,25 @@
 package com.example.pguard.presentation.dashboard
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
 import com.example.pguard.R
 import com.example.pguard.core.network.model.UserSettingsDto
 import com.example.pguard.engine.accessibility.BrowserInspector
 
 enum class BlockingToggle {
     ADULT_CONTENT,
+    DNS_VPN_SHIELD,
     SHORTS,
     WHATSAPP_CHANNELS,
     INSTAGRAM_REELS,
@@ -22,6 +32,7 @@ enum class BlockingToggle {
 @Composable
 internal fun ContentBlockingSection(
     settings: UserSettingsDto,
+    isDnsVpnEnabled: Boolean = false,
     onToggle: (BlockingToggle, Boolean) -> Unit,
     onInfo: (String, String) -> Unit,
     modifier: Modifier = Modifier
@@ -39,6 +50,19 @@ internal fun ContentBlockingSection(
                 onInfo(
                     "Block adult content",
                     "Automatically blocks pornography, adult websites, and explicit content across supported browsers."
+                )
+            }
+        )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+        ToggleSettingRow(
+            title = "Network DNS & WebView Shield",
+            checked = isDnsVpnEnabled,
+            onCheckedChange = { onToggle(BlockingToggle.DNS_VPN_SHIELD, it) },
+            onInfoClick = {
+                onInfo(
+                    "Network DNS & WebView Shield",
+                    "Runs a 100% on-device local DNS filter via Android's VPN API so adult websites, SafeSearch enforcement, and custom blocked domains are stopped before loading across all browsers and in-app WebViews (Reddit, X, Telegram, Discord). Your browsing traffic never leaves your phone through any remote VPN server."
                 )
             }
         )
@@ -159,6 +183,7 @@ internal fun CustomizeBlockedScreenSection(
     settings: UserSettingsDto,
     onEdit: (SettingsEditor) -> Unit,
     onInfo: (String, String) -> Unit,
+    onPreview: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     SectionCard(
@@ -188,29 +213,48 @@ internal fun CustomizeBlockedScreenSection(
             onInfoClick = {
                 onInfo(
                     "Blocked screen countdown",
-                    "The countdown timer duration before the blocked screen automatically dismisses."
+                    "How long before the blocked screen automatically closes or redirects. Choose Manual to keep it open until you tap a button."
                 )
             }
         )
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
         EditableSettingRow(
-            title = "Redirect after closing (any URL)",
+            title = "Redirect after closing",
             subtitle = redirectLabel(settings.redirectUrl),
             isPremium = true,
             onEditClick = { onEdit(SettingsEditor.REDIRECT) },
             onInfoClick = {
                 onInfo(
                     "Redirect after closing",
-                    "Optionally redirect to a chosen safe URL or homepage when closing the blocked screen."
+                    "Optionally redirect to a chosen safe website when closing the blocked screen. Blocked or adult sites are not allowed."
                 )
             }
         )
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+        Spacer(modifier = Modifier.height(10.dp))
+        OutlinedButton(
+            onClick = onPreview,
+            shape = MaterialTheme.shapes.small,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = "Preview Blocked Screen",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
     }
 }
 
-internal fun countdownLabel(seconds: Int): String =
-    if (seconds <= 0) "Immediately" else "$seconds seconds"
+internal fun countdownLabel(seconds: Int): String = when {
+    seconds <= 0 -> "Manual (no auto-close)"
+    seconds == 1 -> "1 second"
+    else -> "$seconds seconds"
+}
 
 internal fun redirectLabel(url: String): String =
     url.ifBlank { "Not set" }

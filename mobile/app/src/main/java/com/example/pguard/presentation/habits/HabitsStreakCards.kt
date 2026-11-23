@@ -49,6 +49,7 @@ internal fun CleanStreakHeroCard(
     urgesPrevented: Int,
     onSosClick: () -> Unit,
     onResetClick: () -> Unit,
+    onFixProtectionClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -139,7 +140,10 @@ internal fun CleanStreakHeroCard(
                     shape = MaterialTheme.shapes.small,
                     color = primary.copy(alpha = 0.12f),
                     border = BorderStroke(1.dp, primary.copy(alpha = 0.3f)),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(MaterialTheme.shapes.small)
+                        .clickable(onClick = onFixProtectionClick)
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
@@ -155,8 +159,27 @@ internal fun CleanStreakHeroCard(
                         Text(
                             text = streakStatus.inactiveReason,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.weight(1f)
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(primary.copy(alpha = 0.18f))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = if (streakStatus.inactiveReasonType == StreakInactiveReason.ACCESSIBILITY_OFF) {
+                                    "Enable"
+                                } else {
+                                    "Fix"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = primary
+                            )
+                        }
                     }
                 }
             }
@@ -308,10 +331,31 @@ internal fun WeeklyConsistencyCard(
 ) {
     val trackedPastDays = weeklyStatus.filter { it.isTracked && it.isPastOrToday }
     val cleanDaysCount = trackedPastDays.count { it.isClean }
+    val isOnlyTodayPaused = trackedPastDays.size == 1 &&
+        trackedPastDays[0].isToday &&
+        !trackedPastDays[0].isClean &&
+        !trackedPastDays[0].isRelapse
     val percentage = if (trackedPastDays.isNotEmpty()) ((cleanDaysCount.toFloat() / trackedPastDays.size) * 100).toInt() else 100
 
     val primary = MaterialTheme.colorScheme.primary
     val successColor = MaterialTheme.pguardColors.success
+
+    val pillLabel = when {
+        trackedPastDays.isEmpty() -> "Tracking Starts Today"
+        isOnlyTodayPaused -> "Paused"
+        percentage == 100 -> "100% Clean"
+        else -> "$percentage% Clean"
+    }
+    val pillColor = when {
+        isOnlyTodayPaused -> MaterialTheme.colorScheme.onSurfaceVariant
+        trackedPastDays.isNotEmpty() && percentage < 100 -> primary
+        else -> successColor
+    }
+    val pillBackground = if (isOnlyTodayPaused) {
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    } else {
+        pillColor.copy(alpha = 0.12f)
+    }
 
     Surface(
         modifier = modifier
@@ -364,14 +408,14 @@ internal fun WeeklyConsistencyCard(
                 Row(
                     modifier = Modifier
                         .clip(CircleShape)
-                        .background(successColor.copy(alpha = 0.12f))
+                        .background(pillBackground)
                         .padding(horizontal = 10.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (trackedPastDays.isEmpty()) "Tracking Starts Today" else if (percentage == 100) "100% Clean" else "$percentage% Clean",
+                        text = pillLabel,
                         style = MaterialTheme.typography.labelSmall,
-                        color = successColor
+                        color = pillColor
                     )
                 }
             }
@@ -395,6 +439,7 @@ internal fun WeeklyConsistencyCard(
                             }
                         )
                         Spacer(modifier = Modifier.height(8.dp))
+                        val isPausedTrackedDay = status.isTracked && status.isPastOrToday && !status.isClean && !status.isRelapse
                         Box(
                             modifier = Modifier
                                 .size(32.dp)
@@ -402,8 +447,9 @@ internal fun WeeklyConsistencyCard(
                                 .background(
                                     when {
                                         !status.isTracked || !status.isPastOrToday -> MaterialTheme.colorScheme.surfaceContainer
+                                        status.isRelapse -> primary.copy(alpha = 0.15f)
                                         status.isClean -> successColor.copy(alpha = 0.15f)
-                                        else -> primary.copy(alpha = 0.15f)
+                                        else -> MaterialTheme.colorScheme.surfaceContainerHigh
                                     }
                                 )
                                 .border(
@@ -411,22 +457,16 @@ internal fun WeeklyConsistencyCard(
                                     color = when {
                                         status.isToday -> primary
                                         !status.isTracked || !status.isPastOrToday -> MaterialTheme.colorScheme.outlineVariant
+                                        status.isRelapse -> primary
                                         status.isClean -> successColor
-                                        else -> primary
+                                        else -> MaterialTheme.colorScheme.outline
                                     },
                                     shape = CircleShape
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (status.isTracked && status.isPastOrToday) {
-                                if (status.isClean) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.ic_check_circle),
-                                        contentDescription = null,
-                                        tint = successColor,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                } else {
+                            when {
+                                status.isTracked && status.isPastOrToday && status.isRelapse -> {
                                     Icon(
                                         painter = painterResource(id = R.drawable.ic_close),
                                         contentDescription = null,
@@ -434,13 +474,22 @@ internal fun WeeklyConsistencyCard(
                                         modifier = Modifier.size(15.dp)
                                     )
                                 }
-                            } else if (!status.isTracked && status.isPastOrToday) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(4.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.outline)
-                                )
+                                status.isTracked && status.isPastOrToday && status.isClean -> {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_check_circle),
+                                        contentDescription = null,
+                                        tint = successColor,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                                isPausedTrackedDay || (!status.isTracked && status.isPastOrToday) -> {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(4.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.outline)
+                                    )
+                                }
                             }
                         }
                     }

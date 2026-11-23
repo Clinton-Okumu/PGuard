@@ -2,11 +2,13 @@ package com.example.pguard.presentation.focus
 
 import kotlinx.serialization.Serializable
 import java.util.Calendar
+import java.util.Locale
 import java.util.UUID
 
 @Serializable
 data class FocusSchedule(
     val id: String = UUID.randomUUID().toString(),
+    val name: String = "",
     val startHour: Int = 0,
     val startMinute: Int = 0,
     val endHour: Int = 5,
@@ -24,6 +26,9 @@ data class FocusSchedule(
     ),
     val allowedApps: Set<String> = emptySet()
 ) {
+    val displayName: String
+        get() = name.trim().ifBlank { "Focus Session" }
+
     val durationMinutes: Int
         get() {
             val startTotal = startHour * 60 + startMinute
@@ -34,6 +39,9 @@ data class FocusSchedule(
                 (24 * 60 - startTotal) + endTotal
             }
         }
+
+    val isValidDuration: Boolean
+        get() = durationMinutes > 0
 
     val formattedDuration: String
         get() {
@@ -47,20 +55,22 @@ data class FocusSchedule(
             }
         }
 
+    val formattedWindowOnly: String
+        get() = String.format(Locale.US, "%02d:%02d - %02d:%02d", startHour, startMinute, endHour, endMinute)
+
     val formattedTimeRange: String
-        get() = String.format(
-            "%02d:%02d - %02d:%02d (%s)",
-            startHour,
-            startMinute,
-            endHour,
-            endMinute,
-            formattedDuration
-        )
+        get() = "$formattedWindowOnly ($formattedDuration)"
 
     val formattedDaysBadge: String
         get() {
             if (repeatDaily || repeatDays.size >= 7) return "Daily"
-            val weekdays = setOf(Calendar.MONDAY, Calendar.TUESDAY, Calendar.WEDNESDAY, Calendar.THURSDAY, Calendar.FRIDAY)
+            val weekdays = setOf(
+                Calendar.MONDAY,
+                Calendar.TUESDAY,
+                Calendar.WEDNESDAY,
+                Calendar.THURSDAY,
+                Calendar.FRIDAY
+            )
             val weekends = setOf(Calendar.SATURDAY, Calendar.SUNDAY)
             if (repeatDays == weekdays) return "Weekdays"
             if (repeatDays == weekends) return "Weekends"
@@ -87,7 +97,7 @@ data class FocusSchedule(
         }
 
     fun isCurrentlyActive(cal: Calendar = Calendar.getInstance()): Boolean {
-        if (!isEnabled) return false
+        if (!isEnabled || !isValidDuration) return false
 
         val currentMins = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
         val startMins = startHour * 60 + startMinute
@@ -105,7 +115,6 @@ data class FocusSchedule(
         return if (startMins <= endMins) {
             currentDay in repeatDays && currentMins in startMins until endMins
         } else {
-            // Spans overnight:
             if (currentMins >= startMins && currentDay in repeatDays) {
                 true
             } else if (currentMins < endMins) {
@@ -113,6 +122,28 @@ data class FocusSchedule(
                 prevDay in repeatDays
             } else {
                 false
+            }
+        }
+    }
+
+    companion object {
+        fun activeSchedules(
+            schedules: List<FocusSchedule>,
+            cal: Calendar = Calendar.getInstance()
+        ): List<FocusSchedule> = schedules.filter { it.isCurrentlyActive(cal) }
+
+        /**
+         * Enforces the strictest intersection when multiple focus schedules overlap:
+         * an app is allowed only if it is allowed by every currently active schedule.
+         */
+        fun isAllowedAcrossSchedules(
+            packageName: String,
+            activeSchedules: List<FocusSchedule>,
+            isEssentialSystemPackage: Boolean
+        ): Boolean {
+            if (activeSchedules.isEmpty() || isEssentialSystemPackage) return true
+            return activeSchedules.all { schedule ->
+                schedule.allowedApps.any { it.equals(packageName, ignoreCase = true) }
             }
         }
     }

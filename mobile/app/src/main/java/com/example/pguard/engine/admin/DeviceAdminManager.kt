@@ -23,15 +23,20 @@ object DeviceAdminManager {
         }
     }
 
+    fun buildEnableDeviceAdminIntent(context: Context): Intent {
+        val component = getComponentName(context)
+        return Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+            putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, component)
+            putExtra(
+                DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                "Activate Device Administrator to protect PGuard from unauthorized removal until you pass your accountability check."
+            )
+        }
+    }
+
     fun requestEnableDeviceAdmin(context: Context) {
         try {
-            val component = getComponentName(context)
-            val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-                putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, component)
-                putExtra(
-                    DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                    "Activate Device Administrator to prevent PGuard from being uninstalled without passing your accountability check."
-                )
+            val intent = buildEnableDeviceAdminIntent(context).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)

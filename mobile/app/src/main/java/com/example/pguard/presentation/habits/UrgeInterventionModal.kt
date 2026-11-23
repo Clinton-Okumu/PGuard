@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
@@ -48,16 +49,26 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import com.example.pguard.R
+import com.example.pguard.presentation.focus.FocusModeManager
 import com.example.pguard.presentation.theme.pguardColors
 import kotlinx.coroutines.delay
 
 @Composable
 internal fun UrgeInterventionModal(
     incompleteHabit: PersistentHabit?,
+    isAccessibilityRunning: Boolean = true,
+    onOpenAccessibilitySettings: () -> Unit = {},
     onDismiss: () -> Unit,
     onUrgeOvercome: () -> Unit
 ) {
-    var timerSeconds by remember { mutableIntStateOf(120) }
+    val context = LocalContext.current
+    val hadLockdown = remember { FocusModeManager.isUrgeLockdownActive(context) }
+    var timerSeconds by remember {
+        mutableIntStateOf(
+            FocusModeManager.getUrgeLockdownRemainingSeconds(context).let { if (it > 0) it else 120 }
+        )
+    }
+    var confirmUnlockCountdown by remember { mutableIntStateOf(-1) }
     val isRunning = true
     val haptic = LocalHapticFeedback.current
 
@@ -68,11 +79,22 @@ internal fun UrgeInterventionModal(
     LaunchedEffect(isRunning) {
         while (timerSeconds > 0) {
             delay(1000L)
-            timerSeconds--
+            timerSeconds = if (hadLockdown) {
+                FocusModeManager.getUrgeLockdownRemainingSeconds(context)
+            } else {
+                (timerSeconds - 1).coerceAtLeast(0)
+            }
         }
     }
 
-    val cycleTime = (120 - timerSeconds) % 16
+    LaunchedEffect(confirmUnlockCountdown) {
+        if (confirmUnlockCountdown > 0) {
+            delay(1000L)
+            confirmUnlockCountdown--
+        }
+    }
+
+    val cycleTime = (120 - timerSeconds).coerceAtLeast(0) % 16
     val (phaseText, targetScale) = when (cycleTime) {
         in 0..3 -> "Inhale deeply (4s)" to 1.25f
         in 4..7 -> "Hold your breath (4s)" to 1.25f
@@ -133,7 +155,7 @@ internal fun UrgeInterventionModal(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Urge Protocol • Focus Active",
+                            text = if (isAccessibilityRunning) "Urge Protocol • Focus Active" else "Breathing Protocol • App Lock OFF",
                             style = MaterialTheme.typography.labelSmall,
                             color = primary
                         )
@@ -156,11 +178,51 @@ internal fun UrgeInterventionModal(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                if (!isAccessibilityRunning && timerSeconds > 0) {
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = primary.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, primary.copy(alpha = 0.35f)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(MaterialTheme.shapes.small)
+                            .clickable(onClick = onOpenAccessibilitySettings)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_feature_shield),
+                                contentDescription = null,
+                                tint = primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Accessibility Service is OFF — other apps won't be locked until enabled.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Enable",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = primary
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+
                 Text(
-                    text = if (timerSeconds > 0)
-                        "Phone is locked down from use for 2 minutes just like Focus Mode. Non-essential apps and notifications are blocked."
-                    else
-                        "You survived the peak urge wave! Your dopamine receptors are resting. Claim your victory below.",
+                    text = when {
+                        timerSeconds <= 0 -> "You survived the peak urge wave! Your dopamine receptors are resting. Claim your victory below."
+                        isAccessibilityRunning -> "Phone is locked down from use for 2 minutes just like Focus Mode. Non-essential apps and notifications are blocked."
+                        else -> "Breathe through this 2-minute urge wave. Enable Accessibility Service to lock other apps automatically."
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center
@@ -327,7 +389,7 @@ internal fun UrgeInterventionModal(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "Phone Locked ($formattedTime)",
+                        text = if (isAccessibilityRunning) "Phone Locked ($formattedTime)" else "Hold Steady ($formattedTime)",
                         style = MaterialTheme.typography.labelLarge
                     )
                 }
@@ -335,15 +397,42 @@ internal fun UrgeInterventionModal(
         },
         dismissButton = {
             if (timerSeconds > 0) {
-                TextButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.padding(top = 2.dp)
-                ) {
-                    Text(
-                        text = "Emergency Unlock",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                if (confirmUnlockCountdown < 0) {
+                    TextButton(
+                        onClick = { confirmUnlockCountdown = 5 },
+                        modifier = Modifier.padding(top = 2.dp)
+                    ) {
+                        Text(
+                            text = "Emergency Unlock",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        TextButton(onClick = { confirmUnlockCountdown = -1 }) {
+                            Text(
+                                text = "Stay Strong",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = successColor,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        TextButton(
+                            onClick = onDismiss,
+                            enabled = confirmUnlockCountdown == 0
+                        ) {
+                            Text(
+                                text = if (confirmUnlockCountdown > 0) "Wait ${confirmUnlockCountdown}s..." else "Unlock Now",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (confirmUnlockCountdown == 0) primary else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
             }
         },
@@ -449,11 +538,22 @@ internal fun ReflectiveRelapseDialog(
                 Spacer(modifier = Modifier.height(6.dp))
                 OutlinedTextField(
                     value = reflectionNote,
-                    onValueChange = { reflectionNote = it },
+                    onValueChange = {
+                        if (it.length <= HabitsManager.MAX_RELAPSE_NOTE_LENGTH) {
+                            reflectionNote = it
+                        }
+                    },
                     placeholder = {
                         Text(
                             "e.g. Keep phone outside the bedroom",
                             style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    supportingText = {
+                        Text(
+                            text = "${reflectionNote.length}/${HabitsManager.MAX_RELAPSE_NOTE_LENGTH}",
+                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     },

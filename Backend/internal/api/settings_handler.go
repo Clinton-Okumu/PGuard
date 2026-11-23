@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 
 	"Backend/internal/middleware"
 	"Backend/internal/store"
@@ -36,6 +37,7 @@ type updateSettingsRequest struct {
 	BlockedScreenMessage     *string `json:"blocked_screen_message"`
 	BlockedScreenCountdown   *int    `json:"blocked_screen_countdown"`
 	RedirectURL              *string `json:"redirect_url"`
+	AccountabilityMode       *string `json:"accountability_mode"`
 }
 
 func (h *SettingsHandler) HandleGetSettings(w http.ResponseWriter, r *http.Request) {
@@ -102,7 +104,11 @@ func (h *SettingsHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Re
 	}
 	if req.BlockedScreenMessage != nil {
 		msg := strings.TrimSpace(*req.BlockedScreenMessage)
-		if len(msg) > 300 {
+		if msg == "" {
+			_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Blocked screen message cannot be empty"})
+			return
+		}
+		if utf8.RuneCountInString(msg) > 300 {
 			_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Blocked screen message must be 300 characters or fewer"})
 			return
 		}
@@ -137,6 +143,16 @@ func (h *SettingsHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Re
 			}
 		}
 		current.RedirectURL = rawURL
+	}
+	if req.AccountabilityMode != nil {
+		mode := strings.ToLower(strings.TrimSpace(*req.AccountabilityMode))
+		switch mode {
+		case "none", "friend", "self", "time_delay":
+			current.AccountabilityMode = mode
+		default:
+			_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "accountability_mode must be 'none', 'friend', 'self', or 'time_delay'"})
+			return
+		}
 	}
 
 	updated, err := h.settingsStore.Upsert(current)

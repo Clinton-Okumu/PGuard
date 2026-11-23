@@ -2,6 +2,11 @@
     <string name="app_name">PGuard</string>
     <string name="accessibility_service_label">PGuard Protection Service</string>
     <string name="accessibility_service_description">PGuard monitors and blocks adult websites, enforces habit limits, and protects against unauthorized uninstallation or tampering.</string>
-    <string name="device_admin_label">PGuard Uninstall Protection</string>
-    <string name="device_admin_description">Prevents PGuard from being uninstalled or tampered with without passing your accountability check.</string>
+    <string name="device_admin_label">PGuard Tamper Protection</string>
+    <string name="device_admin_description">Protects PGuard from unauthorized removal until you pass your accountability check.</string>
+    <string name="vpn_service_label">PGuard DNS Shield</string>
+    <string name="vpn_notification_channel_name">DNS Content Shield</string>
+    <string name="vpn_notification_channel_desc">Local on-device DNS filtering to block adult and custom domains across browsers and in-app WebViews.</string>
+    <string name="vpn_notification_title">PGuard DNS Shield Active</string>
+    <string name="vpn_notification_text">Filtering adult and blocked domains locally across all apps.</string>
 </resources>

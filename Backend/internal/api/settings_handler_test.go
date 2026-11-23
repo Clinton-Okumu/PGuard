@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"Backend/internal/middleware"
@@ -151,7 +152,7 @@ func TestSettingsHandler_HandleUpdateSettings(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, rr.Code)
 	})
 
-	t.Run("returns bad request for message exceeding 300 chars", func(t *testing.T) {
+	t.Run("returns bad request for message exceeding 300 runes", func(t *testing.T) {
 		longMsg := string(bytes.Repeat([]byte("a"), 301))
 		payload := updateSettingsRequest{
 			BlockedScreenMessage: &longMsg,
@@ -165,6 +166,32 @@ func TestSettingsHandler_HandleUpdateSettings(t *testing.T) {
 		handler.HandleUpdateSettings(rr, req)
 
 		assert.Equal(t, http.StatusBadRequest, rr.Code)
+
+		tooManyRunes := strings.Repeat("🛡", 301)
+		body2, _ := json.Marshal(updateSettingsRequest{BlockedScreenMessage: &tooManyRunes})
+		req2 := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body2))
+		req2 = middleware.SetUser(req2, user)
+		rr2 := httptest.NewRecorder()
+		handler.HandleUpdateSettings(rr2, req2)
+		assert.Equal(t, http.StatusBadRequest, rr2.Code)
+	})
+
+	t.Run("rejects empty message and accepts multi-byte UTF-8 message within 300 runes", func(t *testing.T) {
+		empty := "   "
+		body, _ := json.Marshal(updateSettingsRequest{BlockedScreenMessage: &empty})
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+		req = middleware.SetUser(req, user)
+		rr := httptest.NewRecorder()
+		handler.HandleUpdateSettings(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+
+		emojiMsg := strings.Repeat("🛡", 150)
+		body2, _ := json.Marshal(updateSettingsRequest{BlockedScreenMessage: &emojiMsg})
+		req2 := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body2))
+		req2 = middleware.SetUser(req2, user)
+		rr2 := httptest.NewRecorder()
+		handler.HandleUpdateSettings(rr2, req2)
+		assert.Equal(t, http.StatusOK, rr2.Code)
 	})
 
 	t.Run("returns bad request for unsafe redirect_url scheme", func(t *testing.T) {
@@ -180,6 +207,34 @@ func TestSettingsHandler_HandleUpdateSettings(t *testing.T) {
 
 		handler.HandleUpdateSettings(rr, req)
 
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
+
+	t.Run("updates valid accountability_mode and rejects invalid modes", func(t *testing.T) {
+		for _, valid := range []string{"friend", "self", "time_delay", "none"} {
+			mode := valid
+			body, _ := json.Marshal(updateSettingsRequest{AccountabilityMode: &mode})
+			req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+			req = middleware.SetUser(req, user)
+			rr := httptest.NewRecorder()
+
+			handler.HandleUpdateSettings(rr, req)
+
+			assert.Equal(t, http.StatusOK, rr.Code)
+			var resp struct {
+				Settings store.UserSettings `json:"settings"`
+			}
+			require.NoError(t, json.NewDecoder(rr.Body).Decode(&resp))
+			assert.Equal(t, valid, resp.Settings.AccountabilityMode)
+		}
+
+		invalid := "bypass"
+		body, _ := json.Marshal(updateSettingsRequest{AccountabilityMode: &invalid})
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/settings", bytes.NewReader(body))
+		req = middleware.SetUser(req, user)
+		rr := httptest.NewRecorder()
+
+		handler.HandleUpdateSettings(rr, req)
 		assert.Equal(t, http.StatusBadRequest, rr.Code)
 	})
 }

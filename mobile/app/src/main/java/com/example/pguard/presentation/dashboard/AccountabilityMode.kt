@@ -56,15 +56,32 @@ sealed interface ProtectedAction {
         override val title: String get() = "Remove Accountability Partner"
         override val identifier: String get() = "DISCONNECT_PARTNER"
     }
+
+    data object Logout : ProtectedAction {
+        override val title: String get() = "Log Out"
+        override val identifier: String get() = "LOGOUT"
+    }
+
+    data object UninstallApp : ProtectedAction {
+        override val title: String get() = "Uninstall App"
+        override val identifier: String get() = "UNINSTALL_APP"
+    }
 }
 
 fun targetDisplayName(target: String?): String {
     if (target == null) return "Protection Feature"
     if (target == "DISCONNECT_PARTNER") return "Remove Accountability Partner"
     if (target == "OPEN_CHANGE_MODE") return "Change Accountability Mode"
-    if (target.startsWith("BLOCKLIST_APP:")) return "Blocklist App"
-    if (target.startsWith("BLOCKLIST_KW:")) return "Blocklist Keyword (${target.removePrefix("BLOCKLIST_KW:")})"
+    if (target == "LOGOUT") return "Log Out"
+    if (target == "UNINSTALL_APP") return "Uninstall App"
+    if (target.startsWith("BLOCKLIST_APP:")) return "Unblock App"
+    if (target.startsWith("BLOCKLIST_KW:")) return "Unblock ${target.removePrefix("BLOCKLIST_KW:")}"
+    if (target.startsWith("WHITELIST_ADD_APP:")) return "Whitelist App"
+    if (target.startsWith("WHITELIST_ADD_KW:")) return "Whitelist ${target.removePrefix("WHITELIST_ADD_KW:")}"
+    if (target.startsWith("FOCUS_SCHEDULE_TOGGLE:")) return "Disable Focus Schedule"
+    if (target.startsWith("FOCUS_SCHEDULE_DELETE:")) return "Delete Focus Schedule"
     if (target.startsWith("FOCUS_SCHEDULE:")) return "Focus Schedule"
+    if (target == "FOCUS_QUICK") return "Stop Quick Focus"
     if (target.startsWith("MODE_")) {
         val modeCode = target.removePrefix("MODE_")
         val mode = AccountabilityMode.fromCode(modeCode)
@@ -75,6 +92,7 @@ fun targetDisplayName(target: String?): String {
 
 fun featureDisplayName(toggleName: String?): String = when (toggleName) {
     BlockingToggle.ADULT_CONTENT.name -> "Adult Content"
+    BlockingToggle.DNS_VPN_SHIELD.name -> "Network DNS Shield"
     BlockingToggle.SHORTS.name -> "YouTube Shorts"
     BlockingToggle.WHATSAPP_CHANNELS.name -> "WhatsApp Channels"
     BlockingToggle.INSTAGRAM_REELS.name -> "Instagram Reels"

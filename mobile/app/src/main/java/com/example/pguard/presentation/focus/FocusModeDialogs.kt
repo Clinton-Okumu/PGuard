@@ -1,9 +1,8 @@
 package com.example.pguard.presentation.focus
 
 import android.app.TimePickerDialog
-import java.util.Calendar
+import android.text.format.DateFormat
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,13 +16,18 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,10 +43,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.example.pguard.R
+import java.util.Calendar
+import java.util.Locale
 
 @Composable
 fun FocusHelpDialog(onDismiss: () -> Unit) {
@@ -61,13 +67,13 @@ fun FocusHelpDialog(onDismiss: () -> Unit) {
                     .padding(22.dp)
             ) {
                 Text(
-                    text = "What is Schedule?",
+                    text = "Quick Focus & Schedules",
                     style = MaterialTheme.typography.titleMedium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "If you want to block all apps except few selected apps for a particular time period, then you can schedule a focus time.\nExample: 4:00 PM - 5:00 PM.",
+                    text = "Use Quick Focus for an instant timed session, or create recurring daily/weekly schedules (for example 22:00 - 06:00 Sleep or 09:00 - 12:00 Deep Work) to block distracting apps.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -81,7 +87,7 @@ fun FocusHelpDialog(onDismiss: () -> Unit) {
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "By default only 'Call/SMS' apps are allowed during active focus time, but this option used to allow apps you want to access during active focus time.",
+                    text = "Calls, Messages, Contacts, Keyboards, and PGuard are allowed by default so you stay reachable. Pick any extra apps you need during a session before saving; when schedules overlap, only apps allowed by every active schedule stay open.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -110,102 +116,6 @@ fun FocusHelpDialog(onDismiss: () -> Unit) {
 }
 
 @Composable
-fun FocusAccountabilityGuardDialog(
-    partnerModeTitle: String = "Team",
-    onDismiss: () -> Unit
-) {
-    val primary = MaterialTheme.colorScheme.primary
-
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = MaterialTheme.shapes.large,
-            color = MaterialTheme.colorScheme.surfaceContainer,
-            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "To disable or reset this option, please contact our support team, as you have chosen '$partnerModeTitle' as your accountability partner.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f),
-                    textAlign = TextAlign.Start
-                )
-
-                Spacer(modifier = Modifier.height(24.dp))
-
-                Button(
-                    onClick = onDismiss,
-                    colors = ButtonDefaults.buttonColors(containerColor = primary),
-                    shape = MaterialTheme.shapes.small,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp)
-                ) {
-                    Text(
-                        text = "Okay",
-                        color = MaterialTheme.colorScheme.onPrimary,
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun FreeLimitPillToast(
-    onDismiss: () -> Unit,
-    onUpgradeClick: () -> Unit = {}
-) {
-    Surface(
-        shape = MaterialTheme.shapes.medium,
-        color = MaterialTheme.colorScheme.surfaceContainer,
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        shadowElevation = 8.dp,
-        modifier = Modifier
-            .fillMaxWidth(0.92f)
-            .clickable {
-                onUpgradeClick()
-                onDismiss()
-            }
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(34.dp)
-                    .clip(MaterialTheme.shapes.extraSmall)
-                    .background(MaterialTheme.colorScheme.primary),
-                contentAlignment = Alignment.Center
-            ) {
-                Image(
-                    painter = painterResource(id = R.drawable.ic_pguard_globe_shield),
-                    contentDescription = null,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-
-            Text(
-                text = "Only one focus time allowed in the free version.",
-                color = MaterialTheme.colorScheme.onSurface,
-                style = MaterialTheme.typography.bodySmall,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-@Composable
 fun CreateScheduleDialog(
     initialSchedule: FocusSchedule? = null,
     onDismiss: () -> Unit,
@@ -218,11 +128,15 @@ fun CreateScheduleDialog(
     val currentHour = nowCal.get(Calendar.HOUR_OF_DAY)
     val currentMinute = nowCal.get(Calendar.MINUTE)
     val defaultEndHour = (currentHour + 1) % 24
+    val use24Hour = remember(context) { DateFormat.is24HourFormat(context) }
 
-    var startHour by remember { mutableIntStateOf(initialSchedule?.startHour ?: currentHour) }
-    var startMinute by remember { mutableIntStateOf(initialSchedule?.startMinute ?: currentMinute) }
-    var endHour by remember { mutableIntStateOf(initialSchedule?.endHour ?: defaultEndHour) }
-    var endMinute by remember { mutableIntStateOf(initialSchedule?.endMinute ?: currentMinute) }
+    var scheduleName by remember(initialSchedule?.id) {
+        mutableStateOf(initialSchedule?.name.orEmpty())
+    }
+    var startHour by remember(initialSchedule?.id) { mutableIntStateOf(initialSchedule?.startHour ?: currentHour) }
+    var startMinute by remember(initialSchedule?.id) { mutableIntStateOf(initialSchedule?.startMinute ?: currentMinute) }
+    var endHour by remember(initialSchedule?.id) { mutableIntStateOf(initialSchedule?.endHour ?: defaultEndHour) }
+    var endMinute by remember(initialSchedule?.id) { mutableIntStateOf(initialSchedule?.endMinute ?: currentMinute) }
 
     val allDays = remember {
         setOf(
@@ -251,21 +165,31 @@ fun CreateScheduleDialog(
         )
     }
 
-    var selectedDays by remember {
+    var selectedDays by remember(initialSchedule?.id) {
         mutableStateOf(initialSchedule?.repeatDays ?: allDays)
     }
 
     fun showTimePicker(initialH: Int, initialM: Int, onTimeSet: (Int, Int) -> Unit) {
-        TimePickerDialog(context, { _, h, m -> onTimeSet(h, m) }, initialH, initialM, true).show()
+        TimePickerDialog(context, { _, h, m -> onTimeSet(h, m) }, initialH, initialM, use24Hour).show()
     }
 
-    val tempSchedule = remember(startHour, startMinute, endHour, endMinute, selectedDays, selectedAllowedApps) {
+    val tempSchedule = remember(
+        scheduleName,
+        startHour,
+        startMinute,
+        endHour,
+        endMinute,
+        selectedDays,
+        selectedAllowedApps
+    ) {
         FocusSchedule(
             id = initialSchedule?.id ?: java.util.UUID.randomUUID().toString(),
+            name = scheduleName.trim().take(40),
             startHour = startHour,
             startMinute = startMinute,
             endHour = endHour,
             endMinute = endMinute,
+            isEnabled = initialSchedule?.isEnabled ?: true,
             repeatDaily = selectedDays.size >= 7,
             repeatDays = selectedDays,
             allowedApps = selectedAllowedApps
@@ -284,6 +208,7 @@ fun CreateScheduleDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(22.dp)
             ) {
                 Text(
@@ -292,7 +217,23 @@ fun CreateScheduleDialog(
                     color = MaterialTheme.colorScheme.onSurface
                 )
 
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(14.dp))
+
+                OutlinedTextField(
+                    value = scheduleName,
+                    onValueChange = { if (it.length <= 40) scheduleName = it },
+                    label = { Text("Label (optional)") },
+                    placeholder = { Text("e.g. Deep Work, Sleep, Study") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Surface(
                     shape = MaterialTheme.shapes.medium,
@@ -322,7 +263,7 @@ fun CreateScheduleDialog(
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = String.format("%02d:%02d", startHour, startMinute),
+                                    text = String.format(Locale.US, "%02d:%02d", startHour, startMinute),
                                     style = MaterialTheme.typography.headlineSmall,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
@@ -355,7 +296,7 @@ fun CreateScheduleDialog(
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
-                                    text = String.format("%02d:%02d", endHour, endMinute),
+                                    text = String.format(Locale.US, "%02d:%02d", endHour, endMinute),
                                     style = MaterialTheme.typography.headlineSmall,
                                     color = MaterialTheme.colorScheme.onSurface
                                 )
@@ -366,11 +307,19 @@ fun CreateScheduleDialog(
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        Text(
-                            text = "${tempSchedule.formattedDuration} focus window",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = primary
-                        )
+                        if (tempSchedule.isValidDuration) {
+                            Text(
+                                text = "${tempSchedule.formattedDuration} focus window",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = primary
+                            )
+                        } else {
+                            Text(
+                                text = "Start and end times must be different.",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
                     }
                 }
 
@@ -385,13 +334,13 @@ fun CreateScheduleDialog(
 
                 val daysList = remember {
                     listOf(
-                        Triple(Calendar.MONDAY, "M", "Mon"),
-                        Triple(Calendar.TUESDAY, "T", "Tue"),
-                        Triple(Calendar.WEDNESDAY, "W", "Wed"),
-                        Triple(Calendar.THURSDAY, "T", "Thu"),
-                        Triple(Calendar.FRIDAY, "F", "Fri"),
-                        Triple(Calendar.SATURDAY, "S", "Sat"),
-                        Triple(Calendar.SUNDAY, "S", "Sun")
+                        Calendar.MONDAY to "M",
+                        Calendar.TUESDAY to "T",
+                        Calendar.WEDNESDAY to "W",
+                        Calendar.THURSDAY to "T",
+                        Calendar.FRIDAY to "F",
+                        Calendar.SATURDAY to "S",
+                        Calendar.SUNDAY to "S"
                     )
                 }
 
@@ -399,9 +348,7 @@ fun CreateScheduleDialog(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    for (dayItem in daysList) {
-                        val dayInt = dayItem.first
-                        val letter = dayItem.second
+                    for ((dayInt, letter) in daysList) {
                         val isSelected = dayInt in selectedDays
                         Box(
                             modifier = Modifier
@@ -519,7 +466,7 @@ fun CreateScheduleDialog(
 
                             Column {
                                 Text(
-                                    text = if (selectedAllowedApps.isEmpty()) "Allowed Apps (0)" else "Allowed Apps (${selectedAllowedApps.size})",
+                                    text = "Allowed Apps (${selectedAllowedApps.size})",
                                     color = MaterialTheme.colorScheme.onSurface,
                                     style = MaterialTheme.typography.titleSmall
                                 )
@@ -555,19 +502,153 @@ fun CreateScheduleDialog(
                     }
                     Spacer(modifier = Modifier.width(10.dp))
                     Button(
-                        onClick = {
-                            onSaveSchedule(tempSchedule)
-                            onDismiss()
-                        },
+                        onClick = { onSaveSchedule(tempSchedule) },
+                        enabled = tempSchedule.isValidDuration,
                         colors = ButtonDefaults.buttonColors(containerColor = primary),
                         shape = MaterialTheme.shapes.small,
                         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp)
                     ) {
                         Text(
-                            text = "Save Schedule",
+                            text = if (initialSchedule == null) "Save Schedule" else "Update",
                             color = MaterialTheme.colorScheme.onPrimary,
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun QuickFocusDialog(
+    selectedAllowedApps: Set<String>,
+    onPickAllowedAppsClick: (Set<String>) -> Unit,
+    onStartQuickFocus: (durationMinutes: Int, allowedApps: Set<String>) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val presets = listOf(15, 30, 45, 60, 90)
+    var selectedMinutes by remember { mutableIntStateOf(30) }
+    val primary = MaterialTheme.colorScheme.primary
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(22.dp)
+            ) {
+                Text(
+                    text = "Start Quick Focus",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Block distracting apps immediately for a one-off focus sprint.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "DURATION",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    presets.forEach { mins ->
+                        val active = selectedMinutes == mins
+                        Surface(
+                            shape = MaterialTheme.shapes.small,
+                            color = if (active) primary else MaterialTheme.colorScheme.surfaceContainerHigh,
+                            border = if (active) null else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier
+                                .weight(1f)
+                                .clickable { selectedMinutes = mins }
+                        ) {
+                            Text(
+                                text = if (mins >= 60 && mins % 60 == 0) "${mins / 60}h" else "${mins}m",
+                                color = if (active) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(vertical = 10.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = MaterialTheme.colorScheme.surfaceContainerLow,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onPickAllowedAppsClick(selectedAllowedApps) }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Allowed Apps (${selectedAllowedApps.size})",
+                                color = MaterialTheme.colorScheme.onSurface,
+                                style = MaterialTheme.typography.titleSmall
+                            )
+                            Text(
+                                text = "Optional exceptions for this sprint",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_chevron_right),
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(22.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Cancel", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Button(
+                        onClick = { onStartQuickFocus(selectedMinutes, selectedAllowedApps) },
+                        colors = ButtonDefaults.buttonColors(containerColor = primary),
+                        shape = MaterialTheme.shapes.small
+                    ) {
+                        Text(
+                            text = "Start Focus Now",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary
                         )
                     }
                 }

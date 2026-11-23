@@ -1,5 +1,8 @@
 package com.example.pguard.presentation.habits
 
+import android.content.Intent
+import android.os.SystemClock
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +23,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,10 +43,10 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.pguard.R
 import com.example.pguard.core.common.runSuspendCatching
 import com.example.pguard.core.network.NetworkClient
-import com.example.pguard.core.network.model.CreateHabitRequest
 import com.example.pguard.core.network.model.ResetStreakRequest
 import com.example.pguard.core.network.model.UserDto
 import com.example.pguard.engine.accessibility.PGuardAccessibilityService
+import com.example.pguard.engine.accountability.SecurityAlertReporter
 import com.example.pguard.presentation.dashboard.BlockingViewModel
 import com.example.pguard.presentation.focus.FocusModeManager
 import com.example.pguard.presentation.theme.CoralPrimary
@@ -56,6 +60,7 @@ fun HabitsScreen(
     user: UserDto? = null,
     blockingViewModel: BlockingViewModel? = null,
     isActiveTab: Boolean = true,
+    onOpenBlockingTab: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -69,21 +74,22 @@ fun HabitsScreen(
     val isBlockingLoading = blockingState?.isLoading ?: false
     val isAccessibilityRunning by PGuardAccessibilityService.isRunning.collectAsState()
 
-    var refreshKey by remember { mutableIntStateOf(0) }
-
     var streakStatus by remember { mutableStateOf(HabitsManager.getStreakStatus(context)) }
     var urgesPrevented by remember { mutableIntStateOf(HabitsManager.getUrgesPrevented(context)) }
     var weeklyConsistency by remember { mutableStateOf(HabitsManager.getWeeklyConsistency(context)) }
 
     val habits = remember { mutableStateListOf<PersistentHabit>() }
 
-    var uncelebratedMilestone by remember { mutableStateOf<MilestoneBadge?>(null) }
+    var selectedMilestoneDialog by remember { mutableStateOf<Pair<MilestoneBadge, Boolean>?>(null) }
     var showDailyStoicDialog by remember { mutableStateOf(false) }
     var showSosIntervention by remember { mutableStateOf(false) }
     var showRelapseDialog by remember { mutableStateOf(false) }
     var showAddHabitDialog by remember { mutableStateOf(false) }
     var showMonthlyCalendarDialog by remember { mutableStateOf(false) }
     var habitToDelete by remember { mutableStateOf<PersistentHabit?>(null) }
+
+    var lastSyncAtMs by remember { mutableLongStateOf(0L) }
+    var lastSyncedUserId by remember { mutableStateOf<Long?>(null) }
 
     val milestones = remember {
         listOf(
@@ -106,18 +112,34 @@ fun HabitsScreen(
         weeklyConsistency = HabitsManager.getWeeklyConsistency(context)
         habits.clear()
         habits.addAll(HabitsManager.getHabits(context))
-        refreshKey++
     }
 
-    DisposableEffect(lifecycleOwner, user?.id) {
+    fun openAccessibilitySettings() {
+        val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    }
+
+    suspend fun syncIfNeeded(force: Boolean = false) {
+        val activeUser = user ?: return
+        val elapsed = SystemClock.elapsedRealtime() - lastSyncAtMs
+        if (!force && lastSyncedUserId == activeUser.id && elapsed <= 15_000L) {
+            return
+        }
+        lastSyncAtMs = SystemClock.elapsedRealtime()
+        lastSyncedUserId = activeUser.id
+        HabitsManager.syncCalendarWithBackend(context, activeUser.id)
+        refreshAll()
+    }
+
+    DisposableEffect(lifecycleOwner, user?.id, isActiveTab) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 refreshAll()
-                val activeUser = user
-                if (activeUser != null) {
+                if (isActiveTab && user != null) {
                     coroutineScope.launch {
-                        HabitsManager.syncCalendarWithBackend(context, activeUser.id)
-                        refreshAll()
+                        syncIfNeeded(force = false)
                     }
                 }
             }
@@ -128,37 +150,33 @@ fun HabitsScreen(
         }
     }
 
-    LaunchedEffect(uninstallProtectionEnabled, isAccessibilityRunning, isBlockingLoading, isActiveTab) {
+    LaunchedEffect(isActiveTab, user?.id) {
         refreshAll()
         if (isActiveTab && user != null) {
-            HabitsManager.syncCalendarWithBackend(context, user.id)
-            refreshAll()
+            syncIfNeeded(force = lastSyncedUserId != user.id)
         }
     }
 
-    LaunchedEffect(user?.id) {
+    LaunchedEffect(uninstallProtectionEnabled, isAccessibilityRunning, isBlockingLoading) {
         refreshAll()
-        if (user != null) {
-            HabitsManager.syncCalendarWithBackend(context, user.id)
-            refreshAll()
-        }
     }
 
-    LaunchedEffect(streakStatus.isStreakActive, streakStatus.streakDays) {
-        if (streakStatus.isStreakActive && streakStatus.streakDays > 0 && uncelebratedMilestone == null) {
+    LaunchedEffect(isActiveTab, streakStatus.isStreakActive, streakStatus.streakDays) {
+        if (isActiveTab && streakStatus.isStreakActive && streakStatus.streakDays > 0 && selectedMilestoneDialog == null) {
             val uncelebratedDays = HabitsManager.getUncelebratedMilestone(
                 context,
                 streakStatus.streakDays,
                 milestones.map { it.targetDays }
             )
-            if (uncelebratedDays != null) {
-                uncelebratedMilestone = milestones.firstOrNull { it.targetDays == uncelebratedDays }
+            val badge = milestones.firstOrNull { it.targetDays == uncelebratedDays }
+            if (badge != null) {
+                selectedMilestoneDialog = badge to true
             }
         }
     }
 
-    LaunchedEffect(Unit) {
-        if (uncelebratedMilestone == null && HabitsManager.shouldShowDailyStoic(context)) {
+    LaunchedEffect(isActiveTab, selectedMilestoneDialog) {
+        if (isActiveTab && selectedMilestoneDialog == null && HabitsManager.shouldShowDailyStoic(context)) {
             showDailyStoicDialog = true
         }
     }
@@ -181,9 +199,21 @@ fun HabitsScreen(
                 urgesPrevented = urgesPrevented,
                 onSosClick = {
                     FocusModeManager.startUrgeLockdown(context, durationSeconds = 120)
+                    SecurityAlertReporter.reportIfPartnerLinked(
+                        context,
+                        "sos_triggered",
+                        "Emergency 2-minute SOS Urge Lockdown was triggered."
+                    )
                     showSosIntervention = true
                 },
                 onResetClick = { showRelapseDialog = true },
+                onFixProtectionClick = {
+                    if (streakStatus.inactiveReasonType == StreakInactiveReason.ACCESSIBILITY_OFF) {
+                        openAccessibilitySettings()
+                    } else {
+                        onOpenBlockingTab()
+                    }
+                },
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
 
@@ -206,9 +236,8 @@ fun HabitsScreen(
                     habits.addAll(updatedList)
 
                     coroutineScope.launch {
-                        runSuspendCatching {
-                            NetworkClient.getHabitsApiService(context).toggleHabit(habit.id.toLongOrNull() ?: 0)
-                        }
+                        HabitsManager.syncToggleHabit(context, habit.id)
+                        refreshAll()
                     }
                 },
                 onDeleteHabit = { habit ->
@@ -224,9 +253,7 @@ fun HabitsScreen(
                 currentStreak = streakStatus.streakDays,
                 milestones = milestones,
                 onBadgeClick = { badge ->
-                    if (streakStatus.streakDays >= badge.targetDays) {
-                        uncelebratedMilestone = badge
-                    }
+                    selectedMilestoneDialog = badge to false
                 },
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
@@ -240,16 +267,22 @@ fun HabitsScreen(
         }
     }
 
-    if (uncelebratedMilestone != null) {
-        val badge = uncelebratedMilestone!!
+    selectedMilestoneDialog?.let { (badge, isNewUnlock) ->
+        val isUnlocked = streakStatus.streakDays >= badge.targetDays
         MilestoneCelebrationDialog(
             milestone = badge,
+            isNewUnlock = isNewUnlock,
+            isUnlocked = isUnlocked,
+            currentStreak = streakStatus.streakDays,
+            bestStreak = streakStatus.bestStreakDays,
             onClaimBadge = {
-                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                HabitsManager.markMilestoneCelebrated(context, badge.targetDays)
-                uncelebratedMilestone = null
+                if (isNewUnlock) {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    HabitsManager.markMilestoneCelebrated(context, badge.targetDays)
+                }
+                selectedMilestoneDialog = null
 
-                if (HabitsManager.shouldShowDailyStoic(context)) {
+                if (isNewUnlock && isActiveTab && HabitsManager.shouldShowDailyStoic(context)) {
                     showDailyStoicDialog = true
                 }
             }
@@ -271,6 +304,8 @@ fun HabitsScreen(
         val incompleteHabit = habits.firstOrNull { !it.isCompletedToday }
         UrgeInterventionModal(
             incompleteHabit = incompleteHabit,
+            isAccessibilityRunning = isAccessibilityRunning,
+            onOpenAccessibilitySettings = { openAccessibilitySettings() },
             onDismiss = {
                 FocusModeManager.stopUrgeLockdown(context)
                 showSosIntervention = false
@@ -286,6 +321,7 @@ fun HabitsScreen(
 
     if (showMonthlyCalendarDialog) {
         MonthlyProgressCalendarDialog(
+            userId = user?.id,
             onDismiss = { showMonthlyCalendarDialog = false }
         )
     }
@@ -311,14 +347,14 @@ fun HabitsScreen(
             confirmButton = {
                 TextButton(
                     onClick = {
-                        val updated = HabitsManager.deleteHabit(context, habit.id)
+                        val (updated, deletedServerId) = HabitsManager.deleteHabitAndGetServerId(context, habit.id)
                         habits.clear()
                         habits.addAll(updated)
                         habitToDelete = null
 
-                        coroutineScope.launch {
-                            runSuspendCatching {
-                                NetworkClient.getHabitsApiService(context).deleteHabit(habit.id.toLongOrNull() ?: 0)
+                        if (deletedServerId != null) {
+                            coroutineScope.launch {
+                                HabitsManager.syncDeleteHabit(context, deletedServerId)
                             }
                         }
                     },
@@ -358,17 +394,14 @@ fun HabitsScreen(
     if (showAddHabitDialog) {
         AddHabitDialog(
             onDismiss = { showAddHabitDialog = false },
-            onConfirmAdd = { title, iconKey, targetDays ->
-                val newHabit = HabitsManager.addHabit(context, title, iconKey, targetDays)
+            onConfirmAdd = { title, iconKey ->
+                val newHabit = HabitsManager.addHabit(context, title, iconKey)
                 habits.add(newHabit)
                 showAddHabitDialog = false
 
                 coroutineScope.launch {
-                    runSuspendCatching {
-                        NetworkClient.getHabitsApiService(context).createHabit(
-                            CreateHabitRequest(title = title, icon = iconKey)
-                        )
-                    }
+                    HabitsManager.syncCreateHabit(context, newHabit)
+                    refreshAll()
                 }
             }
         )

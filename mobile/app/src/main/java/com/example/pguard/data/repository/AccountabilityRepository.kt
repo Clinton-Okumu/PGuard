@@ -10,6 +10,8 @@ import com.example.pguard.core.network.model.RecordEventRequest
 import com.example.pguard.core.network.model.RequestUnlockCodeRequest
 import com.example.pguard.core.network.model.RequestUnlockCodeResponse
 import com.example.pguard.core.network.model.SecurityAlertDto
+import com.example.pguard.core.network.model.StartTimeDelayRequest
+import com.example.pguard.core.network.model.TimeDelayResponse
 import com.example.pguard.core.network.model.VerifyUnlockCodeRequest
 import com.example.pguard.core.network.model.VerifyUnlockCodeResponse
 import kotlinx.coroutines.CancellationException
@@ -103,10 +105,13 @@ class AccountabilityRepository(
         }
     }
 
-    suspend fun verifyUnlockCode(code: String): Result<VerifyUnlockCodeResponse> {
+    suspend fun verifyUnlockCode(code: String, featureName: String? = null): Result<VerifyUnlockCodeResponse> {
         return try {
             val response = accountabilityApiService.verifyUnlockCode(
-                VerifyUnlockCodeRequest(code = code.trim())
+                VerifyUnlockCodeRequest(
+                    code = code.trim(),
+                    featureName = featureName?.trim()?.takeIf { it.isNotEmpty() }
+                )
             )
             if (!response.verified) {
                 throw IllegalStateException(response.error ?: "Invalid or expired approval code")
@@ -116,6 +121,40 @@ class AccountabilityRepository(
             throw e
         } catch (e: Exception) {
             Result.failure(Exception(extractErrorMessage(e), e))
+        }
+    }
+
+    suspend fun getTimeDelay(): Result<TimeDelayResponse> {
+        return runSuspendCatching {
+            accountabilityApiService.getTimeDelay()
+        }
+    }
+
+    suspend fun startTimeDelay(
+        targetKey: String,
+        targetTitle: String,
+        durationSeconds: Long = 86_400L
+    ): Result<TimeDelayResponse> {
+        return try {
+            val response = accountabilityApiService.startTimeDelay(
+                StartTimeDelayRequest(
+                    targetKey = targetKey,
+                    targetTitle = targetTitle,
+                    durationSeconds = durationSeconds
+                )
+            )
+            Result.success(response)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            Result.failure(Exception(extractErrorMessage(e), e))
+        }
+    }
+
+    suspend fun clearTimeDelay(): Result<Unit> {
+        return runSuspendCatching {
+            accountabilityApiService.clearTimeDelay()
+            Unit
         }
     }
 }

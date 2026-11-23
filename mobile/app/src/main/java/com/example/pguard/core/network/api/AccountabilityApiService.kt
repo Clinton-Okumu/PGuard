@@ -10,7 +10,9 @@ import com.example.pguard.core.network.model.RecordEventResponse
 import com.example.pguard.core.network.model.RequestUnlockCodeRequest
 import com.example.pguard.core.network.model.RequestUnlockCodeResponse
 import com.example.pguard.core.network.model.SecurityEventsResponse
+import com.example.pguard.core.network.model.StartTimeDelayRequest
 import com.example.pguard.core.network.model.StatusResponse
+import com.example.pguard.core.network.model.TimeDelayResponse
 import com.example.pguard.core.network.model.VerifyUnlockCodeRequest
 import com.example.pguard.core.network.model.VerifyUnlockCodeResponse
 import retrofit2.http.Body
@@ -56,4 +58,15 @@ interface AccountabilityApiService {
     suspend fun verifyUnlockCode(
         @Body request: VerifyUnlockCodeRequest
     ): VerifyUnlockCodeResponse
+
+    @GET("api/v1/accountability/time-delay")
+    suspend fun getTimeDelay(): TimeDelayResponse
+
+    @POST("api/v1/accountability/time-delay")
+    suspend fun startTimeDelay(
+        @Body request: StartTimeDelayRequest
+    ): TimeDelayResponse
+
+    @DELETE("api/v1/accountability/time-delay")
+    suspend fun clearTimeDelay(): StatusResponse
 }

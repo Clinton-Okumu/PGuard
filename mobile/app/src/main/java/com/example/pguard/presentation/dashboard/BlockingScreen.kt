@@ -1,7 +1,10 @@
 package com.example.pguard.presentation.dashboard
 
+import android.app.Activity
 import android.content.Context
-import android.provider.Settings
+import android.net.VpnService
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -42,12 +45,15 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.pguard.R
 import com.example.pguard.engine.accessibility.PGuardAccessibilityService
+import com.example.pguard.engine.admin.DeviceAdminManager
+import com.example.pguard.engine.vpn.PGuardVpnService
 import com.example.pguard.presentation.theme.PGuardTheme
 
 internal data class PermissionAlerts(
     val pushNotificationsMissing: Boolean,
     val accessibilityMissing: Boolean,
-    val overlayMissing: Boolean
+    val dnsVpnInactive: Boolean = false,
+    val deviceAdminMissing: Boolean = false
 )
 
 internal data class BlockingScreenCallbacks(
@@ -58,9 +64,15 @@ internal data class BlockingScreenCallbacks(
     val onEditSetting: (SettingsEditor) -> Unit,
     val onInfo: (String, String) -> Unit,
     val onPartnerAction: () -> Unit,
+    val onResendInvite: () -> Unit,
+    val onConfirmCancelInvite: () -> Unit,
+    val onDismissCancelInvite: () -> Unit,
+    val onOpenSecurityAlerts: () -> Unit,
+    val onRefreshSecurityAlerts: () -> Unit,
+    val onDismissSecurityAlerts: () -> Unit,
     val onFixPushNotifications: () -> Unit,
     val onFixAccessibility: () -> Unit,
-    val onFixOverlay: () -> Unit,
+    val onFixDnsVpn: () -> Unit,
     val onEditorTextChange: (String) -> Unit,
     val onEditorSave: () -> Unit,
     val onEditorDismiss: () -> Unit,
@@ -68,6 +80,7 @@ internal data class BlockingScreenCallbacks(
     val onInfoDismiss: () -> Unit,
     val onGuideDismiss: () -> Unit,
     val onInviteEmailChange: (String) -> Unit,
+    val onInviteNameChange: (String) -> Unit,
     val onInviteSubmit: () -> Unit,
     val onInviteDismiss: () -> Unit,
     val onManageAccountabilityMode: () -> Unit,
@@ -77,13 +90,18 @@ internal data class BlockingScreenCallbacks(
     val onDismissTypingChallenge: () -> Unit,
     val onConfirmTimeDelay: () -> Unit,
     val onCancelTimeDelay: () -> Unit,
+    val onCompleteTimeDelay: () -> Unit,
     val onDismissTimeDelayConfirm: () -> Unit,
-    val onFriendApprovalSuccess: () -> Unit,
     val onVerifyFriendApprovalCode: (String) -> Unit,
     val onDismissFriendApproval: () -> Unit,
     val onRequestPartnerApproval: (String) -> Unit,
     val onConfirmDeviceAdmin: () -> Unit,
-    val onDismissDeviceAdmin: () -> Unit
+    val onDismissDeviceAdmin: () -> Unit,
+    val onFixDeviceAdmin: () -> Unit,
+    val onResetMessageDefault: () -> Unit,
+    val onClearRedirectUrl: () -> Unit,
+    val onPreviewBlockedScreen: () -> Unit,
+    val onDismissBlockedScreenPreview: () -> Unit
 )
 
 @Composable
@@ -96,22 +114,98 @@ fun BlockingScreen(
 ) {
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
+    val isVpnRunning by PGuardVpnService.isRunning.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
+
+    var showVpnDialog by remember { mutableStateOf(false) }
+
+    var alerts by remember {
+        mutableStateOf(
+            readPermissionAlerts(
+                context = context,
+                dnsVpnEnabled = state.isDnsVpnEnabled,
+                isVpnRunning = isVpnRunning,
+                uninstallProtectionEnabled = state.settings.uninstallProtection
+            )
+        )
+    }
+
+    val vpnPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            viewModel.onDnsVpnPermissionGranted(context)
+        }
+    }
+
+    val launchVpnConsent = {
+        val prepareIntent = VpnService.prepare(context)
+        if (prepareIntent == null) {
+            viewModel.onDnsVpnPermissionGranted(context)
+        } else {
+            vpnPermissionLauncher.launch(prepareIntent)
+        }
+    }
+
+    val deviceAdminLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { _ ->
+        viewModel.onDeviceAdminActivityResult(context)
+        val latest = viewModel.uiState.value
+        alerts = readPermissionAlerts(
+            context = context,
+            dnsVpnEnabled = latest.isDnsVpnEnabled,
+            isVpnRunning = PGuardVpnService.isRunning.value,
+            uninstallProtectionEnabled = latest.settings.uninstallProtection
+        )
+    }
+
+    val launchDeviceAdminConsent = {
+        viewModel.markDeviceAdminRequestLaunched()
+        try {
+            deviceAdminLauncher.launch(DeviceAdminManager.buildEnableDeviceAdminIntent(context))
+        } catch (_: Exception) {
+            DeviceAdminManager.requestEnableDeviceAdmin(context)
+        }
+    }
 
     LaunchedEffect(Unit) {
         PGuardAccessibilityService.loadSettings(context)
         viewModel.refreshFromLocalPreferences(context)
+        if (PGuardAccessibilityService.isDnsVpnEnabled &&
+            !PGuardVpnService.isRunning.value &&
+            VpnService.prepare(context) == null
+        ) {
+            viewModel.onDnsVpnPermissionGranted(context)
+        }
     }
 
-    var alerts by remember { mutableStateOf(readPermissionAlerts(context)) }
+    LaunchedEffect(state.isDnsVpnEnabled, isVpnRunning, state.settings.uninstallProtection) {
+        alerts = readPermissionAlerts(
+            context = context,
+            dnsVpnEnabled = state.isDnsVpnEnabled,
+            isVpnRunning = isVpnRunning,
+            uninstallProtectionEnabled = state.settings.uninstallProtection
+        )
+    }
 
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_RESUME -> {
-                    alerts = readPermissionAlerts(context)
-                    viewModel.refreshPartnerStatus()
                     viewModel.checkDeviceAdminStatus(context)
+                    val refreshedState = viewModel.uiState.value
+                    val vpnActive = PGuardVpnService.isRunning.value
+                    if (refreshedState.isDnsVpnEnabled && !vpnActive && VpnService.prepare(context) == null) {
+                        viewModel.onDnsVpnPermissionGranted(context)
+                    }
+                    alerts = readPermissionAlerts(
+                        context = context,
+                        dnsVpnEnabled = refreshedState.isDnsVpnEnabled,
+                        isVpnRunning = PGuardVpnService.isRunning.value,
+                        uninstallProtectionEnabled = refreshedState.settings.uninstallProtection
+                    )
+                    viewModel.refreshPartnerStatus()
                 }
                 Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
                     viewModel.stopPartnerPolling()
@@ -134,13 +228,23 @@ fun BlockingScreen(
         },
         onFocusModeClick = onFocusModeClick,
         onToggle = { toggle, checked ->
-            viewModel.handleToggleRequested(toggle, checked, context)
+            if (toggle == BlockingToggle.DNS_VPN_SHIELD && checked) {
+                showVpnDialog = true
+            } else {
+                viewModel.handleToggleRequested(toggle, checked, context)
+            }
         },
         onEditSetting = viewModel::openEditor,
         onInfo = viewModel::showInfo,
         onPartnerAction = {
             if (state.partner == null) viewModel.showInviteDialog() else viewModel.requestDisconnectPartner(context)
         },
+        onResendInvite = viewModel::resendPartnerInvite,
+        onConfirmCancelInvite = viewModel::confirmCancelPendingInvite,
+        onDismissCancelInvite = viewModel::dismissCancelPendingInvite,
+        onOpenSecurityAlerts = viewModel::openSecurityAlerts,
+        onRefreshSecurityAlerts = viewModel::refreshSecurityAlerts,
+        onDismissSecurityAlerts = viewModel::dismissSecurityAlerts,
         onFixPushNotifications = {
             openNotificationSettings(context)
             alerts = alerts.copy(pushNotificationsMissing = false)
@@ -149,9 +253,8 @@ fun BlockingScreen(
             openAccessibilitySettings(context)
             alerts = alerts.copy(accessibilityMissing = false)
         },
-        onFixOverlay = {
-            openOverlayPermission(context)
-            alerts = alerts.copy(overlayMissing = false)
+        onFixDnsVpn = {
+            showVpnDialog = true
         },
         onEditorTextChange = viewModel::updateEditorText,
         onEditorSave = viewModel::saveEditor,
@@ -160,6 +263,7 @@ fun BlockingScreen(
         onInfoDismiss = viewModel::dismissInfo,
         onGuideDismiss = viewModel::dismissGuide,
         onInviteEmailChange = viewModel::updateInviteEmail,
+        onInviteNameChange = viewModel::updateInviteName,
         onInviteSubmit = viewModel::submitInvite,
         onInviteDismiss = viewModel::dismissInviteDialog,
         onManageAccountabilityMode = { viewModel.requestChangeAccountabilityMode(context) },
@@ -169,13 +273,18 @@ fun BlockingScreen(
         onDismissTypingChallenge = viewModel::dismissTypingChallenge,
         onConfirmTimeDelay = { viewModel.onStartTimeDelay(context) },
         onCancelTimeDelay = { viewModel.cancelTimeDelay(context) },
+        onCompleteTimeDelay = { viewModel.completeReadyTimeDelay(context) },
         onDismissTimeDelayConfirm = viewModel::dismissTimeDelayConfirm,
-        onFriendApprovalSuccess = { },
         onVerifyFriendApprovalCode = { code -> viewModel.verifyFriendApprovalCode(code, context) },
         onDismissFriendApproval = viewModel::dismissFriendApproval,
         onRequestPartnerApproval = viewModel::requestPartnerApprovalCode,
-        onConfirmDeviceAdmin = { viewModel.onConfirmDeviceAdmin(context) },
-        onDismissDeviceAdmin = { viewModel.dismissDeviceAdminDialog(context) }
+        onConfirmDeviceAdmin = launchDeviceAdminConsent,
+        onDismissDeviceAdmin = viewModel::dismissDeviceAdminDialog,
+        onFixDeviceAdmin = viewModel::showDeviceAdminDialog,
+        onResetMessageDefault = viewModel::resetMessageEditorToDefault,
+        onClearRedirectUrl = viewModel::clearRedirectEditor,
+        onPreviewBlockedScreen = viewModel::openBlockedScreenPreview,
+        onDismissBlockedScreenPreview = viewModel::dismissBlockedScreenPreview
     )
 
     BlockingScreenContent(
@@ -184,6 +293,16 @@ fun BlockingScreen(
         callbacks = callbacks,
         modifier = modifier
     )
+
+    if (showVpnDialog) {
+        VpnDnsExplanationDialog(
+            onConfirm = {
+                showVpnDialog = false
+                launchVpnConsent()
+            },
+            onDismiss = { showVpnDialog = false }
+        )
+    }
 }
 
 @Composable
@@ -194,20 +313,24 @@ internal fun BlockingScreenContent(
     modifier: Modifier = Modifier
 ) {
     val settings = state.settings
+    val partnerLabel = state.partner?.let { p ->
+        if (p.partnerName.isNotBlank()) "${p.partnerName} (${p.partnerEmail})" else p.partnerEmail
+    }.orEmpty()
     val partnerStatus = when {
-        state.isPartnerLinked -> "Active (${state.partner?.partnerEmail})"
-        state.partner != null -> "Pending (${state.partner?.partnerEmail})"
+        state.isPartnerLinked -> "Active ($partnerLabel)"
+        state.partner != null -> "Pending ($partnerLabel)"
         else -> "No partner linked"
     }
 
+    val isPendingPartner = state.partner != null && !state.isPartnerLinked
     val partnerActionLabel = when {
         state.accountabilityMode == AccountabilityMode.FRIEND && state.partner == null -> "Invite"
-        state.accountabilityMode == AccountabilityMode.FRIEND && state.partner != null -> "Remove"
+        state.accountabilityMode == AccountabilityMode.FRIEND && state.isPartnerLinked -> "Remove"
+        state.accountabilityMode == AccountabilityMode.FRIEND && isPendingPartner -> "Cancel"
         else -> null
     }
 
     var showAccessibilityDialog by remember { mutableStateOf(false) }
-    var showOverlayDialog by remember { mutableStateOf(false) }
     var showNotificationDialog by remember { mutableStateOf(false) }
 
     Box(
@@ -254,13 +377,23 @@ internal fun BlockingScreenContent(
                     )
                 }
 
-                AnimatedVisibility(visible = alerts.overlayMissing) {
+                AnimatedVisibility(visible = alerts.dnsVpnInactive) {
                     AlertActionCard(
-                        title = "Display pop-up window",
-                        subtitle = "Allows pop-ups to appear over other apps and enables safe search.",
+                        title = "DNS Shield is Paused",
+                        subtitle = "Turn ON local DNS filtering to block adult and custom domains across browsers and WebViews.",
                         actionLabel = "Turn ON",
                         trailingIcon = R.drawable.ic_chevron_right,
-                        onAction = { showOverlayDialog = true }
+                        onAction = callbacks.onFixDnsVpn
+                    )
+                }
+
+                AnimatedVisibility(visible = alerts.deviceAdminMissing) {
+                    AlertActionCard(
+                        title = "Device Admin is OFF",
+                        subtitle = "Uninstall Protection needs Device Administrator active to prevent unauthorized removal.",
+                        actionLabel = "Activate",
+                        trailingIcon = R.drawable.ic_chevron_right,
+                        onAction = callbacks.onFixDeviceAdmin
                     )
                 }
 
@@ -268,7 +401,9 @@ internal fun BlockingScreenContent(
                     TimeDelayActiveBanner(
                         targetFeatureTitle = targetDisplayName(state.timeDelayTarget),
                         unlockAt = state.timeDelayUnlockAt,
-                        onCancel = callbacks.onCancelTimeDelay
+                        onCancel = callbacks.onCancelTimeDelay,
+                        onCompleteUnlock = callbacks.onCompleteTimeDelay,
+                        isServerReady = state.isTimeDelayServerReady
                     )
                 }
 
@@ -278,10 +413,14 @@ internal fun BlockingScreenContent(
                     onManageMode = callbacks.onManageAccountabilityMode,
                     onPartnerAction = callbacks.onPartnerAction,
                     partnerActionLabel = partnerActionLabel,
+                    isPendingPartner = isPendingPartner,
+                    isLinkedPartner = state.isPartnerLinked,
+                    onResendInvite = callbacks.onResendInvite,
+                    onViewSecurityAlerts = callbacks.onOpenSecurityAlerts,
                     onInfoClick = {
                         callbacks.onInfo(
                             "Accountability Guard",
-                            "Choose friction mode before turning off protection:\n\n• Friend: Partner must approve via email code.\n• Myself: 60-second typing challenge with zero typos.\n• 24h Time Delay: 24-hour cooling-off period."
+                            "Choose friction mode before turning off protection:\n\n• Friend: Partner must approve via email code and receives tamper/SOS security alerts.\n• Myself: 60-second randomized typing challenge (copy/paste disabled).\n• 24h Time Delay: Server-backed 24-hour cooling-off period."
                         )
                     }
                 )
@@ -291,6 +430,7 @@ internal fun BlockingScreenContent(
 
             ContentBlockingSection(
                 settings = settings,
+                isDnsVpnEnabled = state.isDnsVpnEnabled,
                 onToggle = callbacks.onToggle,
                 onInfo = callbacks.onInfo,
                 modifier = Modifier.padding(horizontal = 16.dp)
@@ -311,6 +451,7 @@ internal fun BlockingScreenContent(
                 settings = settings,
                 onEdit = callbacks.onEditSetting,
                 onInfo = callbacks.onInfo,
+                onPreview = callbacks.onPreviewBlockedScreen,
                 modifier = Modifier.padding(horizontal = 16.dp)
             )
         }
@@ -351,16 +492,6 @@ internal fun BlockingScreenContent(
         )
     }
 
-    if (showOverlayDialog) {
-        OverlayExplanationDialog(
-            onConfirm = {
-                showOverlayDialog = false
-                callbacks.onFixOverlay()
-            },
-            onDismiss = { showOverlayDialog = false }
-        )
-    }
-
     if (showNotificationDialog) {
         NotificationExplanationDialog(
             onConfirm = {
@@ -380,8 +511,10 @@ private fun BlockingScreenDialogs(
     when (state.editor) {
         SettingsEditor.MESSAGE -> BlockedScreenMessageDialog(
             text = state.editorText,
+            errorMessage = state.editorError,
             onTextChange = callbacks.onEditorTextChange,
             onSave = callbacks.onEditorSave,
+            onResetDefault = callbacks.onResetMessageDefault,
             onDismiss = callbacks.onEditorDismiss
         )
         SettingsEditor.COUNTDOWN -> BlockedScreenCountdownDialog(
@@ -391,11 +524,22 @@ private fun BlockingScreenDialogs(
         )
         SettingsEditor.REDIRECT -> RedirectUrlDialog(
             text = state.editorText,
+            errorMessage = state.editorError,
             onTextChange = callbacks.onEditorTextChange,
             onSave = callbacks.onEditorSave,
+            onClear = callbacks.onClearRedirectUrl,
             onDismiss = callbacks.onEditorDismiss
         )
         null -> Unit
+    }
+
+    if (state.isBlockedScreenPreviewVisible) {
+        BlockedScreenPreviewDialog(
+            message = state.settings.blockedScreenMessage,
+            countdownSeconds = state.settings.blockedScreenCountdown,
+            redirectUrl = state.settings.redirectUrl,
+            onDismiss = callbacks.onDismissBlockedScreenPreview
+        )
     }
 
     state.infoDialog?.let { info ->
@@ -413,10 +557,29 @@ private fun BlockingScreenDialogs(
     if (state.isInviteDialogVisible) {
         InvitePartnerDialog(
             email = state.inviteEmail,
+            partnerName = state.inviteName,
             onEmailChange = callbacks.onInviteEmailChange,
+            onPartnerNameChange = callbacks.onInviteNameChange,
             onSubmit = callbacks.onInviteSubmit,
             onDismiss = callbacks.onInviteDismiss,
             errorMessage = state.inviteEmailError
+        )
+    }
+
+    if (state.isConfirmCancelInviteVisible) {
+        ConfirmCancelInviteDialog(
+            partnerEmail = state.partner?.partnerEmail.orEmpty(),
+            onConfirm = callbacks.onConfirmCancelInvite,
+            onDismiss = callbacks.onDismissCancelInvite
+        )
+    }
+
+    if (state.isSecurityAlertsDialogVisible) {
+        SecurityAlertsDialog(
+            events = state.securityAlerts,
+            isLoading = state.isLoadingSecurityAlerts,
+            onRefresh = callbacks.onRefreshSecurityAlerts,
+            onDismiss = callbacks.onDismissSecurityAlerts
         )
     }
 
@@ -437,8 +600,12 @@ private fun BlockingScreenDialogs(
     }
 
     state.timeDelayConfirmTarget?.let { target ->
+        val activeTitle = state.timeDelayTarget
+            .takeIf { it.isNotBlank() && it != target.identifier }
+            ?.let { targetDisplayName(it) }
         TimeDelayConfirmDialog(
             targetFeatureTitle = target.title,
+            activeTimerTitle = activeTitle,
             onConfirm = callbacks.onConfirmTimeDelay,
             onDismiss = callbacks.onDismissTimeDelayConfirm
         )
@@ -453,6 +620,8 @@ private fun BlockingScreenDialogs(
             onSubmitCode = callbacks.onVerifyFriendApprovalCode,
             onDismiss = callbacks.onDismissFriendApproval,
             isVerifying = state.isVerifyingUnlockCode,
+            isSendingRequest = state.isSendingUnlockCode,
+            emailSentSuccess = state.unlockEmailSent,
             errorMessage = state.unlockCodeError,
             requestError = state.unlockRequestError
         )
@@ -466,12 +635,17 @@ private fun BlockingScreenDialogs(
     }
 }
 
-private fun readPermissionAlerts(context: Context): PermissionAlerts =
-    PermissionAlerts(
-        pushNotificationsMissing = !NotificationManagerCompat.from(context).areNotificationsEnabled(),
-        accessibilityMissing = !PGuardAccessibilityService.isEnabled(context),
-        overlayMissing = !Settings.canDrawOverlays(context)
-    )
+private fun readPermissionAlerts(
+    context: Context,
+    dnsVpnEnabled: Boolean,
+    isVpnRunning: Boolean,
+    uninstallProtectionEnabled: Boolean = false
+): PermissionAlerts = PermissionAlerts(
+    pushNotificationsMissing = !NotificationManagerCompat.from(context).areNotificationsEnabled(),
+    accessibilityMissing = !PGuardAccessibilityService.isEnabled(context),
+    dnsVpnInactive = dnsVpnEnabled && !isVpnRunning,
+    deviceAdminMissing = uninstallProtectionEnabled && !DeviceAdminManager.isDeviceAdminActive(context)
+)
 
 @Preview(showBackground = true)
 @Composable
@@ -482,7 +656,8 @@ private fun BlockingScreenPreview() {
             alerts = PermissionAlerts(
                 pushNotificationsMissing = true,
                 accessibilityMissing = true,
-                overlayMissing = false
+                dnsVpnInactive = false,
+                deviceAdminMissing = false
             ),
             callbacks = previewCallbacks()
         )
@@ -497,9 +672,15 @@ private fun previewCallbacks() = BlockingScreenCallbacks(
     onEditSetting = {},
     onInfo = { _, _ -> },
     onPartnerAction = {},
+    onResendInvite = {},
+    onConfirmCancelInvite = {},
+    onDismissCancelInvite = {},
+    onOpenSecurityAlerts = {},
+    onRefreshSecurityAlerts = {},
+    onDismissSecurityAlerts = {},
     onFixPushNotifications = {},
     onFixAccessibility = {},
-    onFixOverlay = {},
+    onFixDnsVpn = {},
     onEditorTextChange = {},
     onEditorSave = {},
     onEditorDismiss = {},
@@ -507,6 +688,7 @@ private fun previewCallbacks() = BlockingScreenCallbacks(
     onInfoDismiss = {},
     onGuideDismiss = {},
     onInviteEmailChange = {},
+    onInviteNameChange = {},
     onInviteSubmit = {},
     onInviteDismiss = {},
     onManageAccountabilityMode = {},
@@ -516,11 +698,16 @@ private fun previewCallbacks() = BlockingScreenCallbacks(
     onDismissTypingChallenge = {},
     onConfirmTimeDelay = {},
     onCancelTimeDelay = {},
+    onCompleteTimeDelay = {},
     onDismissTimeDelayConfirm = {},
-    onFriendApprovalSuccess = {},
     onVerifyFriendApprovalCode = {},
     onDismissFriendApproval = {},
     onRequestPartnerApproval = {},
     onConfirmDeviceAdmin = {},
-    onDismissDeviceAdmin = {}
+    onDismissDeviceAdmin = {},
+    onFixDeviceAdmin = {},
+    onResetMessageDefault = {},
+    onClearRedirectUrl = {},
+    onPreviewBlockedScreen = {},
+    onDismissBlockedScreenPreview = {}
 )

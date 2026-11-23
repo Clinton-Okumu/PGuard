@@ -12,16 +12,19 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -47,11 +50,18 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import com.example.pguard.R
+import com.example.pguard.core.network.model.SecurityAlertDto
 import com.example.pguard.engine.accessibility.BlockingPreferences
+import com.example.pguard.presentation.accountability.TypingChallengeEngine
 import com.example.pguard.presentation.theme.pguardColors
 import kotlinx.coroutines.delay
 
@@ -126,7 +136,7 @@ fun AccountabilityModeSelectionDialog(
                     Triple(
                         AccountabilityMode.SELF,
                         "Myself (Typing Challenge)",
-                        "Type a randomly generated commitment phrase within 60 seconds."
+                        "Type a uniquely randomized commitment phrase within 60 seconds."
                     ),
                     Triple(
                         AccountabilityMode.TIME_DELAY,
@@ -189,10 +199,7 @@ fun AccountabilityModeSelectionDialog(
                     }
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
-                        onClick = {
-                            onSelectMode(selected)
-                            onDismiss()
-                        },
+                        onClick = { onSelectMode(selected) },
                         colors = ButtonDefaults.buttonColors(containerColor = primary),
                         shape = MaterialTheme.shapes.small
                     ) {
@@ -210,30 +217,58 @@ fun TypingChallengeDialog(
     onSuccess: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    val samplePledges = remember {
-        listOf(
-            "I choose my long term goals over temporary impulse and take full ownership of this action.",
-            "I understand that turning off protection puts my progress at risk and I proceed with awareness.",
-            "I am calm, deliberate, and taking full responsibility for changing my digital boundaries today."
-        )
-    }
-    val targetText = remember { samplePledges.random() }
+    var targetText by remember { mutableStateOf(TypingChallengeEngine.generateChallenge()) }
     var inputText by remember { mutableStateOf("") }
+    var pasteBlockedWarning by remember { mutableStateOf(false) }
     var secondsLeft by remember { mutableIntStateOf(60) }
     var isExpired by remember { mutableStateOf(false) }
+    var attemptNonce by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(Unit) {
-        while (secondsLeft > 0 && !isExpired) {
+    LaunchedEffect(attemptNonce) {
+        secondsLeft = 60
+        isExpired = false
+        while (secondsLeft > 0) {
             delay(1000L)
             secondsLeft -= 1
         }
-        if (secondsLeft <= 0) {
-            isExpired = true
-        }
+        isExpired = true
     }
 
-    val isMatch = inputText.trim() == targetText.trim()
+    val matchState = TypingChallengeEngine.evaluatePrefix(targetText, inputText)
+    val isMatch = matchState.isComplete
     val primary = MaterialTheme.colorScheme.primary
+    val successColor = MaterialTheme.pguardColors.success
+    val errorColor = MaterialTheme.colorScheme.error
+
+    val annotatedPrompt = buildAnnotatedString {
+        if (matchState.matchedCount > 0) {
+            withStyle(SpanStyle(color = successColor, fontWeight = FontWeight.SemiBold)) {
+                append(targetText.substring(0, matchState.matchedCount))
+            }
+        }
+        val mismatchIdx = matchState.firstMismatchIndex
+        if (mismatchIdx != null && mismatchIdx < targetText.length) {
+            withStyle(
+                SpanStyle(
+                    color = errorColor,
+                    background = errorColor.copy(alpha = 0.18f),
+                    textDecoration = TextDecoration.Underline,
+                    fontWeight = FontWeight.Bold
+                )
+            ) {
+                append(targetText[mismatchIdx])
+            }
+            if (mismatchIdx + 1 < targetText.length) {
+                withStyle(SpanStyle(color = primary.copy(alpha = 0.9f))) {
+                    append(targetText.substring(mismatchIdx + 1))
+                }
+            }
+        } else if (matchState.matchedCount < targetText.length) {
+            withStyle(SpanStyle(color = primary.copy(alpha = 0.9f))) {
+                append(targetText.substring(matchState.matchedCount))
+            }
+        }
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -245,6 +280,7 @@ fun TypingChallengeDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(22.dp)
             ) {
                 Row(
@@ -279,11 +315,13 @@ fun TypingChallengeDialog(
                 Spacer(modifier = Modifier.height(14.dp))
                 val challengePrompt = when {
                     targetFeatureTitle.startsWith("Change", ignoreCase = true) ->
-                        "To change your accountability mode, accurately type the phrase below within 60 seconds:"
+                        "To change your accountability mode, accurately type the phrase and code below within 60 seconds:"
                     targetFeatureTitle.startsWith("Remove", ignoreCase = true) ->
-                        "To remove your accountability partner, accurately type the phrase below within 60 seconds:"
+                        "To remove your accountability partner, accurately type the phrase and code below within 60 seconds:"
+                    targetFeatureTitle.equals("Log Out", ignoreCase = true) ->
+                        "To log out of your account, accurately type the phrase and code below within 60 seconds:"
                     else ->
-                        "To turn off $targetFeatureTitle, accurately type the phrase below within 60 seconds:"
+                        "To turn off $targetFeatureTitle, accurately type the phrase and code below within 60 seconds:"
                 }
                 Text(
                     text = challengePrompt,
@@ -299,10 +337,9 @@ fun TypingChallengeDialog(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(
-                        text = targetText,
+                        text = annotatedPrompt,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.Medium,
-                        color = primary,
                         modifier = Modifier.padding(12.dp)
                     )
                 }
@@ -311,19 +348,31 @@ fun TypingChallengeDialog(
 
                 OutlinedTextField(
                     value = inputText,
-                    onValueChange = { if (!isExpired) inputText = it },
+                    onValueChange = { candidate ->
+                        if (!isExpired) {
+                            val result = TypingChallengeEngine.sanitizeTypedInput(inputText, candidate)
+                            inputText = result.acceptedText
+                            pasteBlockedWarning = result.pasteBlocked
+                        }
+                    },
                     placeholder = {
                         Text(
-                            "Type phrase here...",
+                            "Type phrase + [CODE] manually...",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     },
+                    keyboardOptions = KeyboardOptions(
+                        autoCorrectEnabled = false,
+                        keyboardType = KeyboardType.Ascii
+                    ),
+                    isError = matchState.firstMismatchIndex != null || pasteBlockedWarning,
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.small,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = if (isMatch) MaterialTheme.pguardColors.success else primary,
+                        focusedBorderColor = if (isMatch) successColor else primary,
                         unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                        errorBorderColor = errorColor,
                         focusedTextColor = MaterialTheme.colorScheme.onSurface,
                         unfocusedTextColor = MaterialTheme.colorScheme.onSurface
                     ),
@@ -332,14 +381,46 @@ fun TypingChallengeDialog(
                     enabled = !isExpired
                 )
 
+                if (pasteBlockedWarning) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Copy/paste is disabled. Please type each character manually.",
+                        color = errorColor,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Medium
+                    )
+                } else if (matchState.firstMismatchIndex != null && !isExpired) {
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "Typo at character #${matchState.firstMismatchIndex + 1} (highlighted above).",
+                        color = errorColor,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
                 if (isExpired) {
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Time expired! Protection remains active.",
-                        color = primary,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Time expired! Protection remains active.",
+                            color = primary,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = {
+                            targetText = TypingChallengeEngine.generateChallenge()
+                            inputText = ""
+                            pasteBlockedWarning = false
+                            attemptNonce++
+                        }) {
+                            Text("Try New Phrase", style = MaterialTheme.typography.labelMedium, color = primary)
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -376,6 +457,7 @@ fun TypingChallengeDialog(
 @Composable
 fun TimeDelayConfirmDialog(
     targetFeatureTitle: String,
+    activeTimerTitle: String? = null,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -420,6 +502,8 @@ fun TimeDelayConfirmDialog(
                         "Changing your accountability mode requires a 24-hour waiting delay to prevent impulsive decisions.\n\nYour current protection settings remain active until the timer expires."
                     targetFeatureTitle.startsWith("Remove", ignoreCase = true) ->
                         "Removing your accountability partner requires a 24-hour waiting delay to prevent impulsive decisions.\n\nYour current partner protection remains active until the timer expires."
+                    targetFeatureTitle.equals("Log Out", ignoreCase = true) ->
+                        "Logging out requires a 24-hour waiting delay to prevent impulsive bypasses.\n\nProtection remains active until the timer expires."
                     else ->
                         "Turning off $targetFeatureTitle requires a 24-hour waiting delay to prevent impulsive decisions.\n\nThe feature will remain 100% blocked until the timer expires. You can cancel this unlock request at any time."
                 }
@@ -428,6 +512,23 @@ fun TimeDelayConfirmDialog(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+
+                if (!activeTimerTitle.isNullOrBlank()) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = primary.copy(alpha = 0.10f),
+                        border = BorderStroke(1.dp, primary.copy(alpha = 0.35f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = "Note: Starting this timer will replace your active 24h unlock timer for \"$activeTimerTitle\".",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = primary,
+                            modifier = Modifier.padding(10.dp)
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(20.dp))
 
@@ -457,29 +558,35 @@ fun TimeDelayActiveBanner(
     targetFeatureTitle: String,
     unlockAt: Long,
     onCancel: () -> Unit,
+    onCompleteUnlock: (() -> Unit)? = null,
+    isServerReady: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    var diffMillis by remember(unlockAt, targetFeatureTitle) {
+    var diffMillis by remember(unlockAt, targetFeatureTitle, isServerReady) {
         mutableStateOf(
-            BlockingPreferences.getTimeDelayRemainingMs(context).let {
+            BlockingPreferences.getTimeDelayRemainingMs(context, serverConfirmedReady = isServerReady).let {
                 if (it > 0L) it else (unlockAt - System.currentTimeMillis()).coerceAtLeast(0L)
             }
         )
     }
 
-    LaunchedEffect(unlockAt, targetFeatureTitle) {
+    LaunchedEffect(unlockAt, targetFeatureTitle, isServerReady) {
+        diffMillis = BlockingPreferences.getTimeDelayRemainingMs(context, serverConfirmedReady = isServerReady)
         while (diffMillis > 0L) {
-            delay(30_000L)
-            diffMillis = BlockingPreferences.getTimeDelayRemainingMs(context).let {
-                if (it > 0L || BlockingPreferences.timeDelayUnlockAt <= 0L) it
-                else (unlockAt - System.currentTimeMillis()).coerceAtLeast(0L)
-            }
+            val interval = if (diffMillis <= 120_000L) 1_000L else 10_000L
+            delay(interval)
+            diffMillis = BlockingPreferences.getTimeDelayRemainingMs(context, serverConfirmedReady = isServerReady)
         }
     }
 
+    val awaitingServerVerify = BlockingPreferences.isTimeDelayServerBacked &&
+        !isServerReady &&
+        unlockAt <= System.currentTimeMillis() &&
+        diffMillis > 0L
     val hours = diffMillis / (1000 * 60 * 60)
     val minutes = (diffMillis / (1000 * 60)) % 60
+    val seconds = (diffMillis / 1000) % 60
     val isComplete = diffMillis <= 0L
     val primary = MaterialTheme.colorScheme.primary
 
@@ -497,7 +604,9 @@ fun TimeDelayActiveBanner(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Row(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
@@ -516,22 +625,48 @@ fun TimeDelayActiveBanner(
                     )
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = if (isComplete) "Ready to toggle off" else "Available in ${hours}h ${minutes}m",
+                        text = when {
+                            isComplete -> "Cooling-off complete. Ready to unlock."
+                            awaitingServerVerify -> "Awaiting server time verification..."
+                            hours == 0L && minutes < 2L -> "Available in ${minutes}m ${seconds}s"
+                            else -> "Available in ${hours}h ${minutes}m"
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
 
-            OutlinedButton(
-                onClick = onCancel,
-                shape = MaterialTheme.shapes.small,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
-                modifier = Modifier.height(32.dp)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text("Cancel", style = MaterialTheme.typography.labelMedium)
+                if (isComplete && onCompleteUnlock != null) {
+                    Button(
+                        onClick = onCompleteUnlock,
+                        shape = MaterialTheme.shapes.small,
+                        colors = ButtonDefaults.buttonColors(containerColor = primary),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+                        modifier = Modifier.height(32.dp)
+                    ) {
+                        Text(
+                            text = "Unlock",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = onCancel,
+                    shape = MaterialTheme.shapes.small,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                    modifier = Modifier.height(32.dp)
+                ) {
+                    Text("Cancel", style = MaterialTheme.typography.labelMedium)
+                }
             }
         }
     }
@@ -545,17 +680,28 @@ fun FriendApprovalDialog(
     onSubmitCode: (String) -> Unit,
     onDismiss: () -> Unit,
     isVerifying: Boolean = false,
+    isSendingRequest: Boolean = false,
+    emailSentSuccess: Boolean = false,
     errorMessage: String? = null,
     requestError: String? = null
 ) {
     var code by remember { mutableStateOf("") }
-    var codeRequested by remember { mutableStateOf(false) }
+    var resendCooldownSeconds by remember { mutableIntStateOf(0) }
     val primary = MaterialTheme.colorScheme.primary
 
     LaunchedEffect(Unit) {
         onRequestCode()
-        codeRequested = true
+        resendCooldownSeconds = 30
     }
+
+    LaunchedEffect(resendCooldownSeconds) {
+        if (resendCooldownSeconds > 0) {
+            delay(1000L)
+            resendCooldownSeconds -= 1
+        }
+    }
+
+    val canResend = !isVerifying && !isSendingRequest && (resendCooldownSeconds == 0 || !requestError.isNullOrBlank())
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -606,6 +752,8 @@ fun FriendApprovalDialog(
                         "To change your accountability mode, ask your partner for their 6-digit approval code:"
                     targetFeatureTitle.startsWith("Remove", ignoreCase = true) ->
                         "To remove your accountability partner, ask your partner for their 6-digit approval code:"
+                    targetFeatureTitle.equals("Log Out", ignoreCase = true) ->
+                        "To log out of your account, ask your partner for their 6-digit approval code:"
                     else ->
                         "To disable $targetFeatureTitle, ask your partner for their 6-digit approval code:"
                 }
@@ -619,7 +767,11 @@ fun FriendApprovalDialog(
 
                 OutlinedTextField(
                     value = code,
-                    onValueChange = { if (it.length <= 6 && !isVerifying) code = it },
+                    onValueChange = { raw ->
+                        if (!isVerifying) {
+                            code = raw.filter { it.isDigit() }.take(6)
+                        }
+                    },
                     placeholder = {
                         Text(
                             "6-digit code",
@@ -627,6 +779,7 @@ fun FriendApprovalDialog(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.small,
                     colors = OutlinedTextFieldDefaults.colors(
@@ -654,19 +807,29 @@ fun FriendApprovalDialog(
                 TextButton(
                     onClick = {
                         onRequestCode()
-                        codeRequested = true
+                        resendCooldownSeconds = 30
                     },
-                    enabled = !isVerifying,
+                    enabled = canResend,
                     modifier = Modifier.align(Alignment.Start)
                 ) {
+                    val statusText = when {
+                        isSendingRequest -> "Sending approval email..."
+                        !requestError.isNullOrBlank() -> "Failed to send ($requestError) — tap to retry"
+                        emailSentSuccess && resendCooldownSeconds > 0 ->
+                            "Email sent to partner! Resend in ${resendCooldownSeconds}s"
+                        emailSentSuccess -> "Email sent to partner! Tap to resend"
+                        resendCooldownSeconds > 0 -> "Wait ${resendCooldownSeconds}s to resend"
+                        else -> "Send approval email to partner"
+                    }
+                    val statusColor = when {
+                        !requestError.isNullOrBlank() -> MaterialTheme.colorScheme.error
+                        emailSentSuccess -> MaterialTheme.pguardColors.success
+                        else -> primary
+                    }
                     Text(
-                        text = when {
-                            !requestError.isNullOrBlank() -> "Failed to send email ($requestError) — tap to retry"
-                            codeRequested -> "Email sent to partner! Tap to resend"
-                            else -> "Resend approval email to partner"
-                        },
+                        text = statusText,
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (!requestError.isNullOrBlank()) primary else if (codeRequested) MaterialTheme.pguardColors.success else primary
+                        color = statusColor
                     )
                 }
 
@@ -699,6 +862,132 @@ fun FriendApprovalDialog(
             }
         }
     }
+}
+
+@Composable
+fun SecurityAlertsDialog(
+    events: List<SecurityAlertDto>,
+    isLoading: Boolean,
+    onRefresh: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val primary = MaterialTheme.colorScheme.primary
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(22.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Partner Security Alerts",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    TextButton(onClick = onRefresh, enabled = !isLoading) {
+                        Text("Refresh", style = MaterialTheme.typography.labelMedium, color = primary)
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (isLoading) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(140.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = primary, modifier = Modifier.size(28.dp))
+                    }
+                } else if (events.isEmpty()) {
+                    Text(
+                        text = "No security or tamper alerts recorded yet. Alerts appear here whenever SOS Urge Lockdown, tamper attempts, or shield disables occur while your partner is linked.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        events.forEach { alert ->
+                            Surface(
+                                shape = MaterialTheme.shapes.small,
+                                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = formatSecurityEventTitle(alert.eventType),
+                                            style = MaterialTheme.typography.labelLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            color = primary
+                                        )
+                                        val dateText = alert.createdAt?.take(16)?.replace("T", " ").orEmpty()
+                                        if (dateText.isNotEmpty()) {
+                                            Text(
+                                                text = dateText,
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = alert.message,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismiss) {
+                        Text("Close", style = MaterialTheme.typography.labelLarge, color = primary)
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatSecurityEventTitle(eventType: String): String = when (eventType.lowercase()) {
+    "sos_triggered" -> "SOS Urge Triggered"
+    "protection_disabled" -> "Protection Disabled"
+    "permission_revoked" -> "Permission Revoked"
+    "uninstall_attempt" -> "Tamper / Uninstall Attempt"
+    else -> eventType
 }
 
 @Composable

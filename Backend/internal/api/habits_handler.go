@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"Backend/internal/middleware"
 	"Backend/internal/store"
@@ -122,7 +123,18 @@ func (h *HabitsHandler) HandleResetStreak(w http.ResponseWriter, r *http.Request
 	// Optional body
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	streak, relapseLog, err := h.habitsStore.ResetStreak(user.ID, req.Trigger, req.Notes)
+	trigger := strings.TrimSpace(req.Trigger)
+	if utf8.RuneCountInString(trigger) > 100 {
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Trigger must be 100 characters or fewer"})
+		return
+	}
+	notes := strings.TrimSpace(req.Notes)
+	if utf8.RuneCountInString(notes) > 500 {
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Notes must be 500 characters or fewer"})
+		return
+	}
+
+	streak, relapseLog, err := h.habitsStore.ResetStreak(user.ID, trigger, notes)
 	if err != nil {
 		h.logger.Printf("ERROR: reset streak for user %d: %v", user.ID, err)
 		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "Failed to reset streak"})
@@ -209,12 +221,23 @@ func (h *HabitsHandler) HandleCreateHabit(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if strings.TrimSpace(req.Title) == "" {
+	title := strings.TrimSpace(req.Title)
+	if title == "" {
 		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Title is required"})
 		return
 	}
+	if utf8.RuneCountInString(title) > 100 {
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Title must be 100 characters or fewer"})
+		return
+	}
 
-	habit, err := h.habitsStore.CreateHabit(user.ID, req.Title, req.Icon)
+	icon := strings.TrimSpace(req.Icon)
+	if utf8.RuneCountInString(icon) > 50 {
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Icon must be 50 characters or fewer"})
+		return
+	}
+
+	habit, err := h.habitsStore.CreateHabit(user.ID, title, icon)
 	if err != nil {
 		h.logger.Printf("ERROR: create habit for user %d: %v", user.ID, err)
 		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "Failed to create habit"})

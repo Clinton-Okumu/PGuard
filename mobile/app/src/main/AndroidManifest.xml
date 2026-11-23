@@ -5,8 +5,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_DELETE_PACKAGES" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
         tools:ignore="QueryAllPackagesPermission" />
 
@@ -34,13 +36,6 @@
             </intent-filter>
         </activity>
 
-        <activity
-            android:name=".presentation.blocked.BlockedActivity"
-            android:exported="false"
-            android:theme="@style/Theme.PGuard"
-            android:launchMode="singleTop"
-            android:excludeFromRecents="true" />
-
         <service
             android:name=".engine.accessibility.PGuardAccessibilityService"
             android:label="@string/accessibility_service_label"
@@ -52,6 +47,20 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <service
+            android:name=".engine.vpn.PGuardVpnService"
+            android:label="@string/vpn_service_label"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Local on-device DNS content filtering VPN for blocking adult websites and custom blocklist domains." />
         </service>
 
         <receiver
@@ -67,6 +76,9 @@
                 <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
             </intent-filter>
         </receiver>
+        <receiver
+            android:name=".engine.accountability.TimeDelayReadyReceiver"
+            android:exported="false" />
     </application>
 
 </manifest>

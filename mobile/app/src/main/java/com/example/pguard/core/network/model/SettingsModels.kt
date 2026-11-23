@@ -18,6 +18,7 @@ data class UserSettingsDto(
     @SerialName("blocked_screen_message") val blockedScreenMessage: String = "This page is blocked.",
     @SerialName("blocked_screen_countdown") val blockedScreenCountdown: Int = 3,
     @SerialName("redirect_url") val redirectUrl: String = "",
+    @SerialName("accountability_mode") val accountabilityMode: String = "none",
     @SerialName("created_at") val createdAt: String? = null,
     @SerialName("updated_at") val updatedAt: String? = null
 )
@@ -34,7 +35,8 @@ data class UpdateSettingsRequest(
     @SerialName("block_newly_installed_apps") val blockNewlyInstalledApps: Boolean? = null,
     @SerialName("blocked_screen_message") val blockedScreenMessage: String? = null,
     @SerialName("blocked_screen_countdown") val blockedScreenCountdown: Int? = null,
-    @SerialName("redirect_url") val redirectUrl: String? = null
+    @SerialName("redirect_url") val redirectUrl: String? = null,
+    @SerialName("accountability_mode") val accountabilityMode: String? = null
 )
 
 @Serializable

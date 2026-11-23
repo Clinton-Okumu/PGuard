@@ -115,6 +115,9 @@ func SetUpRoutes(app *app.Application) *chi.Mux {
 			r.Get("/accountability/events", app.Middleware.RequireUser(app.AccountabilityHandler.HandleGetEvents))
 			r.With(accountabilityLimiter.Middleware).Post("/accountability/request-unlock", app.Middleware.RequireUser(app.AccountabilityHandler.HandleRequestUnlockCode))
 			r.With(accountabilityLimiter.Middleware).Post("/accountability/verify-unlock", app.Middleware.RequireUser(app.AccountabilityHandler.HandleVerifyUnlockCode))
+			r.Get("/accountability/time-delay", app.Middleware.RequireUser(app.AccountabilityHandler.HandleGetTimeDelay))
+			r.With(accountabilityLimiter.Middleware).Post("/accountability/time-delay", app.Middleware.RequireUser(app.AccountabilityHandler.HandleStartTimeDelay))
+			r.Delete("/accountability/time-delay", app.Middleware.RequireUser(app.AccountabilityHandler.HandleClearTimeDelay))
 		})
 	})
 

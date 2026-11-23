@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -23,6 +24,8 @@ var (
 	ErrInvalidEventType           = errors.New("invalid security event type")
 	ErrInvalidUnlockCode          = errors.New("invalid or expired approval code")
 	ErrUnlockCodeAttemptsExceeded = errors.New("too many invalid approval code attempts; request a new code")
+	ErrUnlockCodeFeatureMismatch  = errors.New("approval code was issued for a different action")
+	ErrTimeDelayNotFound          = errors.New("no active time delay unlock found")
 )
 
 const (
@@ -30,10 +33,10 @@ const (
 	PartnerStatusAccepted     = "accepted"
 	PartnerStatusDisconnected = "disconnected"
 
-	EventSOSTriggered         = "sos_triggered"
-	EventProtectionDisabled   = "protection_disabled"
-	EventPermissionRevoked    = "permission_revoked"
-	EventUninstallAttempt     = "uninstall_attempt"
+	EventSOSTriggered       = "sos_triggered"
+	EventProtectionDisabled = "protection_disabled"
+	EventPermissionRevoked  = "permission_revoked"
+	EventUninstallAttempt   = "uninstall_attempt"
 )
 
 func IsValidEventType(t string) bool {
@@ -43,6 +46,28 @@ func IsValidEventType(t string) bool {
 	default:
 		return false
 	}
+}
+
+// IsValidEmail validates an email address using net/mail and requires a non-empty local part
+// plus a dot-containing domain without leading/trailing dots or whitespace.
+func IsValidEmail(raw string) bool {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" || strings.ContainsAny(trimmed, " \t\r\n") {
+		return false
+	}
+	parsed, err := mail.ParseAddress(trimmed)
+	if err != nil || !strings.EqualFold(parsed.Address, trimmed) {
+		return false
+	}
+	atIdx := strings.LastIndex(parsed.Address, "@")
+	if atIdx <= 0 || atIdx+1 >= len(parsed.Address) {
+		return false
+	}
+	domain := parsed.Address[atIdx+1:]
+	if !strings.Contains(domain, ".") || strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") {
+		return false
+	}
+	return true
 }
 
 // NormalizeEmail normalizes an email for comparison:
@@ -82,7 +107,7 @@ type AccountabilityPartner struct {
 	PartnerEmail  string    `gorm:"size:255;not null;index:idx_user_partner_email,unique" json:"partner_email"`
 	PartnerName   string    `gorm:"size:100" json:"partner_name"`
 	PartnerUserID *uint     `gorm:"index" json:"partner_user_id,omitempty"`
-	InviteCode    string    `gorm:"size:16;uniqueIndex;not null" json:"invite_code"`
+	InviteCode    string    `gorm:"size:16;uniqueIndex;not null" json:"-"`
 	Status        string    `gorm:"size:20;default:'pending';not null" json:"status"`
 	CreatedAt     time.Time `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt     time.Time `gorm:"autoUpdateTime" json:"updated_at"`
@@ -111,6 +136,17 @@ type UnlockCode struct {
 	User        User      `gorm:"foreignKey:UserID" json:"-"`
 }
 
+type TimeDelayUnlock struct {
+	ID          uint      `gorm:"primaryKey" json:"id"`
+	UserID      uint      `gorm:"uniqueIndex;not null" json:"user_id"`
+	TargetKey   string    `gorm:"size:160;not null" json:"target_key"`
+	TargetTitle string    `gorm:"size:160;not null" json:"target_title"`
+	UnlockAt    time.Time `gorm:"not null" json:"unlock_at"`
+	CreatedAt   time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt   time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+	User        User      `gorm:"foreignKey:UserID" json:"-"`
+}
+
 func GenerateInviteCode() string {
 	const charset = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	b := make([]byte, 6)
@@ -129,7 +165,11 @@ type AccountabilityStore interface {
 	DisconnectPartner(userID uint) error
 
 	CreateUnlockCode(userID uint, featureName, codeHash string, expiresAt time.Time) (*UnlockCode, error)
-	VerifyAndConsumeUnlockCode(userID uint, codeHash string) (*UnlockCode, error)
+	VerifyAndConsumeUnlockCode(userID uint, codeHash, expectedFeature string) (*UnlockCode, error)
+
+	UpsertTimeDelay(userID uint, targetKey, targetTitle string, unlockAt time.Time) (*TimeDelayUnlock, error)
+	GetTimeDelay(userID uint) (*TimeDelayUnlock, error)
+	ClearTimeDelay(userID uint) error
 
 	RecordSecurityEvent(userID uint, eventType, message string) (*SecurityAlert, error)
 	GetRecentEvents(userID uint, limit int) ([]SecurityAlert, error)
@@ -145,7 +185,7 @@ func NewPostgresAccountabilityStore(db *gorm.DB) *PostgresAccountabilityStore {
 
 func (s *PostgresAccountabilityStore) CreateInvite(userID uint, userEmail, partnerEmail, partnerName string) (*AccountabilityPartner, error) {
 	email := strings.ToLower(strings.TrimSpace(partnerEmail))
-	if email == "" || !strings.Contains(email, "@") {
+	if !IsValidEmail(email) {
 		return nil, ErrInvalidEmail
 	}
 
@@ -164,14 +204,25 @@ func (s *PostgresAccountabilityStore) CreateInvite(userID uint, userEmail, partn
 	var existing AccountabilityPartner
 	err := s.db.Where("user_id = ? AND partner_email = ?", userID, email).First(&existing).Error
 	if err == nil {
+		trimmedName := strings.TrimSpace(partnerName)
 		if existing.Status == PartnerStatusDisconnected {
 			existing.Status = PartnerStatusPending
 			existing.InviteCode = GenerateInviteCode()
-			existing.PartnerName = strings.TrimSpace(partnerName)
+			existing.PartnerName = trimmedName
+			existing.UpdatedAt = time.Now()
 			if err := s.db.Save(&existing).Error; err != nil {
 				return nil, err
 			}
 			return &existing, nil
+		}
+		if existing.Status == PartnerStatusPending {
+			existing.UpdatedAt = time.Now()
+			if trimmedName != "" {
+				existing.PartnerName = trimmedName
+			}
+			if err := s.db.Save(&existing).Error; err != nil {
+				return nil, err
+			}
 		}
 		return &existing, nil
 	}
@@ -285,7 +336,7 @@ func (s *PostgresAccountabilityStore) CreateUnlockCode(userID uint, featureName,
 	return created, nil
 }
 
-func (s *PostgresAccountabilityStore) VerifyAndConsumeUnlockCode(userID uint, codeHash string) (*UnlockCode, error) {
+func (s *PostgresAccountabilityStore) VerifyAndConsumeUnlockCode(userID uint, codeHash, expectedFeature string) (*UnlockCode, error) {
 	var verified *UnlockCode
 	var domainErr error
 
@@ -321,6 +372,19 @@ func (s *PostgresAccountabilityStore) VerifyAndConsumeUnlockCode(userID uint, co
 			return nil
 		}
 
+		expected := strings.TrimSpace(expectedFeature)
+		if expected != "" && !strings.EqualFold(strings.TrimSpace(rec.FeatureName), expected) {
+			rec.Attempts++
+			if rec.Attempts >= rec.MaxAttempts {
+				rec.Used = true
+			}
+			if err := tx.Save(&rec).Error; err != nil {
+				return err
+			}
+			domainErr = ErrUnlockCodeFeatureMismatch
+			return nil
+		}
+
 		if subtle.ConstantTimeCompare([]byte(rec.CodeHash), []byte(codeHash)) != 1 {
 			rec.Attempts++
 			if rec.Attempts >= rec.MaxAttempts {
@@ -350,6 +414,56 @@ func (s *PostgresAccountabilityStore) VerifyAndConsumeUnlockCode(userID uint, co
 		return nil, domainErr
 	}
 	return verified, nil
+}
+
+func (s *PostgresAccountabilityStore) UpsertTimeDelay(userID uint, targetKey, targetTitle string, unlockAt time.Time) (*TimeDelayUnlock, error) {
+	var existing TimeDelayUnlock
+	err := s.db.Where("user_id = ?", userID).First(&existing).Error
+	if err == nil {
+		existing.TargetKey = strings.TrimSpace(targetKey)
+		existing.TargetTitle = strings.TrimSpace(targetTitle)
+		existing.UnlockAt = unlockAt.UTC()
+		if err := s.db.Save(&existing).Error; err != nil {
+			return nil, err
+		}
+		return &existing, nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, err
+	}
+
+	rec := &TimeDelayUnlock{
+		UserID:      userID,
+		TargetKey:   strings.TrimSpace(targetKey),
+		TargetTitle: strings.TrimSpace(targetTitle),
+		UnlockAt:    unlockAt.UTC(),
+	}
+	if err := s.db.Create(rec).Error; err != nil {
+		return nil, err
+	}
+	return rec, nil
+}
+
+func (s *PostgresAccountabilityStore) GetTimeDelay(userID uint) (*TimeDelayUnlock, error) {
+	var rec TimeDelayUnlock
+	if err := s.db.Where("user_id = ?", userID).First(&rec).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrTimeDelayNotFound
+		}
+		return nil, err
+	}
+	return &rec, nil
+}
+
+func (s *PostgresAccountabilityStore) ClearTimeDelay(userID uint) error {
+	result := s.db.Where("user_id = ?", userID).Delete(&TimeDelayUnlock{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return ErrTimeDelayNotFound
+	}
+	return nil
 }
 
 func (s *PostgresAccountabilityStore) RecordSecurityEvent(userID uint, eventType, message string) (*SecurityAlert, error) {

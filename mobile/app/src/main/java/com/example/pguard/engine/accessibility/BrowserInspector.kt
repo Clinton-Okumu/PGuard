@@ -8,8 +8,14 @@ import android.os.Build
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import java.util.Locale
 
 object BrowserInspector {
+
+    data class ExtractedUrl(
+        val value: String,
+        val isTrustedAddressBar: Boolean
+    )
 
     /**
      * Verified supported browsers:
@@ -18,16 +24,15 @@ object BrowserInspector {
      * 3. Mozilla Firefox
      * 4. Firefox Lite
      * 5. Brave Browser
-     * 6. Opera
-     * 7. Opera Mini
+     * 6. Microsoft Edge
+     * 7. Opera
      * 8. DuckDuckGo
      * 9. Vivaldi
-     * 10. Tor Browser
-     * 11. Spin Safe Browser
-     * 12. Ecosia
-     * 13. Free Adblocker Browser
-     * 14. 1DM (1DM & 1DM+)
-     * 15. Web Video Cast
+     * 10. Spin Safe Browser
+     * 11. Ecosia
+     * 12. Free Adblocker Browser
+     * 13. 1DM (1DM & 1DM+)
+     * 14. Web Video Cast
      */
     val SUPPORTED_BROWSER_NAMES = listOf(
         "Google Chrome",
@@ -35,11 +40,10 @@ object BrowserInspector {
         "Mozilla Firefox",
         "Firefox Lite",
         "Brave Browser",
+        "Microsoft Edge",
         "Opera Browser",
-        "Opera Mini",
         "DuckDuckGo Privacy Browser",
         "Vivaldi Browser",
-        "Tor Browser",
         "Spin Safe Browser",
         "Ecosia",
         "Free Adblocker Browser",
@@ -76,15 +80,17 @@ object BrowserInspector {
         "com.brave.browser_beta",
         "com.brave.browser_nightly",
 
-        // 6. Opera
+        // 6. Microsoft Edge
+        "com.microsoft.emmx",
+        "com.microsoft.emmx.beta",
+        "com.microsoft.emmx.canary",
+        "com.microsoft.emmx.dev",
+
+        // 7. Opera
         "com.opera.browser",
         "com.opera.browser.beta",
         "com.opera.gx",
         "com.opera.touch",
-
-        // 7. Opera Mini
-        "com.opera.mini.native",
-        "com.opera.mini.native.beta",
 
         // 8. DuckDuckGo
         "com.duckduckgo.mobile.android",
@@ -93,38 +99,37 @@ object BrowserInspector {
         "com.vivaldi.browser",
         "com.vivaldi.browser.snapshot",
 
-        // 10. Tor Browser
-        "org.torproject.torbrowser",
-        "org.torproject.torbrowser_alpha",
-
-        // 11. Spin Safe Browser
+        // 10. Spin Safe Browser
         "com.nationaledtech.spinbrowser",
 
-        // 12. Ecosia
+        // 11. Ecosia
         "com.ecosia.android",
 
-        // 13. Free Adblocker Browser
+        // 12. Free Adblocker Browser
         "com.hsv.freeadblockerbrowser",
         "com.adblocker.browser",
 
-        // 14. 1DM / 1DM+
+        // 13. 1DM / 1DM+
         "idm.internet.download.manager",
         "idm.internet.download.manager.plus",
         "idm.internet.download.manager.lite",
 
-        // 15. Web Video Cast
+        // 14. Web Video Cast
         "com.instantbits.cast.webvideo"
     )
 
     /**
-     * Common known unsupported browser packages for instant matching.
+     * Common known unsupported browser packages (including DNS-bypassing proxy/onion browsers)
+     * for instant matching.
      */
     val KNOWN_UNSUPPORTED_BROWSER_PACKAGES = setOf(
-        // Microsoft Edge
-        "com.microsoft.emmx",
-        "com.microsoft.emmx.beta",
-        "com.microsoft.emmx.canary",
-        "com.microsoft.emmx.dev",
+        // Tor Browser (tunnels DNS/traffic through Tor onion circuits)
+        "org.torproject.torbrowser",
+        "org.torproject.torbrowser_alpha",
+
+        // Opera Mini (cloud proxy compression bypasses local DNS filtering)
+        "com.opera.mini.native",
+        "com.opera.mini.native.beta",
 
         // UC Browser / UC Mini
         "com.ucmobile.intl",
@@ -177,7 +182,7 @@ object BrowserInspector {
         "com.fulldive.mobile",
         "com.chimbori.hermitcrab",
         "com.jio.web.pages"
-    ).map { it.lowercase() }.toSet()
+    ).map { it.lowercase(Locale.ROOT) }.toSet()
 
     @Volatile
     private var cachedBrowserPackages: Set<String>? = null
@@ -193,7 +198,7 @@ object BrowserInspector {
 
         val browsers = mutableSetOf<String>()
         try {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com")).apply {
+            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com")).apply {
                 addCategory(Intent.CATEGORY_BROWSABLE)
             }
             val pm = context.packageManager
@@ -206,7 +211,7 @@ object BrowserInspector {
             for (ri in resolved) {
                 val pkg = ri.activityInfo?.packageName
                 if (!pkg.isNullOrBlank() && pkg != "android" && pkg != context.packageName) {
-                    browsers.add(pkg.lowercase())
+                    browsers.add(pkg.lowercase(Locale.ROOT))
                 }
             }
         } catch (e: Exception) {
@@ -217,19 +222,53 @@ object BrowserInspector {
         return browsers
     }
 
+    fun invalidateBrowserCache() {
+        cachedBrowserPackages = null
+        lastBrowserCacheTime = 0L
+    }
+
+    private val NON_WEB_BROWSER_TOKENS = setOf(
+        "file", "files", "doc", "docs", "document", "documents",
+        "media", "photo", "photos", "gallery", "image", "images",
+        "music", "audio", "video", "videos", "font", "fonts",
+        "sqlite", "database", "db", "ftp", "smb", "lan", "dlna", "upnp",
+        "bluetooth", "nfc", "zip", "rar", "archive", "root",
+        "explorer", "manager", "viewer", "reader", "network", "local",
+        "log", "logs", "contacts", "package"
+    )
+
+    internal fun isLikelyWebBrowserPackageName(packageName: String): Boolean {
+        val pkg = packageName.lowercase(Locale.ROOT)
+        if (!pkg.contains("browser")) return false
+
+        val prefixBeforeBrowser = pkg.substringBefore("browser").trimEnd('.', '_', '-')
+        val tokens = pkg.split('.', '_', '-')
+        if (tokens.any { it in NON_WEB_BROWSER_TOKENS }) return false
+        if (NON_WEB_BROWSER_TOKENS.any { token ->
+                prefixBeforeBrowser.endsWith(token) || pkg.contains("${token}browser")
+            }
+        ) {
+            return false
+        }
+
+        return true
+    }
+
     fun isSupportedBrowser(packageName: String): Boolean {
-        val pkg = packageName.lowercase()
+        val pkg = packageName.lowercase(Locale.ROOT)
         return pkg in SUPPORTED_BROWSER_PACKAGES
     }
 
     fun isUnsupportedBrowser(packageName: String, context: Context?): Boolean {
-        val pkg = packageName.lowercase()
+        val pkg = packageName.lowercase(Locale.ROOT)
         // Supported browsers are never unsupported
         if (isSupportedBrowser(pkg)) return false
 
-        // Exclude system UI, launchers, settings, and PGuard
+        // Exclude system UI, launchers, settings, Google Search app, and PGuard
         if (pkg == "android" ||
             pkg.startsWith("com.android.systemui") ||
+            pkg == "com.google.android.googlequicksearchbox" ||
+            pkg == "com.google.android.apps.searchlite" ||
             pkg.contains("launcher") ||
             pkg.contains("accessibility") ||
             pkg.contains("settings") ||
@@ -241,12 +280,8 @@ object BrowserInspector {
         // 1. Static check of known unsupported browser packages
         if (pkg in KNOWN_UNSUPPORTED_BROWSER_PACKAGES) return true
 
-        // 2. Package naming pattern heuristic
-        if (pkg.contains("browser") ||
-            pkg.contains("webbrowser") ||
-            pkg.contains("internet.browser") ||
-            pkg.endsWith(".browser")
-        ) {
+        // 2. Package naming pattern heuristic (rejecting non-web file/media/db browsers)
+        if (isLikelyWebBrowserPackageName(pkg)) {
             return true
         }
 
@@ -262,7 +297,7 @@ object BrowserInspector {
     }
 
     fun isBrowser(packageName: String, context: Context? = null): Boolean {
-        val pkg = packageName.lowercase()
+        val pkg = packageName.lowercase(Locale.ROOT)
         if (isSupportedBrowser(pkg)) return true
         if (pkg in KNOWN_UNSUPPORTED_BROWSER_PACKAGES) return true
         if (pkg.contains("firefox") || pkg.contains("mozilla") || pkg.contains("fenix") ||
@@ -290,10 +325,12 @@ object BrowserInspector {
                 if (label.isNotBlank()) return label
             } catch (_: Exception) {}
         }
-        val lower = packageName.lowercase()
+        val lower = packageName.lowercase(Locale.ROOT)
         return when {
             lower.contains("sbrowser") -> "Samsung Internet"
             lower.contains("edge") || lower.contains("emmx") -> "Microsoft Edge"
+            lower.contains("torproject") -> "Tor Browser"
+            lower.contains("opera.mini") -> "Opera Mini"
             lower.contains("ucmobile") || lower.contains("uc.browser") -> "UC Browser"
             lower.contains("kiwi") -> "Kiwi Browser"
             lower.contains("mi.globalbrowser") || lower.contains("mint") -> "Mi Browser"
@@ -307,7 +344,7 @@ object BrowserInspector {
         }
     }
 
-    private val ADDRESS_BAR_ID_SUFFIXES = listOf(
+    private val ADDRESS_BAR_VIEW_SUFFIXES = setOf(
         "mozac_browser_toolbar_url_view",
         "mozac_browser_toolbar_edit_url_view",
         "toolbar_display_url",
@@ -322,12 +359,105 @@ object BrowserInspector {
         "location_bar",
         "control_url",
         "custom_url_bar",
-        "omnibarTextInput",
+        "omnibartextinput",
         "url_field",
         "search_edit_text",
         "url_text",
         "address_bar"
     )
+
+    private val GENERIC_FALLBACK_SUFFIXES = listOf(
+        "url_bar",
+        "location_bar_edit_text",
+        "mozac_browser_toolbar_url_view",
+        "address_bar",
+        "url_field",
+        "url_text"
+    )
+
+    private val ACTION_VIEW_ID_MARKERS = listOf(
+        "menu", "tab", "button", "action", "overflow", "share"
+    )
+
+    /**
+     * Maps a browser package directly to its 1–4 known address-bar view resource IDs,
+     * avoiding expensive cross-package IPC probing across 19+ guesses per event.
+     */
+    fun addressBarIdsForPackage(packageName: String): List<String> {
+        val rawPkg = packageName.trim()
+        if (rawPkg.isBlank()) return emptyList()
+        val lower = rawPkg.lowercase(Locale.ROOT)
+
+        val suffixes = when {
+            lower == "com.android.chrome" || lower.startsWith("com.chrome.") ||
+                lower.startsWith("com.brave.browser") ||
+                lower.startsWith("com.microsoft.emmx") ||
+                lower.startsWith("com.vivaldi.browser") ||
+                lower == "com.ecosia.android" -> listOf("url_bar")
+
+            lower.startsWith("com.sec.android.app.sbrowser") ->
+                listOf("location_bar_edit_text", "url_bar_title")
+
+            lower.startsWith("org.mozilla.") || lower.startsWith("org.torproject.") ->
+                listOf(
+                    "mozac_browser_toolbar_url_view",
+                    "mozac_browser_toolbar_edit_url_view",
+                    "display_url",
+                    "url_view"
+                )
+
+            lower.startsWith("com.opera.") ->
+                listOf("url_field", "url_bar")
+
+            lower == "com.duckduckgo.mobile.android" ->
+                listOf("omnibarTextInput")
+
+            lower == "com.nationaledtech.spinbrowser" ->
+                listOf("mozac_browser_toolbar_url_view", "url_bar")
+
+            lower == "com.hsv.freeadblockerbrowser" || lower == "com.adblocker.browser" ->
+                listOf("url_bar", "address_bar")
+
+            lower.startsWith("idm.internet.download.manager") ->
+                listOf("url_bar", "search_edit_text", "url_text")
+
+            lower == "com.instantbits.cast.webvideo" ->
+                listOf("url_text", "address_bar", "url_bar")
+
+            lower == "com.google.android.googlequicksearchbox" ||
+                lower == "com.google.android.apps.searchlite" ->
+                listOf("search_box_text", "url_bar")
+
+            else -> GENERIC_FALLBACK_SUFFIXES
+        }
+
+        return suffixes.map { suffix -> "$rawPkg:id/$suffix" }
+    }
+
+    fun isLikelyAddressBarViewId(viewId: String?): Boolean {
+        if (viewId.isNullOrBlank()) return false
+        val lower = viewId.lowercase(Locale.ROOT)
+        if (ACTION_VIEW_ID_MARKERS.any { lower.contains(it) }) return false
+        val resourceSuffix = lower.substringAfter(":id/", lower)
+        return resourceSuffix in ADDRESS_BAR_VIEW_SUFFIXES ||
+            lower.endsWith("url_view") ||
+            lower.endsWith("edit_url_view") ||
+            lower.endsWith("display_url") ||
+            lower.endsWith("url_bar") ||
+            lower.endsWith("address_bar") ||
+            lower.endsWith("url_text") ||
+            lower.endsWith("url_field") ||
+            lower.endsWith("search_box_text") ||
+            lower.endsWith("location_bar_edit_text") ||
+            lower.contains("omnibar")
+    }
+
+    fun isAddressBarSource(viewId: String?, className: String?): Boolean {
+        val lowerId = viewId?.lowercase(Locale.ROOT).orEmpty()
+        if (ACTION_VIEW_ID_MARKERS.any { lowerId.contains(it) }) return false
+        if (isLikelyAddressBarViewId(viewId)) return true
+        return className?.contains("EditText", ignoreCase = true) == true
+    }
 
     private val IGNORED_PLACEHOLDERS = setOf(
         "search or enter address",
@@ -360,60 +490,111 @@ object BrowserInspector {
     )
 
     /**
-     * Extracts active URL or search text from event and node hierarchy.
+     * Extracts active URL or search-bar text with provenance metadata (`isTrustedAddressBar`).
+     *
+     * Only verified address-bar or EditText nodes are marked trusted; arbitrary links on a web
+     * page are never treated as the active URL so they cannot bypass the whitelist.
      */
-    fun extractUrl(rootNode: AccessibilityNodeInfo?, event: AccessibilityEvent?): String? {
-        val packageName = event?.packageName?.toString() ?: ""
+    fun extractUrlInfo(
+        rootNode: AccessibilityNodeInfo?,
+        event: AccessibilityEvent?,
+        allowFallbackTraversal: Boolean = false
+    ): ExtractedUrl? {
+        val packageName = event?.packageName?.toString()?.takeIf { it.isNotBlank() }
+            ?: rootNode?.packageName?.toString().orEmpty()
 
-        // 1. Direct lookup by address bar view IDs (both dynamic package-prefixed & suffixes)
-        if (rootNode != null) {
-            val candidatePackages = mutableListOf<String>()
-            if (packageName.isNotBlank()) candidatePackages.add(packageName)
-            if (packageName.contains("firefox", ignoreCase = true) || packageName.contains("mozilla", ignoreCase = true)) {
-                candidatePackages.add("org.mozilla.firefox")
-                candidatePackages.add("org.mozilla.fenix")
-            }
-
-            for (pkg in candidatePackages) {
-                for (suffix in ADDRESS_BAR_ID_SUFFIXES) {
-                    val fullId = "$pkg:id/$suffix"
-                    val nodes = rootNode.findAccessibilityNodeInfosByViewId(fullId)
-                    for (node in nodes) {
-                        val text = getNodeText(node)
-                        if (!text.isNullOrBlank() && !isIgnoredPlaceholder(text)) {
-                            return text
-                        }
-                        // Check immediate children if container
-                        for (c in 0 until node.childCount) {
-                            val child = node.getChild(c) ?: continue
-                            val childText = getNodeText(child)
-                            if (!childText.isNullOrBlank() && !isIgnoredPlaceholder(childText)) {
-                                return childText
-                            }
+        // 1. Direct lookup using the browser's exact address-bar resource IDs
+        if (rootNode != null && packageName.isNotBlank()) {
+            for (fullId in addressBarIdsForPackage(packageName)) {
+                val nodes = try {
+                    rootNode.findAccessibilityNodeInfosByViewId(fullId)
+                } catch (_: Exception) {
+                    emptyList()
+                }
+                for (node in nodes) {
+                    val text = getNodeText(node)
+                    if (!text.isNullOrBlank() && !isIgnoredPlaceholder(text)) {
+                        return ExtractedUrl(text, isTrustedAddressBar = true)
+                    }
+                    for (c in 0 until node.childCount) {
+                        val child = node.getChild(c) ?: continue
+                        val childText = getNodeText(child)
+                        if (!childText.isNullOrBlank() && !isIgnoredPlaceholder(childText)) {
+                            return ExtractedUrl(childText, isTrustedAddressBar = true)
                         }
                     }
                 }
             }
         }
 
-        // 2. Traversal through candidate address bar / toolbar nodes
-        val fallbackUrl = findAddressBarTextFallback(rootNode, depth = 0)
-        if (!fallbackUrl.isNullOrBlank() && !isIgnoredPlaceholder(fallbackUrl)) {
-            return fallbackUrl
+        // 2. Direct event source check (for address bar / EditText edits before tree updates)
+        val source = event?.source
+        if (source != null && isAddressBarSource(source.viewIdResourceName, source.className?.toString())) {
+            val srcText = getNodeText(source)
+            if (!srcText.isNullOrBlank() && !isIgnoredPlaceholder(srcText)) {
+                return ExtractedUrl(srcText, isTrustedAddressBar = true)
+            }
         }
 
-        // 3. Check event text (only if it looks like a URL or search query, not placeholder)
-        if (event != null && event.text.isNotEmpty()) {
-            for (charSeq in event.text) {
-                val str = charSeq?.toString()
-                if (!str.isNullOrBlank() && !isIgnoredPlaceholder(str) &&
-                    (str.contains('.') || str.contains('/') || str.contains(' '))) {
-                    return str
-                }
+        // 3. Throttled fallback tree traversal for verified address-bar / EditText nodes only
+        if (allowFallbackTraversal && rootNode != null) {
+            val fallbackUrl = findAddressBarTextFallback(rootNode, depth = 0, maxDepth = 18)
+            if (!fallbackUrl.isNullOrBlank() && !isIgnoredPlaceholder(fallbackUrl)) {
+                return ExtractedUrl(fallbackUrl, isTrustedAddressBar = true)
             }
         }
 
         return null
+    }
+
+    /**
+     * Backwards-compatible wrapper returning only the trusted address-bar URL string.
+     */
+    fun extractUrl(rootNode: AccessibilityNodeInfo?, event: AccessibilityEvent?): String? =
+        extractUrlInfo(rootNode, event, allowFallbackTraversal = false)?.value
+
+    /**
+     * Single-pass bounded collector of visible browser texts so callers can evaluate
+     * blocklists and multi-signal adult scoring without redundant IPC lookups.
+     */
+    fun collectVisibleWebTexts(
+        rootNode: AccessibilityNodeInfo?,
+        maxDepth: Int = 30,
+        maxItems: Int = 200
+    ): List<String> {
+        if (rootNode == null) return emptyList()
+        val out = LinkedHashSet<String>()
+        collectTextsRecursive(rootNode, depth = 0, maxDepth = maxDepth, maxItems = maxItems, out = out)
+        return out.toList()
+    }
+
+    private fun collectTextsRecursive(
+        node: AccessibilityNodeInfo?,
+        depth: Int,
+        maxDepth: Int,
+        maxItems: Int,
+        out: MutableSet<String>
+    ) {
+        if (node == null || depth > maxDepth || out.size >= maxItems) return
+
+        val text = node.text?.toString()?.trim()
+        if (!text.isNullOrBlank() && !isIgnoredPlaceholder(text)) {
+            out.add(text)
+        }
+        if (out.size >= maxItems) return
+
+        val desc = node.contentDescription?.toString()?.trim()
+        if (!desc.isNullOrBlank() && !isIgnoredPlaceholder(desc)) {
+            out.add(desc)
+        }
+        if (out.size >= maxItems) return
+
+        val count = node.childCount
+        for (i in 0 until count) {
+            val child = node.getChild(i) ?: continue
+            collectTextsRecursive(child, depth + 1, maxDepth, maxItems, out)
+            if (out.size >= maxItems) break
+        }
     }
 
     /**
@@ -459,51 +640,24 @@ object BrowserInspector {
         return null
     }
 
-    private fun findAddressBarTextFallback(node: AccessibilityNodeInfo?, depth: Int): String? {
-        if (node == null || depth > 35) return null
+    private fun findAddressBarTextFallback(
+        node: AccessibilityNodeInfo?,
+        depth: Int,
+        maxDepth: Int
+    ): String? {
+        if (node == null || depth > maxDepth) return null
 
-        val viewId = node.viewIdResourceName?.lowercase() ?: ""
+        val viewId = node.viewIdResourceName
+        val className = node.className?.toString()
         val text = getNodeText(node)
 
-        // Exclude standard action buttons from being mistaken for the address bar
-        val isActionButton = viewId.contains("menu") ||
-                viewId.contains("tab") ||
-                viewId.contains("button") ||
-                viewId.contains("action") ||
-                viewId.contains("overflow") ||
-                viewId.contains("share")
-
-        val isLikelyAddressBar = !isActionButton && (
-                viewId.endsWith("url_view") ||
-                viewId.endsWith("edit_url_view") ||
-                viewId.endsWith("display_url") ||
-                viewId.endsWith("url_bar") ||
-                viewId.endsWith("address_bar") ||
-                viewId.endsWith("url_text") ||
-                viewId.endsWith("search_box_text") ||
-                viewId.endsWith("location_bar_edit_text") ||
-                viewId.contains("omnibar") ||
-                node.className?.toString()?.contains("EditText", ignoreCase = true) == true
-        )
-
-        if (!text.isNullOrBlank()) {
-            if (isLikelyAddressBar && !isIgnoredPlaceholder(text)) {
-                return text
-            }
-            // Even without explicit address bar viewId, if it starts with http or looks like a domain:
-            val trimmed = text.trim()
-            if (trimmed.startsWith("http://", ignoreCase = true) ||
-                trimmed.startsWith("https://", ignoreCase = true) ||
-                (trimmed.contains('.') && !trimmed.contains(' ') && trimmed.length > 4)) {
-                if (!isIgnoredPlaceholder(trimmed)) {
-                    return trimmed
-                }
-            }
+        if (!text.isNullOrBlank() && isAddressBarSource(viewId, className) && !isIgnoredPlaceholder(text)) {
+            return text
         }
 
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            val result = findAddressBarTextFallback(child, depth + 1)
+            val result = findAddressBarTextFallback(child, depth + 1, maxDepth)
             if (result != null) return result
         }
 
@@ -547,11 +701,11 @@ object BrowserInspector {
     }
 
     private fun isIgnoredPlaceholder(text: String): Boolean {
-        val lower = text.trim().lowercase()
+        val lower = text.trim().lowercase(Locale.ROOT)
         return lower in IGNORED_PLACEHOLDERS ||
-                lower.isEmpty() ||
-                lower.startsWith("switch to tab") ||
-                lower.endsWith("tabs") ||
-                lower.endsWith("open tabs")
+            lower.isEmpty() ||
+            lower.startsWith("switch to tab") ||
+            lower.endsWith("tabs") ||
+            lower.endsWith("open tabs")
     }
 }

@@ -54,7 +54,14 @@ type requestUnlockCodeRequest struct {
 }
 
 type verifyUnlockCodeRequest struct {
-	Code string `json:"code"`
+	Code        string `json:"code"`
+	FeatureName string `json:"feature_name"`
+}
+
+type startTimeDelayRequest struct {
+	TargetKey       string `json:"target_key"`
+	TargetTitle     string `json:"target_title"`
+	DurationSeconds int64  `json:"duration_seconds"`
 }
 
 func (h *AccountabilityHandler) HandleGetPartner(w http.ResponseWriter, r *http.Request) {
@@ -97,8 +104,8 @@ func (h *AccountabilityHandler) HandleCreateInvite(w http.ResponseWriter, r *htt
 		return
 	}
 
-	if strings.TrimSpace(req.PartnerEmail) == "" {
-		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "partner_email is required"})
+	if !store.IsValidEmail(req.PartnerEmail) {
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Please enter a valid partner email address"})
 		return
 	}
 
@@ -123,17 +130,19 @@ func (h *AccountabilityHandler) HandleCreateInvite(w http.ResponseWriter, r *htt
 	}
 
 	if h.mailer != nil {
-		go func(pEmail, uEmail, code string) {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			if err := h.mailer.SendPartnerInvite(ctx, pEmail, uEmail, code); err != nil {
-				h.logger.Printf("ERROR: sending partner invite email: %v", err)
-			}
-		}(req.PartnerEmail, user.Email, partner.InviteCode)
+		mailCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		if err := h.mailer.SendPartnerInvite(mailCtx, partner.PartnerEmail, user.Email, partner.InviteCode); err != nil {
+			h.logger.Printf("ERROR: sending partner invite email to %s: %v", partner.PartnerEmail, err)
+			_ = utils.WriteJSON(w, http.StatusBadGateway, utils.Envelope{
+				"error": "Failed to send invite email to partner. Please verify the address and try again.",
+			})
+			return
+		}
 	}
 
 	_ = utils.WriteJSON(w, http.StatusCreated, utils.Envelope{
-		"message": "Accountability partner invite created",
+		"message": "Accountability partner invite sent",
 		"partner": partner,
 	})
 }
@@ -411,13 +420,15 @@ func (h *AccountabilityHandler) HandleRequestUnlockCode(w http.ResponseWriter, r
 	}
 
 	if h.mailer != nil {
-		go func(pEmail, uEmail, fName, c string) {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			defer cancel()
-			if err := h.mailer.SendUnlockRequest(ctx, pEmail, uEmail, fName, c); err != nil {
-				h.logger.Printf("ERROR: sending unlock approval email: %v", err)
-			}
-		}(partner.PartnerEmail, user.Email, featureName, code)
+		mailCtx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+		if err := h.mailer.SendUnlockRequest(mailCtx, partner.PartnerEmail, user.Email, featureName, code); err != nil {
+			h.logger.Printf("ERROR: sending unlock approval email for user %d: %v", user.ID, err)
+			_ = utils.WriteJSON(w, http.StatusBadGateway, utils.Envelope{
+				"error": "Failed to send approval email to partner. Please try again.",
+			})
+			return
+		}
 	}
 
 	_ = utils.WriteJSON(w, http.StatusOK, utils.Envelope{
@@ -447,8 +458,13 @@ func (h *AccountabilityHandler) HandleVerifyUnlockCode(w http.ResponseWriter, r 
 	}
 
 	codeHash := tokens.HashToken(code)
-	unlock, err := h.accountabilityStore.VerifyAndConsumeUnlockCode(user.ID, codeHash)
+	expectedFeature := strings.TrimSpace(req.FeatureName)
+	unlock, err := h.accountabilityStore.VerifyAndConsumeUnlockCode(user.ID, codeHash, expectedFeature)
 	if err != nil {
+		if errors.Is(err, store.ErrUnlockCodeFeatureMismatch) {
+			_ = utils.WriteJSON(w, http.StatusForbidden, utils.Envelope{"error": err.Error()})
+			return
+		}
 		if errors.Is(err, store.ErrUnlockCodeAttemptsExceeded) {
 			_ = utils.WriteJSON(w, http.StatusTooManyRequests, utils.Envelope{"error": err.Error()})
 			return
@@ -465,6 +481,113 @@ func (h *AccountabilityHandler) HandleVerifyUnlockCode(w http.ResponseWriter, r 
 	_ = utils.WriteJSON(w, http.StatusOK, utils.Envelope{
 		"verified":     true,
 		"feature_name": unlock.FeatureName,
+	})
+}
+
+func (h *AccountabilityHandler) HandleGetTimeDelay(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUser(r)
+	if user == nil || user.IsAnonymous() {
+		_ = utils.WriteJSON(w, http.StatusUnauthorized, utils.Envelope{"error": "Unauthorized"})
+		return
+	}
+
+	now := time.Now().UTC()
+	rec, err := h.accountabilityStore.GetTimeDelay(user.ID)
+	if err != nil {
+		if errors.Is(err, store.ErrTimeDelayNotFound) {
+			_ = utils.WriteJSON(w, http.StatusOK, utils.Envelope{
+				"time_delay":    nil,
+				"server_now_ms": now.UnixMilli(),
+				"remaining_ms":  0,
+				"is_ready":      false,
+			})
+			return
+		}
+		h.logger.Printf("ERROR: get time delay for user %d: %v", user.ID, err)
+		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "Failed to load time delay"})
+		return
+	}
+
+	remMs := rec.UnlockAt.Sub(now).Milliseconds()
+	if remMs < 0 {
+		remMs = 0
+	}
+	_ = utils.WriteJSON(w, http.StatusOK, utils.Envelope{
+		"time_delay":    rec,
+		"server_now_ms": now.UnixMilli(),
+		"remaining_ms":  remMs,
+		"is_ready":      remMs == 0,
+	})
+}
+
+func (h *AccountabilityHandler) HandleStartTimeDelay(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUser(r)
+	if user == nil || user.IsAnonymous() {
+		_ = utils.WriteJSON(w, http.StatusUnauthorized, utils.Envelope{"error": "Unauthorized"})
+		return
+	}
+
+	var req startTimeDelayRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "Invalid request body"})
+		return
+	}
+
+	targetKey := strings.TrimSpace(req.TargetKey)
+	if targetKey == "" {
+		_ = utils.WriteJSON(w, http.StatusBadRequest, utils.Envelope{"error": "target_key is required"})
+		return
+	}
+	targetTitle := strings.TrimSpace(req.TargetTitle)
+	if targetTitle == "" {
+		targetTitle = targetKey
+	}
+
+	const minDelay = 24 * time.Hour
+	const maxDelay = 7 * 24 * time.Hour
+	duration := minDelay
+	if req.DurationSeconds > 0 {
+		requested := time.Duration(req.DurationSeconds) * time.Second
+		if requested > duration {
+			duration = requested
+		}
+		if duration > maxDelay {
+			duration = maxDelay
+		}
+	}
+
+	now := time.Now().UTC()
+	unlockAt := now.Add(duration)
+	rec, err := h.accountabilityStore.UpsertTimeDelay(user.ID, targetKey, targetTitle, unlockAt)
+	if err != nil {
+		h.logger.Printf("ERROR: start time delay for user %d: %v", user.ID, err)
+		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "Failed to start time delay"})
+		return
+	}
+
+	_ = utils.WriteJSON(w, http.StatusCreated, utils.Envelope{
+		"time_delay":    rec,
+		"server_now_ms": now.UnixMilli(),
+		"remaining_ms":  duration.Milliseconds(),
+		"is_ready":      false,
+	})
+}
+
+func (h *AccountabilityHandler) HandleClearTimeDelay(w http.ResponseWriter, r *http.Request) {
+	user := middleware.GetUser(r)
+	if user == nil || user.IsAnonymous() {
+		_ = utils.WriteJSON(w, http.StatusUnauthorized, utils.Envelope{"error": "Unauthorized"})
+		return
+	}
+
+	if err := h.accountabilityStore.ClearTimeDelay(user.ID); err != nil && !errors.Is(err, store.ErrTimeDelayNotFound) {
+		h.logger.Printf("ERROR: clear time delay for user %d: %v", user.ID, err)
+		_ = utils.WriteJSON(w, http.StatusInternalServerError, utils.Envelope{"error": "Failed to clear time delay"})
+		return
+	}
+
+	_ = utils.WriteJSON(w, http.StatusOK, utils.Envelope{
+		"status": "cleared",
 	})
 }
 

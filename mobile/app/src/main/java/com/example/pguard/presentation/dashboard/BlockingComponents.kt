@@ -31,6 +31,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.pguard.R
 import com.example.pguard.presentation.theme.pguardColors
@@ -181,6 +182,10 @@ internal fun AccountabilityCard(
     onManageMode: () -> Unit,
     onPartnerAction: () -> Unit,
     partnerActionLabel: String? = null,
+    isPendingPartner: Boolean = false,
+    isLinkedPartner: Boolean = false,
+    onResendInvite: (() -> Unit)? = null,
+    onViewSecurityAlerts: (() -> Unit)? = null,
     onInfoClick: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -195,10 +200,10 @@ internal fun AccountabilityCard(
         AccountabilityMode.NONE -> "No friction method active. Toggles can be turned off anytime without restriction."
         AccountabilityMode.FRIEND -> when {
             partnerStatus.startsWith("Active") -> partnerStatus
-            partnerStatus.startsWith("Pending") -> "$partnerStatus (awaiting acceptance)"
+            partnerStatus.startsWith("Pending") -> "$partnerStatus (awaiting confirmation)"
             else -> "No partner linked yet. Tap Invite to add an accountability partner."
         }
-        AccountabilityMode.SELF -> "60-second typing challenge required to turn off blocks."
+        AccountabilityMode.SELF -> "60-second randomized typing challenge required to turn off blocks."
         AccountabilityMode.TIME_DELAY -> "24-hour waiting delay required to turn off blocks."
     }
 
@@ -301,50 +306,79 @@ internal fun AccountabilityCard(
                 color = MaterialTheme.colorScheme.outlineVariant
             )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 8.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Status: ",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = modeName,
-                            style = MaterialTheme.typography.titleSmall,
-                            color = if (mode == AccountabilityMode.NONE) {
-                                MaterialTheme.colorScheme.onSurfaceVariant
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            }
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.height(3.dp))
-
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        text = modeDetail,
+                        text = "Status: ",
                         style = MaterialTheme.typography.bodySmall,
-                        color = if (mode == AccountabilityMode.FRIEND && partnerStatus.startsWith("Active")) {
-                            MaterialTheme.pguardColors.success
-                        } else {
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = modeName,
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (mode == AccountabilityMode.NONE) {
                             MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MaterialTheme.colorScheme.onSurface
                         }
                     )
                 }
 
+                Spacer(modifier = Modifier.height(3.dp))
+
+                Text(
+                    text = modeDetail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (mode == AccountabilityMode.FRIEND && partnerStatus.startsWith("Active")) {
+                        MaterialTheme.pguardColors.success
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 Row(
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)
                 ) {
+                    if (mode == AccountabilityMode.FRIEND && isPendingPartner && onResendInvite != null) {
+                        OutlinedButton(
+                            onClick = onResendInvite,
+                            shape = MaterialTheme.shapes.small,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text(
+                                text = "Resend",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
+
+                    if (mode == AccountabilityMode.FRIEND && isLinkedPartner && onViewSecurityAlerts != null) {
+                        OutlinedButton(
+                            onClick = onViewSecurityAlerts,
+                            shape = MaterialTheme.shapes.small,
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                            colors = ButtonDefaults.outlinedButtonColors(
+                                contentColor = MaterialTheme.colorScheme.onSurface
+                            ),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                            modifier = Modifier.height(32.dp)
+                        ) {
+                            Text(
+                                text = "Alerts",
+                                style = MaterialTheme.typography.labelMedium
+                            )
+                        }
+                    }
+
                     if (mode == AccountabilityMode.FRIEND && partnerActionLabel != null) {
                         OutlinedButton(
                             onClick = onPartnerAction,
@@ -552,7 +586,9 @@ internal fun EditableSettingRow(
             Text(
                 text = subtitle,
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
         }
 

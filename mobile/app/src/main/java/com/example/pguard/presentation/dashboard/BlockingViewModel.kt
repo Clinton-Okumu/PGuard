@@ -1,16 +1,27 @@
 package com.example.pguard.presentation.dashboard
 
+import android.content.Context
+import android.util.Patterns
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.pguard.core.datastore.AuthDataStore
 import com.example.pguard.core.network.model.AccountabilityPartnerDto
+import com.example.pguard.core.network.model.SecurityAlertDto
 import com.example.pguard.core.network.model.UpdateSettingsRequest
 import com.example.pguard.core.network.model.UserSettingsDto
 import com.example.pguard.data.repository.AccountabilityRepository
 import com.example.pguard.data.repository.SettingsRepository
+import com.example.pguard.engine.accessibility.BlockedScreenConfig
 import com.example.pguard.engine.accessibility.BlockingPreferences
+import com.example.pguard.engine.accessibility.PGuardAccessibilityService
+import com.example.pguard.engine.accountability.SecurityAlertReporter
+import com.example.pguard.engine.accountability.TimeDelayNotificationScheduler
 import com.example.pguard.engine.admin.DeviceAdminManager
+import com.example.pguard.engine.vpn.PGuardVpnService
+import com.example.pguard.presentation.focus.FocusModeManager
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,10 +50,16 @@ data class BlockingUiState(
     val errorMessage: String? = null,
     val editor: SettingsEditor? = null,
     val editorText: String = "",
+    val editorError: String? = null,
+    val isBlockedScreenPreviewVisible: Boolean = false,
     val infoDialog: InfoDialogState? = null,
     val isGuideVisible: Boolean = false,
     val isInviteDialogVisible: Boolean = false,
     val inviteEmail: String = "",
+    val inviteName: String = "",
+    val inviteEmailError: String? = null,
+    val isSendingInvite: Boolean = false,
+    val isConfirmCancelInviteVisible: Boolean = false,
     val accountabilityMode: AccountabilityMode = AccountabilityMode.NONE,
     val isModeSelectionVisible: Boolean = false,
     val typingChallengeTarget: ProtectedAction? = null,
@@ -50,22 +67,33 @@ data class BlockingUiState(
     val friendApprovalTarget: ProtectedAction? = null,
     val timeDelayUnlockAt: Long = 0L,
     val timeDelayTarget: String = "",
-    val inviteEmailError: String? = null,
+    val isTimeDelayServerReady: Boolean = false,
     val isVerifyingUnlockCode: Boolean = false,
+    val isSendingUnlockCode: Boolean = false,
+    val unlockEmailSent: Boolean = false,
     val unlockCodeError: String? = null,
     val unlockRequestError: String? = null,
-    val isDeviceAdminDialogVisible: Boolean = false
+    val isDeviceAdminDialogVisible: Boolean = false,
+    val isDnsVpnEnabled: Boolean = BlockingPreferences.isDnsVpnEnabled,
+    val isSecurityAlertsDialogVisible: Boolean = false,
+    val securityAlerts: List<SecurityAlertDto> = emptyList(),
+    val isLoadingSecurityAlerts: Boolean = false
 )
 
 class BlockingViewModel(
     private val settingsRepository: SettingsRepository,
     private val accountabilityRepository: AccountabilityRepository,
-    private val authDataStore: AuthDataStore? = null
+    private val authDataStore: AuthDataStore? = null,
+    private val appContext: Context? = null
 ) : ViewModel() {
 
     private var currentUserEmail: String? = null
     private var partnerPollingJob: Job? = null
     private var loadDataJob: Job? = null
+    private var pendingDeviceAdminActivation: Boolean = false
+
+    private val resolvedContext: Context?
+        get() = appContext ?: BlockingPreferences.appContext
 
     private val _uiState = MutableStateFlow(
         BlockingUiState(
@@ -80,8 +108,19 @@ class BlockingViewModel(
                 blockNewlyInstalledApps = BlockingPreferences.isNewlyInstalledAppsBlockingEnabled,
                 blockedScreenMessage = BlockingPreferences.blockedScreenMessage,
                 blockedScreenCountdown = BlockingPreferences.blockedScreenCountdown,
-                redirectUrl = BlockingPreferences.redirectUrl
+                redirectUrl = BlockingPreferences.redirectUrl,
+                accountabilityMode = BlockingPreferences.accountabilityMode
             ),
+            isPartnerLinked = BlockingPreferences.isPartnerLinkedCached,
+            partner = if (BlockingPreferences.isPartnerLinkedCached && BlockingPreferences.cachedPartnerEmail.isNotBlank()) {
+                AccountabilityPartnerDto(
+                    partnerEmail = BlockingPreferences.cachedPartnerEmail,
+                    partnerName = BlockingPreferences.cachedPartnerName,
+                    status = "accepted"
+                )
+            } else {
+                null
+            },
             accountabilityMode = AccountabilityMode.fromCode(BlockingPreferences.accountabilityMode),
             timeDelayUnlockAt = BlockingPreferences.timeDelayUnlockAt,
             timeDelayTarget = BlockingPreferences.timeDelayTarget
@@ -102,7 +141,12 @@ class BlockingViewModel(
                             stopPartnerPolling()
                             loadDataJob?.cancel()
                             loadDataJob = null
-                            _uiState.update { it.copy(isLoading = false, partner = null, isPartnerLinked = false) }
+                            // Only clear partner UI state if local fail-closed cache is already cleared
+                            if (!BlockingPreferences.isPartnerLinkedCached) {
+                                _uiState.update { it.copy(isLoading = false, partner = null, isPartnerLinked = false) }
+                            } else {
+                                _uiState.update { it.copy(isLoading = false) }
+                            }
                         }
                     }
             }
@@ -136,11 +180,32 @@ class BlockingViewModel(
         return normalizeEmail(email1) == normalizeEmail(email2)
     }
 
-    fun refreshFromLocalPreferences(context: android.content.Context? = null) {
+    private fun isValidEmailFormat(email: String): Boolean {
+        val trimmed = email.trim()
+        if (trimmed.isEmpty() || !trimmed.contains("@")) return false
+        return try {
+            Patterns.EMAIL_ADDRESS.matcher(trimmed).matches()
+        } catch (_: Throwable) {
+            val parts = trimmed.split("@")
+            parts.size == 2 && parts[0].isNotBlank() && parts[1].contains(".")
+        }
+    }
+
+    fun refreshFromLocalPreferences(context: Context? = null) {
         if (context != null) {
             BlockingPreferences.loadSettings(context)
         }
         _uiState.update { current ->
+            val cachedLinked = BlockingPreferences.isPartnerLinkedCached
+            val fallbackPartner = if (current.partner == null && cachedLinked && BlockingPreferences.cachedPartnerEmail.isNotBlank()) {
+                AccountabilityPartnerDto(
+                    partnerEmail = BlockingPreferences.cachedPartnerEmail,
+                    partnerName = BlockingPreferences.cachedPartnerName,
+                    status = "accepted"
+                )
+            } else {
+                current.partner
+            }
             current.copy(
                 settings = current.settings.copy(
                     blockAdultContent = BlockingPreferences.isAdultBlockingEnabled,
@@ -153,11 +218,15 @@ class BlockingViewModel(
                     blockNewlyInstalledApps = BlockingPreferences.isNewlyInstalledAppsBlockingEnabled,
                     blockedScreenMessage = BlockingPreferences.blockedScreenMessage,
                     blockedScreenCountdown = BlockingPreferences.blockedScreenCountdown,
-                    redirectUrl = BlockingPreferences.redirectUrl
+                    redirectUrl = BlockingPreferences.redirectUrl,
+                    accountabilityMode = BlockingPreferences.accountabilityMode
                 ),
+                partner = fallbackPartner,
+                isPartnerLinked = current.isPartnerLinked || cachedLinked,
                 accountabilityMode = AccountabilityMode.fromCode(BlockingPreferences.accountabilityMode),
                 timeDelayUnlockAt = BlockingPreferences.timeDelayUnlockAt,
-                timeDelayTarget = BlockingPreferences.timeDelayTarget
+                timeDelayTarget = BlockingPreferences.timeDelayTarget,
+                isDnsVpnEnabled = BlockingPreferences.isDnsVpnEnabled
             )
         }
     }
@@ -165,38 +234,135 @@ class BlockingViewModel(
     fun loadData() {
         loadDataJob?.cancel()
         loadDataJob = viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+            loadDataInternal()
+        }
+    }
 
-            val settingsResult = settingsRepository.fetchSettings()
-            val partnerResult = accountabilityRepository.fetchPartner()
+    suspend fun syncSettingsNow(): Result<Unit> {
+        loadDataJob?.cancel()
+        loadDataJob = null
+        return loadDataInternal()
+    }
 
+    private suspend fun loadDataInternal(): Result<Unit> {
+        _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+
+        return coroutineScope {
+            val settingsDeferred = async { settingsRepository.fetchSettings() }
+            val partnerDeferred = async { accountabilityRepository.fetchPartner() }
+            val timeDelayDeferred = async { accountabilityRepository.getTimeDelay() }
+
+            val settingsResult = settingsDeferred.await()
+            val partnerResult = partnerDeferred.await()
+            val timeDelayResult = timeDelayDeferred.await()
+
+            val partnerSuccess = partnerResult.isSuccess
             val partnerDto = partnerResult.getOrNull()?.partner
-            val isLinked = partnerResult.getOrNull()?.isLinked ?: false || (partnerDto != null && partnerDto.status == "accepted")
+            val isLinked = if (partnerSuccess) {
+                (partnerResult.getOrNull()?.isLinked == true) || (partnerDto != null && partnerDto.status == "accepted")
+            } else {
+                _uiState.value.isPartnerLinked || BlockingPreferences.isPartnerLinkedCached
+            }
+
+            if (partnerSuccess) {
+                resolvedContext?.let { ctx ->
+                    BlockingPreferences.savePartnerCache(
+                        context = ctx,
+                        isLinked = isLinked,
+                        email = if (isLinked) partnerDto?.partnerEmail.orEmpty() else "",
+                        name = if (isLinked) partnerDto?.partnerName.orEmpty() else ""
+                    )
+                }
+            }
+
+            // Reconcile server-backed time delay
+            var syncedUnlockAt = _uiState.value.timeDelayUnlockAt
+            var syncedTarget = _uiState.value.timeDelayTarget
+            var syncedServerReady = false
+            val tdResp = timeDelayResult.getOrNull()
+            if (timeDelayResult.isSuccess && tdResp != null) {
+                val td = tdResp.timeDelay
+                if (td != null) {
+                    val nowWall = System.currentTimeMillis()
+                    val serverUnlockWallMs = if (tdResp.isReady) nowWall - 1_000L else nowWall + tdResp.remainingMs
+                    syncedUnlockAt = serverUnlockWallMs
+                    syncedTarget = td.targetKey
+                    syncedServerReady = tdResp.isReady
+                    resolvedContext?.let { ctx ->
+                        BlockingPreferences.setTimeDelay(
+                            context = ctx,
+                            unlockAtWallMs = serverUnlockWallMs,
+                            target = td.targetKey,
+                            durationMs = tdResp.remainingMs.coerceAtLeast(0L),
+                            serverBacked = true
+                        )
+                        if (!tdResp.isReady) {
+                            TimeDelayNotificationScheduler.schedule(
+                                ctx,
+                                serverUnlockWallMs,
+                                td.targetTitle.ifBlank { targetDisplayName(td.targetKey) }
+                            )
+                        } else {
+                            TimeDelayNotificationScheduler.cancel(ctx)
+                        }
+                    }
+                } else if (BlockingPreferences.isTimeDelayServerBacked) {
+                    syncedUnlockAt = 0L
+                    syncedTarget = ""
+                    syncedServerReady = false
+                    resolvedContext?.let { ctx ->
+                        BlockingPreferences.clearTimeDelay(ctx)
+                        TimeDelayNotificationScheduler.cancel(ctx)
+                    }
+                }
+            }
 
             var shouldPushLocal = false
             var settingsToPush: UserSettingsDto? = null
 
             _uiState.update { current ->
                 val serverSettings = settingsResult.getOrNull()
-                val finalSettings = if (serverSettings != null) {
+                val finalSettings: UserSettingsDto
+                val finalMode: AccountabilityMode
+
+                if (serverSettings != null) {
                     if (BlockingPreferences.isLocalDirty) {
-                        // Local changes haven't synced to server yet; preserve local state and push to server
                         shouldPushLocal = true
-                        settingsToPush = current.settings
-                        current.settings
+                        val dirtySettings = current.settings.copy(accountabilityMode = current.accountabilityMode.code)
+                        settingsToPush = dirtySettings
+                        finalSettings = dirtySettings
+                        finalMode = current.accountabilityMode
                     } else {
-                        syncSettingsToAccessibilityService(serverSettings, markDirty = false)
-                        serverSettings
+                        val serverMode = AccountabilityMode.fromCode(serverSettings.accountabilityMode)
+                        val resolvedMode = if (isLinked && serverMode == AccountabilityMode.NONE) {
+                            shouldPushLocal = true
+                            AccountabilityMode.FRIEND
+                        } else {
+                            serverMode
+                        }
+                        val merged = serverSettings.copy(accountabilityMode = resolvedMode.code)
+                        syncSettingsToAccessibilityService(merged, markDirty = false)
+                        resolvedContext?.let { BlockingPreferences.saveAccountabilityMode(it, resolvedMode.code) }
+                        if (shouldPushLocal) {
+                            settingsToPush = merged
+                        }
+                        finalSettings = merged
+                        finalMode = resolvedMode
                     }
                 } else {
-                    current.settings
+                    finalSettings = current.settings
+                    finalMode = current.accountabilityMode
                 }
 
                 current.copy(
                     isLoading = false,
                     settings = finalSettings,
-                    partner = partnerDto,
+                    accountabilityMode = finalMode,
+                    partner = if (partnerSuccess) partnerDto else current.partner,
                     isPartnerLinked = isLinked,
+                    timeDelayUnlockAt = syncedUnlockAt,
+                    timeDelayTarget = syncedTarget,
+                    isTimeDelayServerReady = syncedServerReady,
                     errorMessage = null
                 )
             }
@@ -205,10 +371,18 @@ class BlockingViewModel(
                 pushSettingsToServer(settingsToPush!!)
             }
 
-            if (partnerDto != null && !isLinked && partnerDto.status == "pending") {
+            if (partnerSuccess && partnerDto != null && !isLinked && partnerDto.status == "pending") {
                 startPartnerPolling()
-            } else {
+            } else if (partnerSuccess) {
                 stopPartnerPolling()
+            }
+
+            if (settingsResult.isSuccess) {
+                Result.success(Unit)
+            } else {
+                Result.failure(
+                    settingsResult.exceptionOrNull() ?: IllegalStateException("Unable to reach server")
+                )
             }
         }
     }
@@ -229,9 +403,35 @@ class BlockingViewModel(
 
     fun setNewlyInstalledAppsBlocking(enabled: Boolean) = updateSetting { it.copy(blockNewlyInstalledApps = enabled) }
 
+    fun onDnsVpnPermissionGranted(context: Context) {
+        BlockingPreferences.saveDnsVpnEnabled(context, true)
+        _uiState.update { it.copy(isDnsVpnEnabled = true) }
+        try {
+            PGuardVpnService.start(context)
+        } catch (e: Exception) {
+            android.util.Log.w("BlockingViewModel", "Could not start PGuardVpnService: ${e.message}")
+        }
+    }
+
+    fun setDnsVpnEnabled(enabled: Boolean, context: Context) {
+        if (enabled) {
+            onDnsVpnPermissionGranted(context)
+        } else {
+            BlockingPreferences.saveDnsVpnEnabled(context, false)
+            _uiState.update { it.copy(isDnsVpnEnabled = false) }
+            try {
+                PGuardVpnService.stop(context)
+            } catch (e: Exception) {
+                android.util.Log.w("BlockingViewModel", "Could not stop PGuardVpnService: ${e.message}")
+            }
+        }
+    }
+
     fun updateSetting(block: (UserSettingsDto) -> UserSettingsDto) {
-        val currentSettings = _uiState.value.settings
-        val updatedLocal = block(currentSettings)
+        val currentState = _uiState.value
+        val updatedLocal = block(currentState.settings).let {
+            if (it.accountabilityMode.isBlank()) it.copy(accountabilityMode = currentState.accountabilityMode.code) else it
+        }
         syncSettingsToAccessibilityService(updatedLocal, markDirty = true)
         _uiState.update { it.copy(settings = updatedLocal) }
 
@@ -246,19 +446,23 @@ class BlockingViewModel(
             blockNewlyInstalledApps = updatedLocal.blockNewlyInstalledApps,
             blockedScreenMessage = updatedLocal.blockedScreenMessage,
             blockedScreenCountdown = updatedLocal.blockedScreenCountdown,
-            redirectUrl = updatedLocal.redirectUrl
+            redirectUrl = updatedLocal.redirectUrl,
+            accountabilityMode = updatedLocal.accountabilityMode
         )
 
         viewModelScope.launch {
             settingsRepository.updateSettings(request).fold(
                 onSuccess = { updatedServer ->
-                    BlockingPreferences.markLocalDirty(null, false)
+                    BlockingPreferences.markLocalDirty(resolvedContext, false)
                     syncSettingsToAccessibilityService(updatedServer, markDirty = false)
-                    _uiState.update { it.copy(settings = updatedServer) }
+                    _uiState.update {
+                        it.copy(
+                            settings = updatedServer,
+                            accountabilityMode = AccountabilityMode.fromCode(updatedServer.accountabilityMode)
+                        )
+                    }
                 },
                 onFailure = { error ->
-                    // DO NOT roll back the user's local protection setting!
-                    // Device-level blocking remains active on the phone even when backend is offline.
                     android.util.Log.w("BlockingViewModel", "Backend sync failed, keeping local protection setting: ${error.message}")
                 }
             )
@@ -273,31 +477,78 @@ class BlockingViewModel(
                     SettingsEditor.MESSAGE -> current.settings.blockedScreenMessage
                     SettingsEditor.REDIRECT -> current.settings.redirectUrl
                     SettingsEditor.COUNTDOWN -> current.settings.blockedScreenCountdown.toString()
-                }
+                },
+                editorError = null
             )
         }
     }
 
     fun updateEditorText(text: String) {
-        _uiState.update { it.copy(editorText = text) }
+        _uiState.update { it.copy(editorText = text, editorError = null) }
     }
 
     fun dismissEditor() {
-        _uiState.update { it.copy(editor = null, editorText = "") }
+        _uiState.update { it.copy(editor = null, editorText = "", editorError = null) }
+    }
+
+    fun resetMessageEditorToDefault() {
+        _uiState.update {
+            it.copy(
+                editorText = BlockedScreenConfig.DEFAULT_MESSAGE,
+                editorError = null
+            )
+        }
+    }
+
+    fun clearRedirectEditor() {
+        _uiState.update { it.copy(editorText = "", editorError = null) }
     }
 
     fun saveEditor() {
         val state = _uiState.value
         when (state.editor) {
-            SettingsEditor.MESSAGE ->
-                if (state.editorText.isNotBlank()) {
-                    updateSetting { it.copy(blockedScreenMessage = state.editorText.trim()) }
+            SettingsEditor.MESSAGE -> {
+                when (val result = BlockedScreenConfig.validateMessage(state.editorText)) {
+                    is BlockedScreenConfig.ValidationResult.Invalid -> {
+                        _uiState.update { it.copy(editorError = result.error) }
+                        return
+                    }
+                    is BlockedScreenConfig.ValidationResult.Valid -> {
+                        updateSetting { it.copy(blockedScreenMessage = result.normalized) }
+                    }
                 }
-            SettingsEditor.REDIRECT ->
-                updateSetting { it.copy(redirectUrl = state.editorText.trim()) }
+            }
+            SettingsEditor.REDIRECT -> {
+                val result = BlockedScreenConfig.validateRedirectUrl(
+                    raw = state.editorText,
+                    customBlocklist = BlockingPreferences.customBlocklist,
+                    blockAdultContent = state.settings.blockAdultContent,
+                    blockShorts = state.settings.blockShorts,
+                    blockWhatsAppChannels = state.settings.blockWhatsAppChannels,
+                    blockInstagramReels = state.settings.blockInstagramReels,
+                    blockTikTok = state.settings.blockTikTok
+                )
+                when (result) {
+                    is BlockedScreenConfig.ValidationResult.Invalid -> {
+                        _uiState.update { it.copy(editorError = result.error) }
+                        return
+                    }
+                    is BlockedScreenConfig.ValidationResult.Valid -> {
+                        updateSetting { it.copy(redirectUrl = result.normalized) }
+                    }
+                }
+            }
             SettingsEditor.COUNTDOWN, null -> Unit
         }
         dismissEditor()
+    }
+
+    fun openBlockedScreenPreview() {
+        _uiState.update { it.copy(isBlockedScreenPreviewVisible = true) }
+    }
+
+    fun dismissBlockedScreenPreview() {
+        _uiState.update { it.copy(isBlockedScreenPreviewVisible = false) }
     }
 
     fun setCountdown(seconds: Int) {
@@ -322,20 +573,42 @@ class BlockingViewModel(
     }
 
     fun showInviteDialog() {
-        _uiState.update { it.copy(isInviteDialogVisible = true, inviteEmail = "", inviteEmailError = null) }
+        _uiState.update {
+            it.copy(
+                isInviteDialogVisible = true,
+                inviteEmail = "",
+                inviteName = "",
+                inviteEmailError = null
+            )
+        }
     }
 
     fun dismissInviteDialog() {
-        _uiState.update { it.copy(isInviteDialogVisible = false, inviteEmailError = null) }
+        _uiState.update {
+            it.copy(
+                isInviteDialogVisible = false,
+                inviteEmailError = null
+            )
+        }
     }
 
     fun updateInviteEmail(email: String) {
         _uiState.update { it.copy(inviteEmail = email, inviteEmailError = null) }
     }
 
+    fun updateInviteName(name: String) {
+        _uiState.update { it.copy(inviteName = name) }
+    }
+
     fun submitInvite() {
-        val email = _uiState.value.inviteEmail.trim()
-        if (email.isEmpty()) return
+        val state = _uiState.value
+        val email = state.inviteEmail.trim()
+        if (!isValidEmailFormat(email)) {
+            _uiState.update {
+                it.copy(inviteEmailError = "Please enter a valid email address.")
+            }
+            return
+        }
 
         val userEmail = currentUserEmail
         if (!userEmail.isNullOrBlank() && isSameEmail(email, userEmail)) {
@@ -345,23 +618,61 @@ class BlockingViewModel(
             return
         }
 
+        val name = state.inviteName.trim()
         dismissInviteDialog()
-        invitePartner(email)
+        invitePartner(email, name)
+    }
+
+    fun resendPartnerInvite() {
+        val partner = _uiState.value.partner ?: return
+        if (_uiState.value.isSendingInvite || partner.status != "pending") return
+        invitePartner(partner.partnerEmail, partner.partnerName)
+    }
+
+    fun confirmCancelPendingInvite() {
+        _uiState.update { it.copy(isConfirmCancelInviteVisible = false) }
+        disconnectPartner()
+    }
+
+    fun dismissCancelPendingInvite() {
+        _uiState.update { it.copy(isConfirmCancelInviteVisible = false) }
     }
 
     fun disconnectPartner() {
         viewModelScope.launch {
             stopPartnerPolling()
             accountabilityRepository.disconnectPartner().onSuccess {
+                resolvedContext?.let { BlockingPreferences.clearPartnerCache(it) }
                 _uiState.update { it.copy(partner = null, isPartnerLinked = false) }
+            }.onFailure { err ->
+                _uiState.update {
+                    it.copy(
+                        infoDialog = InfoDialogState(
+                            title = "Disconnect Failed",
+                            message = err.message ?: "Could not remove accountability partner."
+                        )
+                    )
+                }
             }
         }
     }
 
     fun invitePartner(email: String, name: String = "") {
+        if (_uiState.value.isSendingInvite) return
+        _uiState.update { it.copy(isSendingInvite = true) }
         viewModelScope.launch {
             accountabilityRepository.invitePartner(email, name).onSuccess { partner ->
-                _uiState.update { it.copy(partner = partner, isPartnerLinked = false) }
+                _uiState.update {
+                    it.copy(
+                        partner = partner,
+                        isPartnerLinked = partner.status == "accepted",
+                        isSendingInvite = false,
+                        infoDialog = InfoDialogState(
+                            title = "Invite Sent",
+                            message = "An invitation email was sent to ${partner.partnerEmail}. Once they confirm, your partner shield becomes active."
+                        )
+                    )
+                }
                 startPartnerPolling()
             }.onFailure { err ->
                 val friendlyMessage = if (err.message?.contains("invalid or expired token", ignoreCase = true) == true) {
@@ -371,6 +682,7 @@ class BlockingViewModel(
                 }
                 _uiState.update {
                     it.copy(
+                        isSendingInvite = false,
                         infoDialog = InfoDialogState(
                             title = "Invite Failed",
                             message = friendlyMessage
@@ -386,6 +698,14 @@ class BlockingViewModel(
             accountabilityRepository.fetchPartner().onSuccess { res ->
                 val partner = res.partner
                 val linked = res.isLinked || (partner != null && partner.status == "accepted")
+                resolvedContext?.let { ctx ->
+                    BlockingPreferences.savePartnerCache(
+                        context = ctx,
+                        isLinked = linked,
+                        email = if (linked) partner?.partnerEmail.orEmpty() else "",
+                        name = if (linked) partner?.partnerName.orEmpty() else ""
+                    )
+                }
                 _uiState.update { current ->
                     current.copy(
                         partner = partner,
@@ -398,17 +718,78 @@ class BlockingViewModel(
                     stopPartnerPolling()
                 }
             }
+
+            if (_uiState.value.timeDelayTarget.isNotBlank() || BlockingPreferences.timeDelayTarget.isNotBlank()) {
+                refreshTimeDelayFromServer()
+            }
+        }
+    }
+
+    private suspend fun refreshTimeDelayFromServer() {
+        accountabilityRepository.getTimeDelay().onSuccess { tdResp ->
+            val td = tdResp.timeDelay
+            val ctx = resolvedContext
+            if (td != null) {
+                val nowWall = System.currentTimeMillis()
+                val unlockAtWall = if (tdResp.isReady) nowWall - 1_000L else nowWall + tdResp.remainingMs
+                if (ctx != null) {
+                    BlockingPreferences.setTimeDelay(
+                        context = ctx,
+                        unlockAtWallMs = unlockAtWall,
+                        target = td.targetKey,
+                        durationMs = tdResp.remainingMs.coerceAtLeast(0L),
+                        serverBacked = true
+                    )
+                }
+                _uiState.update {
+                    it.copy(
+                        timeDelayUnlockAt = unlockAtWall,
+                        timeDelayTarget = td.targetKey,
+                        isTimeDelayServerReady = tdResp.isReady
+                    )
+                }
+            } else if (BlockingPreferences.isTimeDelayServerBacked) {
+                if (ctx != null) {
+                    BlockingPreferences.clearTimeDelay(ctx)
+                    TimeDelayNotificationScheduler.cancel(ctx)
+                }
+                _uiState.update {
+                    it.copy(
+                        timeDelayUnlockAt = 0L,
+                        timeDelayTarget = "",
+                        isTimeDelayServerReady = false
+                    )
+                }
+            }
         }
     }
 
     fun startPartnerPolling() {
         if (partnerPollingJob?.isActive == true) return
         partnerPollingJob = viewModelScope.launch {
+            val backoffIntervals = longArrayOf(3_000L, 5_000L, 10_000L, 15_000L, 30_000L)
+            var attempt = 0
+            var consecutiveFailures = 0
+
             while (isActive) {
-                delay(3000)
-                accountabilityRepository.fetchPartner().onSuccess { res ->
-                    val partner = res.partner
-                    val linked = res.isLinked || (partner != null && partner.status == "accepted")
+                val waitMs = backoffIntervals[minOf(attempt, backoffIntervals.lastIndex)]
+                delay(waitMs)
+                attempt++
+
+                val res = accountabilityRepository.fetchPartner()
+                if (res.isSuccess) {
+                    consecutiveFailures = 0
+                    val body = res.getOrNull()
+                    val partner = body?.partner
+                    val linked = (body?.isLinked == true) || (partner != null && partner.status == "accepted")
+                    resolvedContext?.let { ctx ->
+                        BlockingPreferences.savePartnerCache(
+                            context = ctx,
+                            isLinked = linked,
+                            email = if (linked) partner?.partnerEmail.orEmpty() else "",
+                            name = if (linked) partner?.partnerName.orEmpty() else ""
+                        )
+                    }
                     _uiState.update { current ->
                         current.copy(
                             partner = partner,
@@ -416,6 +797,12 @@ class BlockingViewModel(
                         )
                     }
                     if (linked || partner == null || partner.status != "pending") {
+                        stopPartnerPolling()
+                        return@launch
+                    }
+                } else {
+                    consecutiveFailures++
+                    if (consecutiveFailures >= 5) {
                         stopPartnerPolling()
                         return@launch
                     }
@@ -446,7 +833,7 @@ class BlockingViewModel(
         _uiState.update { it.copy(isModeSelectionVisible = false) }
     }
 
-    fun requestChangeAccountabilityMode(context: android.content.Context) {
+    fun requestChangeAccountabilityMode(context: Context) {
         val currentMode = _uiState.value.accountabilityMode
         if (currentMode == AccountabilityMode.NONE) {
             openModeSelection()
@@ -455,7 +842,7 @@ class BlockingViewModel(
         guardAction(ProtectedAction.OpenChangeMode, context)
     }
 
-    fun requestSetAccountabilityMode(newMode: AccountabilityMode, context: android.content.Context) {
+    fun requestSetAccountabilityMode(newMode: AccountabilityMode, context: Context) {
         dismissModeSelection()
         val currentMode = _uiState.value.accountabilityMode
         if (newMode == currentMode) return
@@ -475,15 +862,24 @@ class BlockingViewModel(
         applyAccountabilityMode(newMode, context)
     }
 
-    fun applyAccountabilityMode(mode: AccountabilityMode, context: android.content.Context) {
+    fun applyAccountabilityMode(mode: AccountabilityMode, context: Context) {
+        BlockingPreferences.ensureContext(context)
         BlockingPreferences.saveAccountabilityMode(context, mode.code)
-        _uiState.update { it.copy(accountabilityMode = mode) }
-        if (mode == AccountabilityMode.FRIEND && _uiState.value.partner == null) {
+        _uiState.update { current ->
+            current.copy(
+                accountabilityMode = mode,
+                settings = current.settings.copy(accountabilityMode = mode.code)
+            )
+        }
+        updateSetting { it.copy(accountabilityMode = mode.code) }
+
+        val hasPartner = _uiState.value.partner != null || BlockingPreferences.isPartnerLinkedCached
+        if (mode == AccountabilityMode.FRIEND && !hasPartner) {
             showInviteDialog()
         }
     }
 
-    fun setAccountabilityMode(mode: AccountabilityMode, context: android.content.Context) {
+    fun setAccountabilityMode(mode: AccountabilityMode, context: Context) {
         requestSetAccountabilityMode(mode, context)
     }
 
@@ -491,22 +887,38 @@ class BlockingViewModel(
         _uiState.update { it.copy(isDeviceAdminDialogVisible = true) }
     }
 
-    fun dismissDeviceAdminDialog(context: android.content.Context? = null) {
+    fun dismissDeviceAdminDialog() {
+        pendingDeviceAdminActivation = false
         _uiState.update { it.copy(isDeviceAdminDialogVisible = false) }
-        context?.let { ctx ->
-            if (!DeviceAdminManager.isDeviceAdminActive(ctx)) {
-                executeToggle(BlockingToggle.UNINSTALL_PROTECTION, false, ctx)
+    }
+
+    fun markDeviceAdminRequestLaunched() {
+        pendingDeviceAdminActivation = true
+        _uiState.update { it.copy(isDeviceAdminDialogVisible = false) }
+    }
+
+    fun onConfirmDeviceAdmin(context: Context) {
+        markDeviceAdminRequestLaunched()
+        DeviceAdminManager.requestEnableDeviceAdmin(context)
+    }
+
+    fun onDeviceAdminActivityResult(context: Context) {
+        pendingDeviceAdminActivation = false
+        if (DeviceAdminManager.isDeviceAdminActive(context)) {
+            if (_uiState.value.accountabilityMode == AccountabilityMode.NONE) {
+                applyAccountabilityMode(AccountabilityMode.SELF, context)
+            }
+            if (!_uiState.value.settings.uninstallProtection) {
+                executeToggle(BlockingToggle.UNINSTALL_PROTECTION, true, context)
             }
         }
     }
 
-    fun onConfirmDeviceAdmin(context: android.content.Context) {
-        _uiState.update { it.copy(isDeviceAdminDialogVisible = false) }
-        executeToggle(BlockingToggle.UNINSTALL_PROTECTION, true, context)
-        DeviceAdminManager.requestEnableDeviceAdmin(context)
-    }
-
-    fun checkDeviceAdminStatus(context: android.content.Context) {
+    fun checkDeviceAdminStatus(context: Context) {
+        if (pendingDeviceAdminActivation) {
+            onDeviceAdminActivityResult(context)
+            return
+        }
         val isAdminActive = DeviceAdminManager.isDeviceAdminActive(context)
         val currentSetting = _uiState.value.settings.uninstallProtection
 
@@ -515,27 +927,58 @@ class BlockingViewModel(
         }
     }
 
-    fun requestDisconnectPartner(context: android.content.Context) {
-        if (_uiState.value.partner == null) return
+    fun requestDisconnectPartner(context: Context) {
+        val partner = _uiState.value.partner ?: return
+        val isLinked = _uiState.value.isPartnerLinked || BlockingPreferences.isPartnerLinkedCached
+        if (!isLinked || partner.status == "pending") {
+            _uiState.update { it.copy(isConfirmCancelInviteVisible = true) }
+            return
+        }
 
-        // Always use the current friction method preset to remove partner
         guardAction(ProtectedAction.DisconnectPartner, context)
     }
 
-    fun handleToggleRequested(toggle: BlockingToggle, checked: Boolean, context: android.content.Context) {
+    fun openSecurityAlerts() {
+        _uiState.update { it.copy(isSecurityAlertsDialogVisible = true) }
+        refreshSecurityAlerts()
+    }
+
+    fun dismissSecurityAlerts() {
+        _uiState.update { it.copy(isSecurityAlertsDialogVisible = false) }
+    }
+
+    fun refreshSecurityAlerts() {
+        _uiState.update { it.copy(isLoadingSecurityAlerts = true) }
+        viewModelScope.launch {
+            accountabilityRepository.fetchSecurityEvents(limit = 30).fold(
+                onSuccess = { events ->
+                    _uiState.update { it.copy(securityAlerts = events, isLoadingSecurityAlerts = false) }
+                },
+                onFailure = {
+                    _uiState.update { it.copy(isLoadingSecurityAlerts = false) }
+                }
+            )
+        }
+    }
+
+    fun handleToggleRequested(toggle: BlockingToggle, checked: Boolean, context: Context) {
         if (toggle == BlockingToggle.UNINSTALL_PROTECTION) {
             if (checked) {
-                val currentMode = _uiState.value.accountabilityMode
-                // If mode is NONE, automatically upgrade to SELF (Typing Challenge) as default check
-                if (currentMode == AccountabilityMode.NONE) {
-                    applyAccountabilityMode(AccountabilityMode.SELF, context)
+                if (!PGuardAccessibilityService.isEnabled(context)) {
+                    _uiState.update {
+                        it.copy(
+                            infoDialog = InfoDialogState(
+                                title = "Accessibility Service Required",
+                                message = "Please turn on PGuard's Accessibility Service first so Uninstall Protection can stop tampering in system settings."
+                            )
+                        )
+                    }
+                    return
                 }
 
-                // If mode is FRIEND, ensure partner is linked
                 if (_uiState.value.accountabilityMode == AccountabilityMode.FRIEND) {
-                    val partner = _uiState.value.partner
-                    val isLinked = _uiState.value.isPartnerLinked
-                    if (partner == null || !isLinked) {
+                    val isLinked = _uiState.value.isPartnerLinked || BlockingPreferences.isPartnerLinkedCached
+                    if (!isLinked) {
                         _uiState.update {
                             it.copy(
                                 infoDialog = InfoDialogState(
@@ -548,32 +991,30 @@ class BlockingViewModel(
                     }
                 }
 
-                // Turn ON the toggle in app and accessibility engine
-                executeToggle(toggle, true, context)
-
-                // If device admin is not active yet, show the modal prompting to enable it
-                if (!DeviceAdminManager.isDeviceAdminActive(context)) {
+                if (DeviceAdminManager.isDeviceAdminActive(context)) {
+                    if (_uiState.value.accountabilityMode == AccountabilityMode.NONE) {
+                        applyAccountabilityMode(AccountabilityMode.SELF, context)
+                    }
+                    executeToggle(toggle, true, context)
+                } else {
                     showDeviceAdminDialog()
                 }
                 return
             } else {
-                // Turning OFF uninstall protection: strictly uses the selected accountability check (Friend, Myself, or 24-Hour Delay)
                 guardAction(ProtectedAction.ToggleFeature(toggle), context)
                 return
             }
         }
 
         if (checked) {
-            // Turning ON is always friction-free
             executeToggle(toggle, true, context)
             return
         }
 
-        // Turning OFF requires guard checks
         guardAction(ProtectedAction.ToggleFeature(toggle), context)
     }
 
-    fun guardAction(action: ProtectedAction, context: android.content.Context) {
+    fun guardAction(action: ProtectedAction, context: Context) {
         val currentMode = _uiState.value.accountabilityMode
         when (currentMode) {
             AccountabilityMode.NONE -> {
@@ -583,7 +1024,8 @@ class BlockingViewModel(
                 _uiState.update { it.copy(typingChallengeTarget = action) }
             }
             AccountabilityMode.TIME_DELAY -> {
-                if (BlockingPreferences.isTimeDelayElapsed(context, action.identifier)) {
+                val serverReady = _uiState.value.isTimeDelayServerReady
+                if (BlockingPreferences.isTimeDelayElapsed(context, action.identifier, serverConfirmedReady = serverReady)) {
                     cancelTimeDelay(context)
                     executeProtectedAction(action, context)
                 } else {
@@ -591,25 +1033,25 @@ class BlockingViewModel(
                 }
             }
             AccountabilityMode.FRIEND -> {
-                val partner = _uiState.value.partner
-                val isLinked = _uiState.value.isPartnerLinked
-                if (partner != null && isLinked) {
+                val isLinked = _uiState.value.isPartnerLinked || BlockingPreferences.isPartnerLinkedCached
+                if (isLinked) {
                     _uiState.update {
                         it.copy(
                             friendApprovalTarget = action,
                             unlockCodeError = null,
-                            unlockRequestError = null
+                            unlockRequestError = null,
+                            unlockEmailSent = false,
+                            isSendingUnlockCode = false
                         )
                     }
                 } else {
-                    // No active partner linked yet -> allow changing mode or action directly without trapping user
                     executeProtectedAction(action, context)
                 }
             }
         }
     }
 
-    private fun executeProtectedAction(action: ProtectedAction, context: android.content.Context) {
+    private fun executeProtectedAction(action: ProtectedAction, context: Context) {
         when (action) {
             is ProtectedAction.ToggleFeature -> {
                 executeToggle(action.toggle, false, context)
@@ -623,10 +1065,11 @@ class BlockingViewModel(
             is ProtectedAction.DisconnectPartner -> {
                 disconnectPartner()
             }
+            is ProtectedAction.Logout, is ProtectedAction.UninstallApp -> Unit
         }
     }
 
-    fun onTypingChallengeSuccess(context: android.content.Context) {
+    fun onTypingChallengeSuccess(context: Context) {
         val action = _uiState.value.typingChallengeTarget
         _uiState.update { it.copy(typingChallengeTarget = null) }
         if (action != null) {
@@ -638,31 +1081,164 @@ class BlockingViewModel(
         _uiState.update { it.copy(typingChallengeTarget = null) }
     }
 
-    fun onStartTimeDelay(context: android.content.Context) {
+    fun onStartTimeDelay(context: Context) {
         val action = _uiState.value.timeDelayConfirmTarget ?: return
-        startTimeDelayForTarget(action.identifier, context)
+        startTimeDelayForTarget(action.identifier, context, action.title)
     }
 
-    fun startTimeDelayForTarget(targetId: String, context: android.content.Context) {
+    fun startTimeDelayForTarget(
+        targetId: String,
+        context: Context,
+        targetTitle: String = targetDisplayName(targetId)
+    ) {
         val durationMs = BlockingPreferences.DEFAULT_TIME_DELAY_MS
         val unlockAt = System.currentTimeMillis() + durationMs
-        BlockingPreferences.setTimeDelay(context, unlockAt, targetId, durationMs)
+        BlockingPreferences.setTimeDelay(
+            context = context,
+            unlockAtWallMs = unlockAt,
+            target = targetId,
+            durationMs = durationMs,
+            serverBacked = false
+        )
+        TimeDelayNotificationScheduler.schedule(context, unlockAt, targetTitle)
         _uiState.update {
             it.copy(
                 timeDelayConfirmTarget = null,
                 timeDelayUnlockAt = unlockAt,
-                timeDelayTarget = targetId
+                timeDelayTarget = targetId,
+                isTimeDelayServerReady = false
             )
+        }
+
+        viewModelScope.launch {
+            accountabilityRepository.startTimeDelay(targetId, targetTitle, durationMs / 1000L).onSuccess { tdResp ->
+                val serverUnlockWall = System.currentTimeMillis() + tdResp.remainingMs
+                BlockingPreferences.setTimeDelay(
+                    context = context,
+                    unlockAtWallMs = serverUnlockWall,
+                    target = targetId,
+                    durationMs = tdResp.remainingMs,
+                    serverBacked = true
+                )
+                TimeDelayNotificationScheduler.schedule(context, serverUnlockWall, targetTitle)
+                _uiState.update {
+                    it.copy(
+                        timeDelayUnlockAt = serverUnlockWall,
+                        timeDelayTarget = targetId,
+                        isTimeDelayServerReady = tdResp.isReady
+                    )
+                }
+            }
         }
     }
 
-    fun cancelTimeDelay(context: android.content.Context) {
+    fun cancelTimeDelay(context: Context) {
         BlockingPreferences.clearTimeDelay(context)
+        TimeDelayNotificationScheduler.cancel(context)
         _uiState.update {
             it.copy(
                 timeDelayUnlockAt = 0L,
-                timeDelayTarget = ""
+                timeDelayTarget = "",
+                isTimeDelayServerReady = false
             )
+        }
+        viewModelScope.launch {
+            accountabilityRepository.clearTimeDelay()
+        }
+    }
+
+    fun completeReadyTimeDelay(context: Context) {
+        val targetId = _uiState.value.timeDelayTarget.ifBlank { BlockingPreferences.timeDelayTarget }
+        if (targetId.isBlank()) {
+            cancelTimeDelay(context)
+            return
+        }
+
+        if (BlockingPreferences.isTimeDelayElapsed(
+                context,
+                targetId,
+                serverConfirmedReady = _uiState.value.isTimeDelayServerReady
+            )
+        ) {
+            performTimeDelayUnlockForTarget(targetId, context)
+            return
+        }
+
+        if (BlockingPreferences.isTimeDelayServerBacked) {
+            viewModelScope.launch {
+                accountabilityRepository.getTimeDelay().fold(
+                    onSuccess = { resp ->
+                        if (resp.isReady || resp.timeDelay == null) {
+                            _uiState.update { it.copy(isTimeDelayServerReady = true) }
+                            performTimeDelayUnlockForTarget(targetId, context)
+                        } else {
+                            _uiState.update {
+                                it.copy(
+                                    infoDialog = InfoDialogState(
+                                        title = "Unlock Pending",
+                                        message = "Your 24-hour cooling-off timer is still active on the server."
+                                    )
+                                )
+                            }
+                        }
+                    },
+                    onFailure = {
+                        _uiState.update {
+                            it.copy(
+                                infoDialog = InfoDialogState(
+                                    title = "Verification Required",
+                                    message = "Connect to the internet to verify that the 24-hour cooling-off timer has completed after rebooting."
+                                )
+                            )
+                        }
+                    }
+                )
+            }
+        }
+    }
+
+    private fun performTimeDelayUnlockForTarget(targetId: String, context: Context) {
+        cancelTimeDelay(context)
+        when {
+            targetId == ProtectedAction.OpenChangeMode.identifier -> openModeSelection()
+            targetId == ProtectedAction.DisconnectPartner.identifier -> disconnectPartner()
+            targetId == "FOCUS_QUICK" -> FocusModeManager.stopQuickFocus(context)
+            targetId.startsWith("FOCUS_SCHEDULE_TOGGLE:") -> {
+                val scheduleId = targetId.removePrefix("FOCUS_SCHEDULE_TOGGLE:")
+                FocusModeManager.toggleSchedule(context, scheduleId, false)
+            }
+            targetId.startsWith("FOCUS_SCHEDULE_DELETE:") -> {
+                val scheduleId = targetId.removePrefix("FOCUS_SCHEDULE_DELETE:")
+                FocusModeManager.deleteSchedule(context, scheduleId)
+            }
+            targetId.startsWith("FOCUS_SCHEDULE:") -> {
+                val scheduleId = targetId.removePrefix("FOCUS_SCHEDULE:")
+                FocusModeManager.toggleSchedule(context, scheduleId, false)
+            }
+            targetId.startsWith("BLOCKLIST_APP:") -> {
+                val pkg = targetId.removePrefix("BLOCKLIST_APP:")
+                BlockingPreferences.removeBlockedApp(context, pkg)
+            }
+            targetId.startsWith("BLOCKLIST_KW:") -> {
+                val kw = targetId.removePrefix("BLOCKLIST_KW:")
+                BlockingPreferences.removeCustomBlockedKeyword(context, kw)
+            }
+            targetId.startsWith("WHITELIST_ADD_APP:") -> {
+                val rawPkgs = targetId.removePrefix("WHITELIST_ADD_APP:")
+                rawPkgs.split(',').filter { it.isNotBlank() }.forEach { pkg ->
+                    BlockingPreferences.addWhitelistedApp(context, pkg.trim())
+                }
+            }
+            targetId.startsWith("WHITELIST_ADD_KW:") -> {
+                val kw = targetId.removePrefix("WHITELIST_ADD_KW:")
+                BlockingPreferences.addWhitelistedKeyword(context, kw)
+            }
+            else -> {
+                val toggle = BlockingToggle.entries.firstOrNull { it.name == targetId }
+                if (toggle != null) {
+                    executeToggle(toggle, false, context)
+                }
+            }
         }
     }
 
@@ -670,7 +1246,7 @@ class BlockingViewModel(
         _uiState.update { it.copy(timeDelayConfirmTarget = null) }
     }
 
-    fun verifyFriendApprovalCode(enteredCode: String, context: android.content.Context) {
+    fun verifyFriendApprovalCode(enteredCode: String, context: Context) {
         val action = _uiState.value.friendApprovalTarget ?: return
         if (_uiState.value.isVerifyingUnlockCode) return
 
@@ -682,14 +1258,15 @@ class BlockingViewModel(
 
         _uiState.update { it.copy(isVerifyingUnlockCode = true, unlockCodeError = null) }
         viewModelScope.launch {
-            accountabilityRepository.verifyUnlockCode(trimmed).fold(
+            accountabilityRepository.verifyUnlockCode(trimmed, action.title).fold(
                 onSuccess = {
                     _uiState.update {
                         it.copy(
                             friendApprovalTarget = null,
                             isVerifyingUnlockCode = false,
                             unlockCodeError = null,
-                            unlockRequestError = null
+                            unlockRequestError = null,
+                            unlockEmailSent = false
                         )
                     }
                     executeProtectedAction(action, context)
@@ -708,6 +1285,7 @@ class BlockingViewModel(
 
     fun verifyExternalUnlockCode(
         enteredCode: String,
+        featureName: String? = null,
         onSuccess: () -> Unit,
         onError: (String) -> Unit
     ) {
@@ -723,13 +1301,14 @@ class BlockingViewModel(
 
         _uiState.update { it.copy(isVerifyingUnlockCode = true, unlockCodeError = null) }
         viewModelScope.launch {
-            accountabilityRepository.verifyUnlockCode(trimmed).fold(
+            accountabilityRepository.verifyUnlockCode(trimmed, featureName).fold(
                 onSuccess = {
                     _uiState.update {
                         it.copy(
                             isVerifyingUnlockCode = false,
                             unlockCodeError = null,
-                            unlockRequestError = null
+                            unlockRequestError = null,
+                            unlockEmailSent = false
                         )
                     }
                     onSuccess()
@@ -749,7 +1328,15 @@ class BlockingViewModel(
     }
 
     fun clearUnlockErrors() {
-        _uiState.update { it.copy(unlockCodeError = null, unlockRequestError = null, isVerifyingUnlockCode = false) }
+        _uiState.update {
+            it.copy(
+                unlockCodeError = null,
+                unlockRequestError = null,
+                isVerifyingUnlockCode = false,
+                isSendingUnlockCode = false,
+                unlockEmailSent = false
+            )
+        }
     }
 
     fun dismissFriendApproval() {
@@ -757,6 +1344,8 @@ class BlockingViewModel(
             it.copy(
                 friendApprovalTarget = null,
                 isVerifyingUnlockCode = false,
+                isSendingUnlockCode = false,
+                unlockEmailSent = false,
                 unlockCodeError = null,
                 unlockRequestError = null
             )
@@ -764,21 +1353,44 @@ class BlockingViewModel(
     }
 
     fun requestPartnerApprovalCode(featureName: String) {
-        _uiState.update { it.copy(unlockRequestError = null, unlockCodeError = null) }
+        _uiState.update {
+            it.copy(
+                isSendingUnlockCode = true,
+                unlockEmailSent = false,
+                unlockRequestError = null,
+                unlockCodeError = null
+            )
+        }
         viewModelScope.launch {
-            accountabilityRepository.requestUnlockCode(featureName).onFailure { err ->
-                android.util.Log.w("BlockingViewModel", "Failed to dispatch unlock request: ${err.message}")
-                _uiState.update {
-                    it.copy(unlockRequestError = err.message ?: "Could not reach server")
+            accountabilityRepository.requestUnlockCode(featureName).fold(
+                onSuccess = {
+                    _uiState.update {
+                        it.copy(
+                            isSendingUnlockCode = false,
+                            unlockEmailSent = true,
+                            unlockRequestError = null
+                        )
+                    }
+                },
+                onFailure = { err ->
+                    android.util.Log.w("BlockingViewModel", "Failed to dispatch unlock request: ${err.message}")
+                    _uiState.update {
+                        it.copy(
+                            isSendingUnlockCode = false,
+                            unlockEmailSent = false,
+                            unlockRequestError = err.message ?: "Could not reach server"
+                        )
+                    }
                 }
-            }
+            )
         }
     }
 
-    fun executeToggle(toggle: BlockingToggle, enabled: Boolean, context: android.content.Context) {
+    fun executeToggle(toggle: BlockingToggle, enabled: Boolean, context: Context) {
         BlockingPreferences.ensureContext(context)
         when (toggle) {
             BlockingToggle.ADULT_CONTENT -> setAdultBlocking(enabled)
+            BlockingToggle.DNS_VPN_SHIELD -> setDnsVpnEnabled(enabled, context)
             BlockingToggle.SHORTS -> setShortsBlocking(enabled)
             BlockingToggle.WHATSAPP_CHANNELS -> setWhatsAppChannelsBlocking(enabled)
             BlockingToggle.INSTAGRAM_REELS -> setInstagramReelsBlocking(enabled)
@@ -792,10 +1404,20 @@ class BlockingViewModel(
             BlockingToggle.UNSUPPORTED_BROWSERS -> setUnsupportedBrowsersBlocking(enabled)
             BlockingToggle.NEW_INSTALLED_APPS -> setNewlyInstalledAppsBlocking(enabled)
         }
+
+        if (!enabled) {
+            val featureLabel = featureDisplayName(toggle.name)
+            SecurityAlertReporter.reportIfPartnerLinked(
+                context = context,
+                eventType = "protection_disabled",
+                message = "$featureLabel protection was turned off."
+            )
+        }
     }
 
     private fun syncSettingsToAccessibilityService(settings: UserSettingsDto, markDirty: Boolean = false) {
         BlockingPreferences.saveSettings(
+            context = resolvedContext,
             adult = settings.blockAdultContent,
             shorts = settings.blockShorts,
             whatsapp = settings.blockWhatsAppChannels,
@@ -823,11 +1445,12 @@ class BlockingViewModel(
             blockNewlyInstalledApps = settings.blockNewlyInstalledApps,
             blockedScreenMessage = settings.blockedScreenMessage,
             blockedScreenCountdown = settings.blockedScreenCountdown,
-            redirectUrl = settings.redirectUrl
+            redirectUrl = settings.redirectUrl,
+            accountabilityMode = settings.accountabilityMode.ifBlank { _uiState.value.accountabilityMode.code }
         )
         viewModelScope.launch {
             settingsRepository.updateSettings(request).onSuccess {
-                BlockingPreferences.markLocalDirty(null, false)
+                BlockingPreferences.markLocalDirty(resolvedContext, false)
             }.onFailure { err ->
                 android.util.Log.w("BlockingViewModel", "Failed to sync local protections to server: ${err.message}")
             }

@@ -22,8 +22,11 @@ class BrowserInspectorTest {
     }
 
     @Test
-    fun `known unsupported browsers are flagged correctly`() {
-        assertTrue(BrowserInspector.isUnsupportedBrowser("com.microsoft.emmx", null))
+    fun `known unsupported browsers and DNS-bypass browsers are flagged correctly`() {
+        assertTrue(BrowserInspector.isUnsupportedBrowser("org.torproject.torbrowser", null))
+        assertTrue(BrowserInspector.isUnsupportedBrowser("org.torproject.torbrowser_alpha", null))
+        assertTrue(BrowserInspector.isUnsupportedBrowser("com.opera.mini.native", null))
+        assertTrue(BrowserInspector.isUnsupportedBrowser("com.opera.mini.native.beta", null))
         assertTrue(BrowserInspector.isUnsupportedBrowser("com.UCMobile.intl", null))
         assertTrue(BrowserInspector.isUnsupportedBrowser("com.kiwibrowser.browser", null))
         assertTrue(BrowserInspector.isUnsupportedBrowser("com.mi.globalbrowser", null))
@@ -31,12 +34,39 @@ class BrowserInspectorTest {
     }
 
     @Test
-    fun `all 15 supported browser names are present`() {
-        assertEquals(15, BrowserInspector.SUPPORTED_BROWSER_NAMES.size)
+    fun `microsoft edge is recognized as a supported browser`() {
+        assertTrue(BrowserInspector.isSupportedBrowser("com.microsoft.emmx"))
+        assertTrue(BrowserInspector.isSupportedBrowser("com.microsoft.emmx.beta"))
+        assertTrue(BrowserInspector.isSupportedBrowser("com.microsoft.emmx.canary"))
+        assertTrue(BrowserInspector.isSupportedBrowser("com.microsoft.emmx.dev"))
+        assertFalse(BrowserInspector.isUnsupportedBrowser("com.microsoft.emmx", null))
+        assertEquals(
+            listOf("com.microsoft.emmx:id/url_bar"),
+            BrowserInspector.addressBarIdsForPackage("com.microsoft.emmx")
+        )
+    }
+
+    @Test
+    fun `non-web utility browsers and Google search app are not falsely flagged as unsupported browsers`() {
+        assertFalse(BrowserInspector.isUnsupportedBrowser("com.estrongs.android.filebrowser", null))
+        assertFalse(BrowserInspector.isUnsupportedBrowser("com.example.photobrowser", null))
+        assertFalse(BrowserInspector.isUnsupportedBrowser("com.dev.sqlitebrowser", null))
+        assertFalse(BrowserInspector.isUnsupportedBrowser("com.smb.lanbrowser", null))
+        assertFalse(BrowserInspector.isUnsupportedBrowser("com.google.android.googlequicksearchbox", null))
+        assertTrue(BrowserInspector.isUnsupportedBrowser("org.niche.webbrowser", null))
+        assertTrue(BrowserInspector.isUnsupportedBrowser("com.fast.browser", null))
+    }
+
+    @Test
+    fun `all 14 supported browser names exclude Tor and Opera Mini and include Edge`() {
+        assertEquals(14, BrowserInspector.SUPPORTED_BROWSER_NAMES.size)
         assertTrue(BrowserInspector.SUPPORTED_BROWSER_NAMES.contains("Samsung Internet"))
         assertTrue(BrowserInspector.SUPPORTED_BROWSER_NAMES.contains("Google Chrome"))
         assertTrue(BrowserInspector.SUPPORTED_BROWSER_NAMES.contains("Mozilla Firefox"))
         assertTrue(BrowserInspector.SUPPORTED_BROWSER_NAMES.contains("Brave Browser"))
+        assertTrue(BrowserInspector.SUPPORTED_BROWSER_NAMES.contains("Microsoft Edge"))
+        assertFalse(BrowserInspector.SUPPORTED_BROWSER_NAMES.contains("Tor Browser"))
+        assertFalse(BrowserInspector.SUPPORTED_BROWSER_NAMES.contains("Opera Mini"))
     }
 
     @Test
@@ -50,5 +80,37 @@ class BrowserInspectorTest {
     fun `getBrowserDisplayName returns Samsung Internet for sbrowser packages`() {
         assertEquals("Samsung Internet", BrowserInspector.getBrowserDisplayName("com.sec.android.app.sbrowser", null))
         assertEquals("Samsung Internet", BrowserInspector.getBrowserDisplayName("com.sec.android.app.sbrowser.beta", null))
+    }
+
+    @Test
+    fun `addressBarIdsForPackage maps exact ids without cross-package multiplication`() {
+        assertEquals(
+            listOf("com.android.chrome:id/url_bar"),
+            BrowserInspector.addressBarIdsForPackage("com.android.chrome")
+        )
+        assertEquals(
+            listOf(
+                "com.sec.android.app.sbrowser:id/location_bar_edit_text",
+                "com.sec.android.app.sbrowser:id/url_bar_title"
+            ),
+            BrowserInspector.addressBarIdsForPackage("com.sec.android.app.sbrowser")
+        )
+        val firefoxIds = BrowserInspector.addressBarIdsForPackage("org.mozilla.firefox")
+        assertTrue(firefoxIds.all { it.startsWith("org.mozilla.firefox:id/") })
+        assertEquals(4, firefoxIds.size)
+        assertEquals(
+            listOf("com.duckduckgo.mobile.android:id/omnibarTextInput"),
+            BrowserInspector.addressBarIdsForPackage("com.duckduckgo.mobile.android")
+        )
+    }
+
+    @Test
+    fun `isLikelyAddressBarViewId accepts url bars and rejects action buttons`() {
+        assertTrue(BrowserInspector.isLikelyAddressBarViewId("com.android.chrome:id/url_bar"))
+        assertTrue(BrowserInspector.isLikelyAddressBarViewId("org.mozilla.firefox:id/mozac_browser_toolbar_url_view"))
+        assertTrue(BrowserInspector.isLikelyAddressBarViewId("com.duckduckgo.mobile.android:id/omnibarTextInput"))
+        assertFalse(BrowserInspector.isLikelyAddressBarViewId("com.android.chrome:id/menu_button"))
+        assertFalse(BrowserInspector.isLikelyAddressBarViewId("com.android.chrome:id/tab_switcher_button"))
+        assertFalse(BrowserInspector.isLikelyAddressBarViewId("com.android.chrome:id/share_url_button"))
     }
 }

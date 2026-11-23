@@ -181,4 +181,100 @@ class FocusScheduleTest {
         }
         assertFalse(schedule.isCurrentlyActive(calWedMorning))
     }
+
+    @Test
+    fun `zero-duration schedule is invalid and never active`() {
+        val zeroSchedule = FocusSchedule(
+            startHour = 9,
+            startMinute = 0,
+            endHour = 9,
+            endMinute = 0,
+            isEnabled = true,
+            repeatDaily = true
+        )
+        assertFalse(zeroSchedule.isValidDuration)
+
+        val cal = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 9)
+            set(Calendar.MINUTE, 0)
+        }
+        assertFalse(zeroSchedule.isCurrentlyActive(cal))
+    }
+
+    @Test
+    fun `displayName trims custom labels and falls back to Focus Session`() {
+        assertEquals("Focus Session", FocusSchedule(name = "   ").displayName)
+        assertEquals("Deep Work", FocusSchedule(name = "  Deep Work  ").displayName)
+    }
+
+    @Test
+    fun `isAllowedAcrossSchedules enforces strictest intersection across overlapping schedules`() {
+        val lightAllDay = FocusSchedule(
+            id = "light",
+            startHour = 8,
+            startMinute = 0,
+            endHour = 20,
+            endMinute = 0,
+            allowedApps = setOf("com.spotify.music", "com.slack")
+        )
+        val strictMorning = FocusSchedule(
+            id = "strict",
+            startHour = 9,
+            startMinute = 0,
+            endHour = 12,
+            endMinute = 0,
+            allowedApps = setOf("com.slack")
+        )
+
+        val cal10am = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, 10)
+            set(Calendar.MINUTE, 0)
+        }
+        val active = FocusSchedule.activeSchedules(listOf(lightAllDay, strictMorning), cal10am)
+        assertEquals(2, active.size)
+
+        // Slack is in both -> allowed; Spotify is missing from strict -> blocked
+        assertTrue(FocusSchedule.isAllowedAcrossSchedules("com.slack", active, isEssentialSystemPackage = false))
+        assertFalse(FocusSchedule.isAllowedAcrossSchedules("com.spotify.music", active, isEssentialSystemPackage = false))
+        assertTrue(FocusSchedule.isAllowedAcrossSchedules("com.android.dialer", active, isEssentialSystemPackage = true))
+    }
+
+    @Test
+    fun `computeMonotonicRemainingMs resists wall clock manipulation on same boot and clamps across reboot`() {
+        // Wall clock jumped 5 hours forward, but elapsedRealtime only advanced 10s -> 110s still left!
+        val remainingSameBoot = FocusModeManager.computeMonotonicRemainingMs(
+            elapsedEndMs = 220_000L,
+            nowElapsedMs = 110_000L,
+            wallEndMs = 1_000_120_000L,
+            nowWallMs = 1_020_000_000L,
+            savedBootCount = 7,
+            currentBootCount = 7,
+            maxDurationMs = 120_000L
+        )
+        assertEquals(110_000L, remainingSameBoot)
+
+        // Once monotonic end elapses -> 0 even if wall clock was pushed backwards
+        val elapsedExpired = FocusModeManager.computeMonotonicRemainingMs(
+            elapsedEndMs = 220_000L,
+            nowElapsedMs = 225_000L,
+            wallEndMs = 1_000_120_000L,
+            nowWallMs = 500_000L,
+            savedBootCount = 7,
+            currentBootCount = 7,
+            maxDurationMs = 120_000L
+        )
+        assertEquals(0L, elapsedExpired)
+
+        // Across reboot: clamps wall fallback to maxDurationMs
+        val acrossRebootClamped = FocusModeManager.computeMonotonicRemainingMs(
+            elapsedEndMs = 220_000L,
+            nowElapsedMs = 5_000L,
+            wallEndMs = 1_000_120_000L,
+            nowWallMs = 900_000_000L,
+            savedBootCount = 7,
+            currentBootCount = 8,
+            maxDurationMs = 120_000L
+        )
+        assertEquals(120_000L, acrossRebootClamped)
+    }
 }

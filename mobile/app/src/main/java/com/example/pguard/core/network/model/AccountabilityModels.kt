@@ -90,12 +90,38 @@ data class RequestUnlockCodeResponse(
 
 @Serializable
 data class VerifyUnlockCodeRequest(
-    @SerialName("code") val code: String
+    @SerialName("code") val code: String,
+    @SerialName("feature_name") val featureName: String? = null
 )
 
 @Serializable
 data class VerifyUnlockCodeResponse(
     @SerialName("verified") val verified: Boolean = false,
     @SerialName("feature_name") val featureName: String? = null,
+    @SerialName("error") val error: String? = null
+)
+
+@Serializable
+data class TimeDelayUnlockDto(
+    @SerialName("id") val id: Long = 0,
+    @SerialName("user_id") val userId: Long = 0,
+    @SerialName("target_key") val targetKey: String = "",
+    @SerialName("target_title") val targetTitle: String = "",
+    @SerialName("unlock_at") val unlockAt: String = ""
+)
+
+@Serializable
+data class StartTimeDelayRequest(
+    @SerialName("target_key") val targetKey: String,
+    @SerialName("target_title") val targetTitle: String,
+    @SerialName("duration_seconds") val durationSeconds: Long = 86_400L
+)
+
+@Serializable
+data class TimeDelayResponse(
+    @SerialName("time_delay") val timeDelay: TimeDelayUnlockDto? = null,
+    @SerialName("server_now_ms") val serverNowMs: Long = 0L,
+    @SerialName("remaining_ms") val remainingMs: Long = 0L,
+    @SerialName("is_ready") val isReady: Boolean = false,
     @SerialName("error") val error: String? = null
 )

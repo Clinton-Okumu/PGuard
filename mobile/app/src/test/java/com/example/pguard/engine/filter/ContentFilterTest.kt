@@ -136,4 +136,73 @@ class ContentFilterTest {
         assertTrue(custom.isAdultContent("this is forbidden content"))
         assertFalse(custom.isAdultContent("pornhub.com"))
     }
+
+    @Test
+    fun `matches hyphenated adult domains like heavy-r in url and plain text`() {
+        assertTrue(filter.isAdultContent("https://www.heavy-r.com/video/123"))
+        assertTrue(filter.isAdultContent("heavy-r.com"))
+        assertTrue(filter.isAdultContent("Watch heavy-r today"))
+        assertTrue(filter.isAdultDomain("heavy-r.com"))
+    }
+
+    @Test
+    fun `matches adult TLDs in urls and dns domains`() {
+        assertTrue(filter.isAdultContent("https://site.xxx/home"))
+        assertTrue(filter.isAdultContent("https://watch.porn"))
+        assertTrue(filter.isAdultDomain("site.xxx"))
+        assertTrue(filter.isAdultDomain("stream.adult"))
+        assertTrue(filter.isAdultDomain("cams.sexy"))
+        assertFalse(filter.isAdultDomain("wikipedia.org"))
+    }
+
+    @Test
+    fun `decodes double percent encoding and strips zero width characters`() {
+        assertTrue(filter.isAdultContent("https://example.com/search?q=free%2520porn%2520videos"))
+        assertTrue(filter.isAdultContent("https://example.com/?q=%2570%256f%2572%256e"))
+        assertTrue(filter.isAdultContent("https://p\u200Bornhub.com/"))
+    }
+
+    @Test
+    fun `matchesDomainEntries checks subdomains for domain rules and ignores plain keywords`() {
+        val list = listOf("https://www.reddit.com/", "casino", "x.com")
+        assertTrue(filter.matchesDomainEntries("old.reddit.com", list))
+        assertTrue(filter.matchesDomainEntries("reddit.com.", list))
+        assertTrue(filter.matchesDomainEntries("mobile.x.com", list))
+        assertFalse(filter.matchesDomainEntries("notreddit.com", list))
+        assertFalse(filter.matchesDomainEntries("casino.org", list))
+    }
+
+    @Test
+    fun `tiered page scanner avoids isolated profanity or anatomy false positives`() {
+        val newsArticle = listOf(
+            "Breaking News Today",
+            "The Senator said that is complete fucking nonsense during the hearing.",
+            "Public reactions continue to pour in."
+        )
+        val medicalArticle = listOf(
+            "Human Reproductive Anatomy - Wikipedia",
+            "The penis and vagina are primary reproductive organs.",
+            "Discusses orgasm and sexual health education."
+        )
+
+        assertTrue(filter.findAdultPageContent(newsArticle) == null)
+        assertTrue(filter.findAdultPageContent(medicalArticle) == null)
+    }
+
+    @Test
+    fun `tiered page scanner blocks strong adult hits or multi-signal explicit pages`() {
+        val strongPage = listOf(
+            "Welcome",
+            "Watch hardcore sex and hentai clips now"
+        )
+        val denseContextualPage = listOf(
+            "Trending",
+            "Hot boobs and tits",
+            "Big cock and pussy",
+            "Anal dildo compilation"
+        )
+
+        assertTrue(filter.findAdultPageContent(strongPage) != null)
+        assertTrue(filter.findAdultPageContent(denseContextualPage) != null)
+    }
 }

@@ -21,6 +21,7 @@ type UserSettings struct {
 	BlockedScreenMessage     string    `gorm:"default:'This page is blocked.'" json:"blocked_screen_message"`
 	BlockedScreenCountdown   int       `gorm:"default:3" json:"blocked_screen_countdown"`
 	RedirectURL              string    `gorm:"default:''" json:"redirect_url"`
+	AccountabilityMode       string    `gorm:"size:20;default:'none';not null" json:"accountability_mode"`
 	CreatedAt                time.Time `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt                time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 	User                     User      `gorm:"foreignKey:UserID" json:"-"`
@@ -40,6 +41,7 @@ func DefaultUserSettings(userID uint) *UserSettings {
 		BlockedScreenMessage:     "This page is blocked.",
 		BlockedScreenCountdown:   3,
 		RedirectURL:              "",
+		AccountabilityMode:       "none",
 	}
 }
 
@@ -96,6 +98,9 @@ func (s *PostgresSettingsStore) Upsert(settings *UserSettings) (*UserSettings, e
 	existing.BlockedScreenMessage = settings.BlockedScreenMessage
 	existing.BlockedScreenCountdown = settings.BlockedScreenCountdown
 	existing.RedirectURL = settings.RedirectURL
+	if settings.AccountabilityMode != "" {
+		existing.AccountabilityMode = settings.AccountabilityMode
+	}
 
 	if err := s.db.Save(&existing).Error; err != nil {
 		return nil, err

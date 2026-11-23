@@ -35,9 +35,11 @@ import com.example.pguard.core.datastore.AuthDataStore
 import com.example.pguard.core.network.NetworkClient
 import com.example.pguard.core.network.model.UserDto
 import com.example.pguard.data.repository.AccountabilityRepository
+import com.example.pguard.data.repository.BlocklistRepository
 import com.example.pguard.data.repository.SettingsRepository
 import com.example.pguard.engine.accessibility.BlockingPreferences
 import com.example.pguard.presentation.blocklist.BlocklistScreen
+import com.example.pguard.presentation.blocklist.BlocklistViewModel
 import com.example.pguard.presentation.focus.FocusModeScreen
 import com.example.pguard.presentation.habits.HabitsScreen
 import com.example.pguard.presentation.navigation.PGuardBottomBar
@@ -57,6 +59,7 @@ private tailrec fun Context.findViewModelStoreOwner(): ViewModelStoreOwner? = wh
 fun HomeScreen(
     user: UserDto?,
     onLogout: () -> Unit,
+    onSignInRequest: () -> Unit = onLogout,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -72,6 +75,9 @@ fun HomeScreen(
     val accountabilityRepository = remember {
         AccountabilityRepository(NetworkClient.getAccountabilityApiService(context))
     }
+    val blocklistRepository = remember {
+        BlocklistRepository(NetworkClient.getBlocklistApiService(context))
+    }
     val authDataStore = remember { AuthDataStore(context.applicationContext) }
     val blockingViewModel = remember(storeOwner) {
         if (storeOwner != null) {
@@ -80,12 +86,32 @@ fun HomeScreen(
                 object : ViewModelProvider.Factory {
                     @Suppress("UNCHECKED_CAST")
                     override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                        return BlockingViewModel(settingsRepository, accountabilityRepository, authDataStore) as T
+                        return BlockingViewModel(
+                            settingsRepository = settingsRepository,
+                            accountabilityRepository = accountabilityRepository,
+                            authDataStore = authDataStore,
+                            appContext = context.applicationContext
+                        ) as T
                     }
                 }
             )[BlockingViewModel::class.java]
         } else {
-            BlockingViewModel(settingsRepository, accountabilityRepository, authDataStore)
+            BlockingViewModel(settingsRepository, accountabilityRepository, authDataStore, context.applicationContext)
+        }
+    }
+    val blocklistViewModel = remember(storeOwner) {
+        if (storeOwner != null) {
+            ViewModelProvider(
+                storeOwner,
+                object : ViewModelProvider.Factory {
+                    @Suppress("UNCHECKED_CAST")
+                    override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                        return BlocklistViewModel(blocklistRepository, context.applicationContext, authDataStore) as T
+                    }
+                }
+            )[BlocklistViewModel::class.java]
+        } else {
+            BlocklistViewModel(blocklistRepository, context.applicationContext, authDataStore)
         }
     }
 
@@ -140,20 +166,38 @@ fun HomeScreen(
                         )
                     }
                     PGuardTab.BLOCKLIST -> {
-                        BlocklistScreen(blockingViewModel = blockingViewModel)
+                        BlocklistScreen(
+                            blockingViewModel = blockingViewModel,
+                            blocklistViewModel = blocklistViewModel
+                        )
                     }
                     PGuardTab.HABITS -> {
                         HabitsScreen(
                             user = user,
                             blockingViewModel = blockingViewModel,
-                            isActiveTab = currentTab == PGuardTab.HABITS
+                            isActiveTab = currentTab == PGuardTab.HABITS,
+                            onOpenBlockingTab = {
+                                currentTab = PGuardTab.BLOCKING
+                                coroutineScope.launch {
+                                    pagerState.scrollToPage(PGuardTab.BLOCKING.ordinal)
+                                }
+                            }
                         )
                     }
                     PGuardTab.SETTINGS -> {
                         SettingsScreen(
                             user = user,
                             onLogout = onLogout,
-                            blockingViewModel = blockingViewModel
+                            onSignInClick = onSignInRequest,
+                            onOpenBlockingTab = {
+                                currentTab = PGuardTab.BLOCKING
+                                coroutineScope.launch {
+                                    pagerState.scrollToPage(PGuardTab.BLOCKING.ordinal)
+                                }
+                            },
+                            onUpgradeClick = { showPremiumScreen = true },
+                            blockingViewModel = blockingViewModel,
+                            blocklistViewModel = blocklistViewModel
                         )
                     }
                 }

@@ -210,6 +210,24 @@ func TestHabitsHandler_StreakEndpoints(t *testing.T) {
 		assert.Equal(t, 1, resp.Count)
 		assert.Equal(t, "Boredom", resp.Relapses[0].Trigger)
 	})
+
+	t.Run("POST /api/v1/streak/reset rejects overlong trigger and notes", func(t *testing.T) {
+		longTrigger := strings.Repeat("a", 101)
+		body := fmt.Sprintf(`{"trigger": "%s", "notes": "ok"}`, longTrigger)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/streak/reset", strings.NewReader(body))
+		req = middleware.SetUser(req, user)
+		rr := httptest.NewRecorder()
+		handler.HandleResetStreak(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+
+		longNotes := strings.Repeat("b", 501)
+		body = fmt.Sprintf(`{"trigger": "Stress", "notes": "%s"}`, longNotes)
+		req = httptest.NewRequest(http.MethodPost, "/api/v1/streak/reset", strings.NewReader(body))
+		req = middleware.SetUser(req, user)
+		rr = httptest.NewRecorder()
+		handler.HandleResetStreak(rr, req)
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
+	})
 }
 
 func TestHabitsHandler_HabitEndpoints(t *testing.T) {
@@ -240,6 +258,18 @@ func TestHabitsHandler_HabitEndpoints(t *testing.T) {
 		assert.Equal(t, "Read 20 mins", resp.Habit.Title)
 		assert.Equal(t, "book", resp.Habit.Icon)
 		createdHabitID = resp.Habit.ID
+	})
+
+	t.Run("POST /api/v1/habits rejects overlong title", func(t *testing.T) {
+		longTitle := strings.Repeat("x", 101)
+		body := fmt.Sprintf(`{"title": "%s", "icon": "book"}`, longTitle)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/habits", strings.NewReader(body))
+		req = middleware.SetUser(req, user1)
+		rr := httptest.NewRecorder()
+
+		handler.HandleCreateHabit(rr, req)
+
+		assert.Equal(t, http.StatusBadRequest, rr.Code)
 	})
 
 	t.Run("GET /api/v1/habits returns habit with uncompleted status initially", func(t *testing.T) {

@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.text.TextUtils
 import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
@@ -75,6 +76,7 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
         message: String = "This page is blocked.",
         countdownSeconds: Int = 3,
         redirectUrl: String = "",
+        onBeforeRedirect: () -> Unit = {},
         onGoBack: () -> Unit = {
             service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
         }
@@ -117,9 +119,21 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                     addTargetChip(contentLayout, target)
                 }
 
+                val validatedRedirect = BlockedScreenConfig.validateRedirectUrl(
+                    raw = redirectUrl,
+                    blockAdultContent = false
+                )
+                val normalizedRedirect = (validatedRedirect as? BlockedScreenConfig.ValidationResult.Valid)
+                    ?.normalized
+                    .orEmpty()
+                val displayHost = BlockedScreenConfig.extractDisplayHost(normalizedRedirect)
+                val hasRedirect = normalizedRedirect.isNotBlank() && displayHost.isNotBlank()
                 var currentCountdown = if (countdownSeconds > 0) countdownSeconds else 0
                 val goBackButton = createPrimaryButton(
-                    label = if (currentCountdown > 0) "Go Back ($currentCountdown s)" else "Go Back to Safety",
+                    label = when {
+                        currentCountdown > 0 && !hasRedirect -> "Go Back ($currentCountdown s)"
+                        else -> "Go Back to Safety"
+                    },
                     widthFraction = 0.82f,
                     bottomMarginDp = 12f
                 ) {
@@ -127,21 +141,33 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                 }
                 contentLayout.addView(goBackButton.first, goBackButton.second)
 
-                if (redirectUrl.isNotBlank()) {
-                    val redirectBtn = Button(service).apply {
-                        text = "Open Safe Site: $redirectUrl"
+                var redirectBtn: Button? = null
+                if (hasRedirect) {
+                    redirectBtn = Button(service).apply {
+                        text = if (currentCountdown > 0) {
+                            "Redirecting to $displayHost ($currentCountdown s)"
+                        } else {
+                            "Open $displayHost"
+                        }
                         setTextColor(COLOR_TEXT_MUTED)
                         setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
                         typeface = Typeface.DEFAULT_BOLD
                         isAllCaps = false
+                        isSingleLine = true
+                        ellipsize = TextUtils.TruncateAt.END
+                        setPadding(dpToPx(16f), 0, dpToPx(16f), 0)
                         background = GradientDrawable().apply {
                             cornerRadius = dpToPx(12f).toFloat()
                             setColor(COLOR_CHIP_BG)
                             setStroke(dpToPx(1f), 0x33FFFFFF.toInt())
                         }
                         setOnClickListener {
-                            handleSafeRedirect(redirectUrl)
-                            hideFullScreenOverlay()
+                            dismissFullScreenAndExecute {
+                                onBeforeRedirect()
+                                if (!handleSafeRedirect(normalizedRedirect)) {
+                                    onGoBack()
+                                }
+                            }
                         }
                     }
                     contentLayout.addView(
@@ -154,15 +180,28 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                 }
 
                 if (currentCountdown > 0) {
-                    val buttonView = goBackButton.first
+                    val primaryBtn = goBackButton.first
                     countdownRunnable = object : Runnable {
                         override fun run() {
                             currentCountdown--
                             if (currentCountdown > 0) {
-                                buttonView.text = "Go Back ($currentCountdown s)"
+                                if (hasRedirect) {
+                                    redirectBtn?.text = "Redirecting to $displayHost ($currentCountdown s)"
+                                } else {
+                                    primaryBtn.text = "Go Back ($currentCountdown s)"
+                                }
                                 mainHandler.postDelayed(this, 1000L)
                             } else {
-                                dismissFullScreenAndExecute(onGoBack)
+                                if (hasRedirect) {
+                                    dismissFullScreenAndExecute {
+                                        onBeforeRedirect()
+                                        if (!handleSafeRedirect(normalizedRedirect)) {
+                                            onGoBack()
+                                        }
+                                    }
+                                } else {
+                                    dismissFullScreenAndExecute(onGoBack)
+                                }
                             }
                         }
                     }
@@ -212,7 +251,7 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                     boxBottomMarginDp = 20f,
                     titleText = "Focus Mode Active",
                     titleSizeSp = 22f,
-                    messageText = "This app is blocked during your scheduled focus time ($scheduleInfo). Stay focused on what matters.",
+                    messageText = "$appName is blocked during $scheduleInfo. Stay focused on what matters.",
                     messageSizeSp = 14.5f,
                     messageBottomMarginDp = 16f
                 )
@@ -258,11 +297,12 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                     )
                 )
 
-                val mins = remainingSeconds / 60
-                val secs = remainingSeconds % 60
-                val timeStr = String.format("%d:%02d", mins, secs)
+                var secsLeft = remainingSeconds.coerceAtLeast(0)
+                val formatTime: (Int) -> String = { totalSecs ->
+                    String.format("%d:%02d", totalSecs / 60, totalSecs % 60)
+                }
 
-                addBrandHeader(
+                val messageView = addBrandHeader(
                     contentLayout = contentLayout,
                     iconRes = R.drawable.ic_feature_lock,
                     boxSizeDp = 84f,
@@ -271,7 +311,7 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                     boxBottomMarginDp = 18f,
                     titleText = "Phone Locked (2-Min Urge Protocol)",
                     titleSizeSp = 20f,
-                    messageText = "Your phone is locked down from use for 2 minutes ($timeStr remaining) to break the impulsive craving loop. Breathe and stay strong.",
+                    messageText = "Your phone is locked down from use for 2 minutes (${formatTime(secsLeft)} remaining) to break the impulsive craving loop. Breathe and stay strong.",
                     messageSizeSp = 14f,
                     messageBottomMarginDp = 24f
                 )
@@ -293,6 +333,21 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                 contentLayout.addView(returnButton.first, returnButton.second)
 
                 attachFullScreenView(root)
+
+                if (secsLeft > 0) {
+                    countdownRunnable = object : Runnable {
+                        override fun run() {
+                            secsLeft--
+                            if (secsLeft > 0) {
+                                messageView.text = "Your phone is locked down from use for 2 minutes (${formatTime(secsLeft)} remaining) to break the impulsive craving loop. Breathe and stay strong."
+                                mainHandler.postDelayed(this, 1000L)
+                            } else {
+                                hideFullScreenOverlay()
+                            }
+                        }
+                    }
+                    mainHandler.postDelayed(countdownRunnable!!, 1000L)
+                }
                 Log.i(TAG, "Urge lockdown overlay displayed (intercepted $appName).")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to display urge lockdown overlay: ${e.message}")
@@ -343,7 +398,7 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
         messageText: String,
         messageSizeSp: Float,
         messageBottomMarginDp: Float
-    ) {
+    ): TextView {
         val iconBox = FrameLayout(service).apply {
             background = GradientDrawable().apply {
                 cornerRadius = dpToPx(cornerRadiusDp).toFloat()
@@ -398,6 +453,7 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                 bottomMargin = dpToPx(messageBottomMarginDp)
             }
         )
+        return messageView
     }
 
     private fun addTargetChip(contentLayout: LinearLayout, target: String) {
@@ -529,26 +585,29 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
         }
     }
 
-    private fun handleSafeRedirect(redirectUrl: String) {
-        try {
+    private fun handleSafeRedirect(redirectUrl: String): Boolean {
+        return try {
             val trimmed = redirectUrl.trim()
-            if (trimmed.isEmpty()) return
+            if (trimmed.isEmpty()) return false
             val fullUrl = when {
                 trimmed.startsWith("http://", ignoreCase = true) ||
                     trimmed.startsWith("https://", ignoreCase = true) -> trimmed
-                trimmed.contains(":") -> return
+                trimmed.contains(":") -> return false
                 else -> "https://$trimmed"
             }
             val parsed = Uri.parse(fullUrl)
             val scheme = parsed.scheme?.lowercase()
-            if (scheme != "http" && scheme != "https") return
+            val host = parsed.host
+            if ((scheme != "http" && scheme != "https") || host.isNullOrBlank()) return false
 
             val intent = Intent(Intent.ACTION_VIEW, parsed).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             service.startActivity(intent)
+            true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch safe redirect: ${e.message}")
+            false
         }
     }
 

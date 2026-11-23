@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net/http"
@@ -22,14 +23,14 @@ import (
 )
 
 type captureMailer struct {
-	mu           sync.Mutex
-	unlockCodes  []string
-	inviteCodes  []string
-	lastDoneCh   chan struct{}
+	mu          sync.Mutex
+	unlockCodes []string
+	inviteCodes []string
+	failNextErr error
 }
 
 func newCaptureMailer() *captureMailer {
-	return &captureMailer{lastDoneCh: make(chan struct{}, 10)}
+	return &captureMailer{}
 }
 
 func (m *captureMailer) SendEmail(ctx context.Context, to []string, subject, htmlBody, textBody string) (string, error) {
@@ -37,16 +38,24 @@ func (m *captureMailer) SendEmail(ctx context.Context, to []string, subject, htm
 }
 func (m *captureMailer) SendPartnerInvite(ctx context.Context, partnerEmail, inviterEmail, inviteCode string) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.failNextErr != nil {
+		err := m.failNextErr
+		m.failNextErr = nil
+		return err
+	}
 	m.inviteCodes = append(m.inviteCodes, inviteCode)
-	m.mu.Unlock()
-	m.lastDoneCh <- struct{}{}
 	return nil
 }
 func (m *captureMailer) SendUnlockRequest(ctx context.Context, partnerEmail, userEmail, featureName, approvalCode string) error {
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.failNextErr != nil {
+		err := m.failNextErr
+		m.failNextErr = nil
+		return err
+	}
 	m.unlockCodes = append(m.unlockCodes, approvalCode)
-	m.mu.Unlock()
-	m.lastDoneCh <- struct{}{}
 	return nil
 }
 func (m *captureMailer) SendSecurityAlert(ctx context.Context, partnerEmail, userEmail, eventType, details string) error {
@@ -57,6 +66,7 @@ type MockAccountabilityStore struct {
 	partners    map[uint]*store.AccountabilityPartner
 	events      map[uint][]store.SecurityAlert
 	unlockCodes map[uint][]*store.UnlockCode
+	timeDelays  map[uint]*store.TimeDelayUnlock
 	nextID      uint
 }
 
@@ -65,12 +75,13 @@ func NewMockAccountabilityStore() *MockAccountabilityStore {
 		partners:    make(map[uint]*store.AccountabilityPartner),
 		events:      make(map[uint][]store.SecurityAlert),
 		unlockCodes: make(map[uint][]*store.UnlockCode),
+		timeDelays:  make(map[uint]*store.TimeDelayUnlock),
 		nextID:      1,
 	}
 }
 
 func (m *MockAccountabilityStore) CreateInvite(userID uint, userEmail, partnerEmail, partnerName string) (*store.AccountabilityPartner, error) {
-	if partnerEmail == "" || !strings.Contains(partnerEmail, "@") {
+	if !store.IsValidEmail(partnerEmail) {
 		return nil, store.ErrInvalidEmail
 	}
 	if store.AreEmailsEquivalent(partnerEmail, userEmail) {
@@ -80,8 +91,8 @@ func (m *MockAccountabilityStore) CreateInvite(userID uint, userEmail, partnerEm
 	p := &store.AccountabilityPartner{
 		ID:           m.nextID,
 		UserID:       userID,
-		PartnerEmail: partnerEmail,
-		PartnerName:  partnerName,
+		PartnerEmail: strings.ToLower(strings.TrimSpace(partnerEmail)),
+		PartnerName:  strings.TrimSpace(partnerName),
 		InviteCode:   "PG-TEST01",
 		Status:       store.PartnerStatusPending,
 		CreatedAt:    time.Now(),
@@ -146,7 +157,7 @@ func (m *MockAccountabilityStore) CreateUnlockCode(userID uint, featureName, cod
 	rec := &store.UnlockCode{
 		ID:          uint(len(m.unlockCodes[userID]) + 1),
 		UserID:      userID,
-		FeatureName: featureName,
+		FeatureName: strings.TrimSpace(featureName),
 		CodeHash:    codeHash,
 		Attempts:    0,
 		MaxAttempts: 5,
@@ -158,7 +169,7 @@ func (m *MockAccountabilityStore) CreateUnlockCode(userID uint, featureName, cod
 	return rec, nil
 }
 
-func (m *MockAccountabilityStore) VerifyAndConsumeUnlockCode(userID uint, codeHash string) (*store.UnlockCode, error) {
+func (m *MockAccountabilityStore) VerifyAndConsumeUnlockCode(userID uint, codeHash, expectedFeature string) (*store.UnlockCode, error) {
 	list := m.unlockCodes[userID]
 	var latest *store.UnlockCode
 	for i := len(list) - 1; i >= 0; i-- {
@@ -178,6 +189,14 @@ func (m *MockAccountabilityStore) VerifyAndConsumeUnlockCode(userID uint, codeHa
 		latest.Used = true
 		return nil, store.ErrUnlockCodeAttemptsExceeded
 	}
+	expected := strings.TrimSpace(expectedFeature)
+	if expected != "" && !strings.EqualFold(strings.TrimSpace(latest.FeatureName), expected) {
+		latest.Attempts++
+		if latest.Attempts >= latest.MaxAttempts {
+			latest.Used = true
+		}
+		return nil, store.ErrUnlockCodeFeatureMismatch
+	}
 	if subtle.ConstantTimeCompare([]byte(latest.CodeHash), []byte(codeHash)) != 1 {
 		latest.Attempts++
 		if latest.Attempts >= latest.MaxAttempts {
@@ -188,6 +207,36 @@ func (m *MockAccountabilityStore) VerifyAndConsumeUnlockCode(userID uint, codeHa
 	}
 	latest.Used = true
 	return latest, nil
+}
+
+func (m *MockAccountabilityStore) UpsertTimeDelay(userID uint, targetKey, targetTitle string, unlockAt time.Time) (*store.TimeDelayUnlock, error) {
+	rec := &store.TimeDelayUnlock{
+		ID:          userID,
+		UserID:      userID,
+		TargetKey:   targetKey,
+		TargetTitle: targetTitle,
+		UnlockAt:    unlockAt,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	m.timeDelays[userID] = rec
+	return rec, nil
+}
+
+func (m *MockAccountabilityStore) GetTimeDelay(userID uint) (*store.TimeDelayUnlock, error) {
+	rec, ok := m.timeDelays[userID]
+	if !ok {
+		return nil, store.ErrTimeDelayNotFound
+	}
+	return rec, nil
+}
+
+func (m *MockAccountabilityStore) ClearTimeDelay(userID uint) error {
+	if _, ok := m.timeDelays[userID]; !ok {
+		return store.ErrTimeDelayNotFound
+	}
+	delete(m.timeDelays, userID)
+	return nil
 }
 
 func (m *MockAccountabilityStore) RecordSecurityEvent(userID uint, eventType, message string) (*store.SecurityAlert, error) {
@@ -236,6 +285,18 @@ func TestAccountabilityHandler_PartnerFlow(t *testing.T) {
 		assert.Nil(t, resp.Partner)
 	})
 
+	t.Run("POST /api/v1/accountability/invite rejects invalid email format", func(t *testing.T) {
+		for _, bad := range []string{`{"partner_email": "a@b"}`, `{"partner_email": "not-an-email"}`} {
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/invite", strings.NewReader(bad))
+			req = middleware.SetUser(req, user1)
+			rr := httptest.NewRecorder()
+
+			handler.HandleCreateInvite(rr, req)
+
+			assert.Equal(t, http.StatusBadRequest, rr.Code)
+		}
+	})
+
 	t.Run("POST /api/v1/accountability/invite prevents self-invite", func(t *testing.T) {
 		body := `{"partner_email": "user1@pguard.local"}`
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/invite", strings.NewReader(body))
@@ -260,7 +321,7 @@ func TestAccountabilityHandler_PartnerFlow(t *testing.T) {
 		assert.Contains(t, rr.Body.String(), "You cannot invite yourself as an accountability partner")
 	})
 
-	t.Run("POST /api/v1/accountability/invite creates pending invite", func(t *testing.T) {
+	t.Run("POST /api/v1/accountability/invite creates pending invite without leaking invite_code in JSON", func(t *testing.T) {
 		body := `{"partner_email": "partner@example.com", "partner_name": "Best Friend"}`
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/invite", strings.NewReader(body))
 		req = middleware.SetUser(req, user1)
@@ -269,6 +330,7 @@ func TestAccountabilityHandler_PartnerFlow(t *testing.T) {
 		handler.HandleCreateInvite(rr, req)
 
 		assert.Equal(t, http.StatusCreated, rr.Code)
+		assert.NotContains(t, rr.Body.String(), "invite_code")
 
 		var resp struct {
 			Partner store.AccountabilityPartner `json:"partner"`
@@ -277,7 +339,8 @@ func TestAccountabilityHandler_PartnerFlow(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, "partner@example.com", resp.Partner.PartnerEmail)
 		assert.Equal(t, "pending", resp.Partner.Status)
-		assert.NotEmpty(t, resp.Partner.InviteCode)
+		assert.Empty(t, resp.Partner.InviteCode)
+		assert.Equal(t, "PG-TEST01", mockStore.partners[user1.ID].InviteCode)
 	})
 
 	t.Run("POST /api/v1/accountability/accept prevents accepting own invite code", func(t *testing.T) {
@@ -320,7 +383,6 @@ func TestAccountabilityHandler_PartnerFlow(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, rr.Code)
 
-		// Verify unlinked
 		p, err := mockStore.GetPartnerByUserID(user1.ID)
 		assert.ErrorIs(t, err, store.ErrPartnerNotFound)
 		assert.Nil(t, p)
@@ -416,6 +478,20 @@ func TestAccountabilityHandler_WebAcceptAndUnlockVerification(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, rr.Code)
 	})
 
+	t.Run("synchronous mailer failure returns 502 on invite", func(t *testing.T) {
+		mailer.failNextErr = errors.New("resend unavailable")
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/invite", strings.NewReader(`{"partner_email":"other@example.com"}`))
+		req = middleware.SetUser(req, user)
+		rr := httptest.NewRecorder()
+
+		handler.HandleCreateInvite(rr, req)
+		assert.Equal(t, http.StatusBadGateway, rr.Code)
+	})
+
+	// Re-create pending invite and accept it via accept-web
+	partner, err = mockStore.CreateInvite(user.ID, user.Email, "friend@example.com", "Friend")
+	require.NoError(t, err)
+
 	t.Run("POST accept-web accepts invite and references inviter", func(t *testing.T) {
 		form := url.Values{}
 		form.Set("code", partner.InviteCode)
@@ -431,7 +507,17 @@ func TestAccountabilityHandler_WebAcceptAndUnlockVerification(t *testing.T) {
 		assert.Equal(t, store.PartnerStatusAccepted, mockStore.partners[user.ID].Status)
 	})
 
-	t.Run("request-unlock does not leak code and verify-unlock enforces single-use + attempt lockout", func(t *testing.T) {
+	t.Run("synchronous mailer failure returns 502 on request-unlock", func(t *testing.T) {
+		mailer.failNextErr = errors.New("smtp error")
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/request-unlock", strings.NewReader(`{"feature_name":"TikTok"}`))
+		req = middleware.SetUser(req, user)
+		rr := httptest.NewRecorder()
+
+		handler.HandleRequestUnlockCode(rr, req)
+		assert.Equal(t, http.StatusBadGateway, rr.Code)
+	})
+
+	t.Run("request-unlock binds feature_name and enforces single-use + attempt lockout", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/request-unlock", strings.NewReader(`{"feature_name":"TikTok"}`))
 		req = middleware.SetUser(req, user)
 		rr := httptest.NewRecorder()
@@ -444,21 +530,28 @@ func TestAccountabilityHandler_WebAcceptAndUnlockVerification(t *testing.T) {
 		_, hasCode := resp["code"]
 		assert.False(t, hasCode, "unlock code must never be returned in API response")
 
-		<-mailer.lastDoneCh
 		mailer.mu.Lock()
 		sentCode := mailer.unlockCodes[0]
 		mailer.mu.Unlock()
 		require.Len(t, sentCode, 6)
 
+		// Wrong feature name fails with 403 and does not consume for TikTok
+		mismatchBody := `{"code":"` + sentCode + `","feature_name":"Uninstall Protection"}`
+		mismatchReq := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/verify-unlock", strings.NewReader(mismatchBody))
+		mismatchReq = middleware.SetUser(mismatchReq, user)
+		mismatchRR := httptest.NewRecorder()
+		handler.HandleVerifyUnlockCode(mismatchRR, mismatchReq)
+		assert.Equal(t, http.StatusForbidden, mismatchRR.Code)
+
 		// Wrong code fails with 401
-		wrongReq := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/verify-unlock", strings.NewReader(`{"code":"000000"}`))
+		wrongReq := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/verify-unlock", strings.NewReader(`{"code":"000000","feature_name":"TikTok"}`))
 		wrongReq = middleware.SetUser(wrongReq, user)
 		wrongRR := httptest.NewRecorder()
 		handler.HandleVerifyUnlockCode(wrongRR, wrongReq)
 		assert.Equal(t, http.StatusUnauthorized, wrongRR.Code)
 
-		// Correct code succeeds
-		okBody := `{"code":"` + sentCode + `"}`
+		// Correct code + matching feature succeeds
+		okBody := `{"code":"` + sentCode + `","feature_name":"TikTok"}`
 		okReq := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/verify-unlock", strings.NewReader(okBody))
 		okReq = middleware.SetUser(okReq, user)
 		okRR := httptest.NewRecorder()
@@ -479,20 +572,66 @@ func TestAccountabilityHandler_WebAcceptAndUnlockVerification(t *testing.T) {
 		rr2 := httptest.NewRecorder()
 		handler.HandleRequestUnlockCode(rr2, req2)
 		require.Equal(t, http.StatusOK, rr2.Code)
-		<-mailer.lastDoneCh
 
 		for i := 0; i < 4; i++ {
-			r := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/verify-unlock", strings.NewReader(`{"code":"999999"}`))
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/verify-unlock", strings.NewReader(`{"code":"999999","feature_name":"Adult Content"}`))
 			r = middleware.SetUser(r, user)
 			w := httptest.NewRecorder()
 			handler.HandleVerifyUnlockCode(w, r)
 			assert.Equal(t, http.StatusUnauthorized, w.Code)
 		}
 
-		lockReq := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/verify-unlock", strings.NewReader(`{"code":"999999"}`))
+		lockReq := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/verify-unlock", strings.NewReader(`{"code":"999999","feature_name":"Adult Content"}`))
 		lockReq = middleware.SetUser(lockReq, user)
 		lockRR := httptest.NewRecorder()
 		handler.HandleVerifyUnlockCode(lockRR, lockReq)
 		assert.Equal(t, http.StatusTooManyRequests, lockRR.Code)
 	})
+}
+
+func TestAccountabilityHandler_TimeDelayLifecycle(t *testing.T) {
+	logger := log.New(io.Discard, "", 0)
+	mockStore := NewMockAccountabilityStore()
+	handler := NewAccountabilityHandler(mockStore, nil, logger)
+
+	user := &store.User{ID: 7, Email: "delay@pguard.local"}
+
+	// Initially empty
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/accountability/time-delay", nil)
+	getReq = middleware.SetUser(getReq, user)
+	getRR := httptest.NewRecorder()
+	handler.HandleGetTimeDelay(getRR, getReq)
+	assert.Equal(t, http.StatusOK, getRR.Code)
+	assert.Contains(t, getRR.Body.String(), `"time_delay": null`)
+
+	// Trying to start a shorter 60s timer is clamped up to 24 hours on server
+	startReq := httptest.NewRequest(http.MethodPost, "/api/v1/accountability/time-delay", strings.NewReader(`{"target_key":"TIKTOK","target_title":"TikTok","duration_seconds":60}`))
+	startReq = middleware.SetUser(startReq, user)
+	startRR := httptest.NewRecorder()
+	handler.HandleStartTimeDelay(startRR, startReq)
+	assert.Equal(t, http.StatusCreated, startRR.Code)
+
+	var startResp struct {
+		TimeDelay   store.TimeDelayUnlock `json:"time_delay"`
+		RemainingMs int64                 `json:"remaining_ms"`
+		IsReady     bool                  `json:"is_ready"`
+	}
+	require.NoError(t, json.NewDecoder(startRR.Body).Decode(&startResp))
+	assert.Equal(t, "TIKTOK", startResp.TimeDelay.TargetKey)
+	assert.False(t, startResp.IsReady)
+	assert.GreaterOrEqual(t, startResp.RemainingMs, int64(24*60*60*1000-1000))
+
+	// Clear active timer
+	delReq := httptest.NewRequest(http.MethodDelete, "/api/v1/accountability/time-delay", nil)
+	delReq = middleware.SetUser(delReq, user)
+	delRR := httptest.NewRecorder()
+	handler.HandleClearTimeDelay(delRR, delReq)
+	assert.Equal(t, http.StatusOK, delRR.Code)
+
+	getReq2 := httptest.NewRequest(http.MethodGet, "/api/v1/accountability/time-delay", nil)
+	getReq2 = middleware.SetUser(getReq2, user)
+	getRR2 := httptest.NewRecorder()
+	handler.HandleGetTimeDelay(getRR2, getReq2)
+	assert.Equal(t, http.StatusOK, getRR2.Code)
+	assert.Contains(t, getRR2.Body.String(), `"time_delay": null`)
 }

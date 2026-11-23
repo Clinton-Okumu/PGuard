@@ -105,24 +105,6 @@ internal fun openDontKillMyApp(context: Context, url: String) {
     }
 }
 
-internal fun openOverlayPermission(context: Context) {
-    try {
-        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
-            data = Uri.parse("package:${context.packageName}")
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(intent)
-    } catch (_: Exception) {
-        try {
-            val fallbackIntent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            }
-            context.startActivity(fallbackIntent)
-        } catch (_: Exception) {
-        }
-    }
-}
-
 internal fun openAccessibilitySettings(context: Context) {
     try {
         val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {

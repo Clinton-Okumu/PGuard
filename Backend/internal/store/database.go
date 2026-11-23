@@ -80,5 +80,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&AccountabilityPartner{},
 		&SecurityAlert{},
 		&UnlockCode{},
+		&TimeDelayUnlock{},
 	)
 }

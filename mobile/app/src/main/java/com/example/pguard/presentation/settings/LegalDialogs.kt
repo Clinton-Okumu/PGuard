@@ -53,17 +53,21 @@ fun PrivacyPolicyDialog(onDismiss: () -> Unit) {
                 )
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
-                    text = "1. Zero-Log Local Protection\n" +
-                        "PGuard operates entirely on-device. Your browsing activities, URLs visited, and habit tracking remain strictly on your personal phone. We do not sell personal data, do not monetize ads, and do not route web traffic through remote proxies.\n\n" +
+                    text = "1. On-Device Filtering Architecture\n" +
+                        "PGuard enforces blocking locally on your device. We do not sell personal data, run third-party ad trackers, or inspect your general web traffic on remote proxy servers.\n\n" +
                         "2. Accessibility Service (BIND_ACCESSIBILITY_SERVICE)\n" +
-                        "PGuard uses Android's Accessibility Service exclusively to:\n" +
-                        "• Detect adult or blocked website URLs in active browsers to prevent unauthorized access.\n" +
-                        "• Enforce Uninstall Protection to prevent tampering during weak moments.\n" +
-                        "• Zero Remote Transmission: The service works purely in local memory. PGuard does NOT log keystrokes, does NOT read personal chats, and NEVER sends browsing history to external servers.\n\n" +
-                        "3. Account & Cloud Sync\n" +
-                        "If you create an account, we securely store your email, hashed session tokens, settings, and recovery streak metrics via encrypted transport solely for cross-device restoration and optional accountability alerts.\n\n" +
-                        "4. Data Rights & Contact\n" +
-                        "You can request account deletion at any time by contacting privacy@pguard.app.",
+                        "PGuard uses Android's Accessibility Service locally in memory solely to:\n" +
+                        "• Detect adult or blocked domains in supported browsers and short-video/app screens you choose to block.\n" +
+                        "• Enforce Focus Mode sessions and Uninstall Protection.\n" +
+                        "• Zero Keylogging: PGuard does NOT log keystrokes, does NOT read personal messages, and NEVER uploads your browsing history.\n\n" +
+                        "3. Local DNS VPN Service (BIND_VPN_SERVICE)\n" +
+                        "When enabled by you, PGuard creates a local on-device split-tunnel VPN that inspects only DNS lookups (port 53) to block adult and custom-blocked domains across browsers and apps. General internet traffic bypasses the tunnel completely.\n\n" +
+                        "4. Device Administrator (BIND_DEVICE_ADMIN)\n" +
+                        "Optional Device Administrator permission prevents impulsive app removal until your configured accountability verification or time-delay expires.\n\n" +
+                        "5. Account & Cloud Sync\n" +
+                        "When signed in, PGuard securely syncs your account email, hashed session tokens, blocking settings, blocklist/whitelist entries, daily habits, streak/relapse logs, and optional accountability partner alerts over HTTPS.\n\n" +
+                        "6. Data Rights & Contact\n" +
+                        "You can request account and synced data deletion at any time by contacting privacy@pguard.app.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.88f)
                 )

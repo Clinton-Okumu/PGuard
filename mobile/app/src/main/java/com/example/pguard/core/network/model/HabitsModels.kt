@@ -37,7 +37,7 @@ data class RelapseLogDto(
     @SerialName("id") val id: Long = 0,
     @SerialName("trigger") val trigger: String = "",
     @SerialName("notes") val notes: String = "",
-    @SerialName("streak_days_lost") val streakDaysLost: Int = 0,
+    @SerialName("streak_days_achieved") val streakDaysAchieved: Int = 0,
     @SerialName("relapsed_at") val relapsedAt: String? = null,
     @SerialName("created_at") val createdAt: String? = null
 )
@@ -63,7 +63,8 @@ data class HabitDto(
     @SerialName("user_id") val userId: Long = 0,
     @SerialName("title") val title: String = "",
     @SerialName("icon") val icon: String = "book",
-    @SerialName("is_completed") val isCompleted: Boolean = false,
+    @SerialName("completed") val isCompleted: Boolean = false,
+    @SerialName("streak_days") val streakDays: Int = 0,
     @SerialName("created_at") val createdAt: String? = null
 )
 

@@ -7,22 +7,20 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.widget.Toast
-import com.example.pguard.core.network.NetworkClient
-import com.example.pguard.core.network.model.CreateBlocklistRequest
+import com.example.pguard.engine.accessibility.BlockingPreferences
+import com.example.pguard.engine.accessibility.BrowserInspector
+import com.example.pguard.engine.accessibility.NewAppInstallGuard
 import com.example.pguard.engine.accessibility.PGuardAccessibilityService
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 
 class NewAppInstallReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != Intent.ACTION_PACKAGE_ADDED) return
+        val action = intent.action ?: return
+        if (action != Intent.ACTION_PACKAGE_ADDED && action != Intent.ACTION_PACKAGE_REMOVED) return
 
         val isReplacing = intent.getBooleanExtra(Intent.EXTRA_REPLACING, false)
         if (isReplacing) {
-            // App update, not a newly installed app
+            // App update / replacement, not a fresh install or full uninstall
             return
         }
 
@@ -30,12 +28,22 @@ class NewAppInstallReceiver : BroadcastReceiver() {
         val packageName = data.schemeSpecificPart ?: return
         if (packageName.isBlank() || packageName == context.packageName) return
 
+        // Invalidate stale package/browser caches on any real install or uninstall
+        BrowserInspector.invalidateBrowserCache()
+        PGuardAccessibilityService.invalidateInstallTimeCache(packageName)
+        BlockingPreferences.revokeNewAppApproval(context, packageName)
+
+        if (action == Intent.ACTION_PACKAGE_REMOVED) {
+            Log.i(TAG, "App removed on device: $packageName")
+            return
+        }
+
         Log.i(TAG, "New app installed on device: $packageName")
 
-        // Reload accessibility settings to check if "block newly installed apps" is enabled
+        // Reload accessibility settings to inspect current protection & whitelist state
         PGuardAccessibilityService.loadSettings(context)
-        if (!PGuardAccessibilityService.isNewlyInstalledAppsBlockingEnabled) {
-            Log.d(TAG, "Block newly installed apps is OFF; skipping $packageName")
+        if (!NewAppInstallGuard.shouldAutoBlockInstalledApp(context, packageName)) {
+            Log.d(TAG, "Skipping auto-block for $packageName (disabled, system/IME/non-launchable, or whitelisted)")
             return
         }
 
@@ -61,27 +69,10 @@ class NewAppInstallReceiver : BroadcastReceiver() {
             ).show()
         }
 
-        // 3. Sync to backend blocklist API asynchronously if network/auth is available
+        // 3. Sync to backend blocklist API asynchronously when signed in and network is available
         val pendingResult = goAsync()
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                withTimeoutOrNull(8_000L) {
-                    val api = NetworkClient.getBlocklistApiService(context)
-                    api.createItem(
-                        CreateBlocklistRequest(
-                            type = "app",
-                            value = packageName,
-                            label = appLabel,
-                            isEnabled = true
-                        )
-                    )
-                    Log.i(TAG, "Successfully synced $packageName to backend blocklist")
-                }
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to sync $packageName to backend blocklist (offline or unauthorized): ${e.message}")
-            } finally {
-                pendingResult.finish()
-            }
+        NewAppInstallGuard.syncBlockedAppToBackendAsync(context, packageName, appLabel) {
+            pendingResult.finish()
         }
     }
 

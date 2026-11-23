@@ -1,7 +1,9 @@
 package com.example.pguard.presentation.habits
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,7 +17,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -27,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -43,6 +48,7 @@ import java.util.Calendar
 
 @Composable
 internal fun MonthlyProgressCalendarDialog(
+    userId: Long? = null,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -50,14 +56,20 @@ internal fun MonthlyProgressCalendarDialog(
     var selectedYear by remember { mutableIntStateOf(now.get(Calendar.YEAR)) }
     var selectedMonth by remember { mutableIntStateOf(now.get(Calendar.MONTH)) }
     var syncRevision by remember { mutableIntStateOf(0) }
+    var selectedRelapseDate by remember(selectedYear, selectedMonth) { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(selectedYear, selectedMonth) {
-        HabitsManager.syncCalendarWithBackend(context)
-        syncRevision++
+    LaunchedEffect(userId) {
+        if (userId != null) {
+            HabitsManager.syncCalendarWithBackend(context, userId)
+            syncRevision++
+        }
     }
 
     val monthData = remember(selectedYear, selectedMonth, syncRevision) {
         HabitsManager.getMonthCalendar(context, selectedYear, selectedMonth)
+    }
+    val monthRelapses = remember(selectedYear, selectedMonth, syncRevision) {
+        HabitsManager.getRelapseEntriesForMonth(context, selectedYear, selectedMonth)
     }
 
     val dayLetters = listOf("M", "T", "W", "T", "F", "S", "S")
@@ -116,7 +128,11 @@ internal fun MonthlyProgressCalendarDialog(
             }
         },
         text = {
-            Column(modifier = Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+            ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween
@@ -151,22 +167,38 @@ internal fun MonthlyProgressCalendarDialog(
                     }
 
                     items(monthData.days) { day ->
+                        val isRelapseDay = day.isWithinStreak && day.isRelapse
+                        val isSelected = selectedRelapseDate == day.dateString
                         Box(
                             modifier = Modifier
                                 .size(36.dp)
                                 .clip(CircleShape)
+                                .then(
+                                    if (isRelapseDay) {
+                                        Modifier.clickable {
+                                            selectedRelapseDate = if (isSelected) null else day.dateString
+                                        }
+                                    } else {
+                                        Modifier
+                                    }
+                                )
                                 .background(
                                     when {
                                         day.isFuture -> Color.Transparent
                                         !day.isWithinStreak -> MaterialTheme.colorScheme.surfaceContainerLow
-                                        day.isRelapse -> primary.copy(alpha = 0.2f)
+                                        day.isRelapse -> primary.copy(alpha = if (isSelected) 0.35f else 0.2f)
                                         day.isClean -> extendedColors.success.copy(alpha = 0.18f)
                                         else -> MaterialTheme.colorScheme.surfaceContainerHigh
                                     }
                                 )
                                 .border(
-                                    width = if (day.isToday) 1.5.dp else 1.dp,
+                                    width = when {
+                                        isSelected -> 2.5.dp
+                                        day.isToday -> 1.5.dp
+                                        else -> 1.dp
+                                    },
                                     color = when {
+                                        isSelected -> primary
                                         day.isToday -> primary
                                         !day.isWithinStreak -> MaterialTheme.colorScheme.outlineVariant
                                         day.isRelapse -> primary
@@ -180,7 +212,7 @@ internal fun MonthlyProgressCalendarDialog(
                             Text(
                                 text = "${day.dayNumber}",
                                 style = MaterialTheme.typography.bodySmall,
-                                fontWeight = if (day.isToday || day.isClean) FontWeight.Bold else FontWeight.Normal,
+                                fontWeight = if (day.isToday || day.isClean || isSelected) FontWeight.Bold else FontWeight.Normal,
                                 color = when {
                                     day.isToday -> primary
                                     !day.isWithinStreak -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
@@ -221,7 +253,11 @@ internal fun MonthlyProgressCalendarDialog(
                         }
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text("Consistency", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("${monthData.consistencyPercent}%", style = MaterialTheme.typography.titleMedium, color = extendedColors.gold)
+                            Text(
+                                text = if (monthData.trackedDaysCount == 0) "—" else "${monthData.consistencyPercent}%",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = if (monthData.trackedDaysCount == 0) MaterialTheme.colorScheme.onSurfaceVariant else extendedColors.gold
+                            )
                         }
                     }
                 }
@@ -234,10 +270,113 @@ internal fun MonthlyProgressCalendarDialog(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "● Green = Clean  ● Red = Relapse  ○ Faint = Pre-streak",
+                        text = "● Green = Clean  ● Red = Relapse (tap)  ○ Pre-streak",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+
+                if (monthRelapses.isNotEmpty()) {
+                    val displayedRelapses = remember(monthRelapses, selectedRelapseDate) {
+                        val filtered = if (selectedRelapseDate != null) {
+                            monthRelapses.filter { it.dateString == selectedRelapseDate }
+                        } else {
+                            monthRelapses
+                        }
+                        filtered.take(3)
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Surface(
+                        shape = MaterialTheme.shapes.small,
+                        color = MaterialTheme.colorScheme.surfaceContainerLow,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (selectedRelapseDate != null) "Relapses on $selectedRelapseDate" else "Relapse Reflections",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                if (selectedRelapseDate != null) {
+                                    Text(
+                                        text = "Show All",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = primary,
+                                        modifier = Modifier.clickable { selectedRelapseDate = null }
+                                    )
+                                }
+                            }
+
+                            displayedRelapses.forEach { entry ->
+                                Surface(
+                                    shape = MaterialTheme.shapes.extraSmall,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(10.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(MaterialTheme.shapes.extraSmall)
+                                                        .background(primary.copy(alpha = 0.15f))
+                                                        .padding(horizontal = 7.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text(
+                                                        text = entry.trigger,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = primary,
+                                                        fontWeight = FontWeight.SemiBold
+                                                    )
+                                                }
+                                                Text(
+                                                    text = entry.dateString,
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            Text(
+                                                text = "After ${entry.streakDaysAchieved}d",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = extendedColors.gold
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = entry.notes.ifBlank { "No reflection note logged." },
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (entry.notes.isNotBlank()) {
+                                                MaterialTheme.colorScheme.onSurface
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         },

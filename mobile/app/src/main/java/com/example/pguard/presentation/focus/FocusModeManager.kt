@@ -5,10 +5,15 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.provider.ContactsContract
+import android.provider.Settings
 import android.provider.Telephony
 import android.util.Log
 import android.view.inputmethod.InputMethodManager
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.Calendar
@@ -19,10 +24,37 @@ object FocusModeManager {
     private const val TAG = "FocusModeManager"
     private const val PREFS_NAME = "pguard_focus_mode_prefs"
     private const val KEY_SCHEDULES = "focus_schedules_json"
+
     private const val KEY_URGE_LOCKDOWN_UNTIL = "urge_lockdown_until"
+    private const val KEY_URGE_LOCKDOWN_ELAPSED_END = "urge_lockdown_elapsed_end"
+    private const val KEY_URGE_LOCKDOWN_BOOT_COUNT = "urge_lockdown_boot_count"
+    private const val KEY_URGE_LOCKDOWN_MAX_MS = "urge_lockdown_max_ms"
+
+    private const val KEY_QUICK_FOCUS_WALL_END = "quick_focus_wall_end"
+    private const val KEY_QUICK_FOCUS_ELAPSED_END = "quick_focus_elapsed_end"
+    private const val KEY_QUICK_FOCUS_BOOT_COUNT = "quick_focus_boot_count"
+    private const val KEY_QUICK_FOCUS_MAX_MS = "quick_focus_max_ms"
+    private const val KEY_QUICK_FOCUS_ALLOWED_APPS = "quick_focus_allowed_apps"
+
     private const val SYSTEM_PKG_CACHE_TTL_MS = 30_000L
 
-    const val MAX_FREE_SCHEDULES = Int.MAX_VALUE
+    private val KNOWN_SYSTEM_LAUNCHERS = setOf(
+        "com.android.launcher",
+        "com.android.launcher2",
+        "com.android.launcher3",
+        "com.google.android.apps.nexuslauncher",
+        "com.sec.android.app.launcher",
+        "com.miui.home",
+        "com.mi.android.globallauncher",
+        "com.huawei.android.launcher",
+        "com.oppo.launcher",
+        "com.oneplus.launcher",
+        "com.nothing.launcher",
+        "com.motorola.launcher3",
+        "com.bbk.launcher2",
+        "com.transsion.hilauncher",
+        "com.transsion.xoslauncher"
+    )
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -32,8 +64,9 @@ object FocusModeManager {
     private val cachedSchedules = Collections.synchronizedList(mutableListOf<FocusSchedule>())
     @Volatile
     private var isInitialized = false
-    @Volatile
-    private var cachedUrgeLockdownUntil: Long = -1L
+
+    private val _focusRevision = MutableStateFlow(0L)
+    val focusRevision: StateFlow<Long> = _focusRevision.asStateFlow()
 
     private data class SystemPackagesSnapshot(
         val dialerPackages: Set<String>,
@@ -45,25 +78,34 @@ object FocusModeManager {
     @Volatile
     private var cachedSystemPackages: SystemPackagesSnapshot? = null
 
+    @Synchronized
     fun init(context: Context) {
         if (!isInitialized) {
-            loadSchedulesFromDisk(context)
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            cachedUrgeLockdownUntil = prefs.getLong(KEY_URGE_LOCKDOWN_UNTIL, 0L)
+            loadSchedulesFromDisk(context.applicationContext)
             isInitialized = true
         }
     }
 
-    fun getSchedules(context: Context): List<FocusSchedule> {
+    private fun ensureInitialized(context: Context) {
         if (!isInitialized) {
             init(context)
         }
+    }
+
+    fun getSchedules(context: Context): List<FocusSchedule> {
+        ensureInitialized(context)
         return synchronized(cachedSchedules) {
             cachedSchedules.toList()
         }
     }
 
     fun saveSchedule(context: Context, schedule: FocusSchedule): Boolean {
+        if (!schedule.isValidDuration) {
+            Log.w(TAG, "Ignoring zero-duration schedule")
+            return false
+        }
+        val appContext = context.applicationContext
+        ensureInitialized(appContext)
         synchronized(cachedSchedules) {
             val existingIndex = cachedSchedules.indexOfFirst { it.id == schedule.id }
             if (existingIndex >= 0) {
@@ -72,12 +114,15 @@ object FocusModeManager {
                 cachedSchedules.add(schedule)
             }
         }
-        persistToDisk(context)
-        Log.i(TAG, "Saved schedule: ${schedule.formattedTimeRange}")
+        persistToDisk(appContext)
+        _focusRevision.value += 1
+        Log.i(TAG, "Saved schedule: ${schedule.displayName} ${schedule.formattedTimeRange}")
         return true
     }
 
     fun toggleSchedule(context: Context, id: String, isEnabled: Boolean) {
+        val appContext = context.applicationContext
+        ensureInitialized(appContext)
         synchronized(cachedSchedules) {
             val index = cachedSchedules.indexOfFirst { it.id == id }
             if (index >= 0) {
@@ -85,24 +130,187 @@ object FocusModeManager {
                 cachedSchedules[index] = current.copy(isEnabled = isEnabled)
             }
         }
-        persistToDisk(context)
+        persistToDisk(appContext)
+        _focusRevision.value += 1
     }
 
     fun deleteSchedule(context: Context, id: String) {
+        val appContext = context.applicationContext
+        ensureInitialized(appContext)
         synchronized(cachedSchedules) {
             cachedSchedules.removeAll { it.id == id }
         }
-        persistToDisk(context)
+        persistToDisk(appContext)
+        _focusRevision.value += 1
         Log.i(TAG, "Deleted schedule: $id")
     }
 
+    fun getActiveSchedules(context: Context, cal: Calendar = Calendar.getInstance()): List<FocusSchedule> {
+        return FocusSchedule.activeSchedules(getSchedules(context), cal)
+    }
+
     fun getActiveSchedule(context: Context, cal: Calendar = Calendar.getInstance()): FocusSchedule? {
-        val schedules = getSchedules(context)
-        return schedules.firstOrNull { it.isCurrentlyActive(cal) }
+        return getActiveSchedules(context, cal).minByOrNull { it.allowedApps.size }
     }
 
     fun isFocusModeActiveNow(context: Context, cal: Calendar = Calendar.getInstance()): Boolean {
-        return getActiveSchedule(context, cal) != null || isUrgeLockdownActive(context)
+        return isQuickFocusActive(context) ||
+            getActiveSchedules(context, cal).isNotEmpty() ||
+            isUrgeLockdownActive(context)
+    }
+
+    internal fun computeMonotonicRemainingMs(
+        elapsedEndMs: Long,
+        nowElapsedMs: Long,
+        wallEndMs: Long,
+        nowWallMs: Long,
+        savedBootCount: Int,
+        currentBootCount: Int,
+        maxDurationMs: Long
+    ): Long {
+        if (savedBootCount >= 0 && currentBootCount == savedBootCount && elapsedEndMs > 0L) {
+            return (elapsedEndMs - nowElapsedMs).coerceAtLeast(0L)
+        }
+        if (wallEndMs <= 0L) return 0L
+        return (wallEndMs - nowWallMs).coerceIn(0L, maxDurationMs.coerceAtLeast(0L))
+    }
+
+    private fun getBootCount(context: Context): Int {
+        return try {
+            Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT, -1)
+        } catch (_: Exception) {
+            -1
+        }
+    }
+
+    private fun readMonotonicRemainingSeconds(
+        context: Context,
+        wallKey: String,
+        elapsedKey: String,
+        bootKey: String,
+        maxMsKey: String,
+        defaultMaxMs: Long
+    ): Int {
+        val appContext = context.applicationContext
+        ensureInitialized(appContext)
+        val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val remainingMs = computeMonotonicRemainingMs(
+            elapsedEndMs = prefs.getLong(elapsedKey, 0L),
+            nowElapsedMs = SystemClock.elapsedRealtime(),
+            wallEndMs = prefs.getLong(wallKey, 0L),
+            nowWallMs = System.currentTimeMillis(),
+            savedBootCount = prefs.getInt(bootKey, -1),
+            currentBootCount = getBootCount(appContext),
+            maxDurationMs = prefs.getLong(maxMsKey, defaultMaxMs)
+        )
+        return if (remainingMs > 0L) ((remainingMs + 999L) / 1000L).toInt() else 0
+    }
+
+    fun startUrgeLockdown(context: Context, durationSeconds: Int = 120) {
+        val appContext = context.applicationContext
+        ensureInitialized(appContext)
+        val clampedSecs = durationSeconds.coerceAtLeast(1)
+        val durationMs = clampedSecs * 1000L
+        val wallEnd = System.currentTimeMillis() + durationMs
+        val elapsedEnd = SystemClock.elapsedRealtime() + durationMs
+        val bootCount = getBootCount(appContext)
+
+        appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putLong(KEY_URGE_LOCKDOWN_UNTIL, wallEnd)
+            .putLong(KEY_URGE_LOCKDOWN_ELAPSED_END, elapsedEnd)
+            .putInt(KEY_URGE_LOCKDOWN_BOOT_COUNT, bootCount)
+            .putLong(KEY_URGE_LOCKDOWN_MAX_MS, durationMs)
+            .apply()
+        _focusRevision.value += 1
+        Log.i(TAG, "Started urge lockdown for ${clampedSecs}s")
+    }
+
+    fun stopUrgeLockdown(context: Context) {
+        val appContext = context.applicationContext
+        ensureInitialized(appContext)
+        appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_URGE_LOCKDOWN_UNTIL)
+            .remove(KEY_URGE_LOCKDOWN_ELAPSED_END)
+            .remove(KEY_URGE_LOCKDOWN_BOOT_COUNT)
+            .remove(KEY_URGE_LOCKDOWN_MAX_MS)
+            .apply()
+        _focusRevision.value += 1
+        Log.i(TAG, "Stopped urge lockdown")
+    }
+
+    fun getUrgeLockdownRemainingSeconds(context: Context): Int {
+        return readMonotonicRemainingSeconds(
+            context = context,
+            wallKey = KEY_URGE_LOCKDOWN_UNTIL,
+            elapsedKey = KEY_URGE_LOCKDOWN_ELAPSED_END,
+            bootKey = KEY_URGE_LOCKDOWN_BOOT_COUNT,
+            maxMsKey = KEY_URGE_LOCKDOWN_MAX_MS,
+            defaultMaxMs = 120_000L
+        )
+    }
+
+    fun isUrgeLockdownActive(context: Context): Boolean {
+        return getUrgeLockdownRemainingSeconds(context) > 0
+    }
+
+    fun startQuickFocus(context: Context, durationMinutes: Int, allowedApps: Set<String> = emptySet()) {
+        if (durationMinutes <= 0) return
+        val appContext = context.applicationContext
+        ensureInitialized(appContext)
+        val durationMs = durationMinutes * 60_000L
+        val wallEnd = System.currentTimeMillis() + durationMs
+        val elapsedEnd = SystemClock.elapsedRealtime() + durationMs
+        val bootCount = getBootCount(appContext)
+
+        appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .putLong(KEY_QUICK_FOCUS_WALL_END, wallEnd)
+            .putLong(KEY_QUICK_FOCUS_ELAPSED_END, elapsedEnd)
+            .putInt(KEY_QUICK_FOCUS_BOOT_COUNT, bootCount)
+            .putLong(KEY_QUICK_FOCUS_MAX_MS, durationMs)
+            .putStringSet(KEY_QUICK_FOCUS_ALLOWED_APPS, allowedApps.toSet())
+            .apply()
+        _focusRevision.value += 1
+        Log.i(TAG, "Started Quick Focus for ${durationMinutes}m (allowed=${allowedApps.size})")
+    }
+
+    fun stopQuickFocus(context: Context) {
+        val appContext = context.applicationContext
+        ensureInitialized(appContext)
+        appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            .edit()
+            .remove(KEY_QUICK_FOCUS_WALL_END)
+            .remove(KEY_QUICK_FOCUS_ELAPSED_END)
+            .remove(KEY_QUICK_FOCUS_BOOT_COUNT)
+            .remove(KEY_QUICK_FOCUS_MAX_MS)
+            .remove(KEY_QUICK_FOCUS_ALLOWED_APPS)
+            .apply()
+        _focusRevision.value += 1
+        Log.i(TAG, "Stopped Quick Focus session")
+    }
+
+    fun getQuickFocusRemainingSeconds(context: Context): Int {
+        return readMonotonicRemainingSeconds(
+            context = context,
+            wallKey = KEY_QUICK_FOCUS_WALL_END,
+            elapsedKey = KEY_QUICK_FOCUS_ELAPSED_END,
+            bootKey = KEY_QUICK_FOCUS_BOOT_COUNT,
+            maxMsKey = KEY_QUICK_FOCUS_MAX_MS,
+            defaultMaxMs = 24L * 60L * 60_000L
+        )
+    }
+
+    fun isQuickFocusActive(context: Context): Boolean {
+        return getQuickFocusRemainingSeconds(context) > 0
+    }
+
+    fun getQuickFocusAllowedApps(context: Context): Set<String> {
+        val appContext = context.applicationContext
+        ensureInitialized(appContext)
+        val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        return prefs.getStringSet(KEY_QUICK_FOCUS_ALLOWED_APPS, emptySet())?.toSet() ?: emptySet()
     }
 
     private fun getSystemPackages(context: Context): SystemPackagesSnapshot {
@@ -209,61 +417,13 @@ object FocusModeManager {
         return false
     }
 
-    fun startUrgeLockdown(context: Context, durationSeconds: Int = 120) {
-        val until = System.currentTimeMillis() + (durationSeconds * 1000L)
-        cachedUrgeLockdownUntil = until
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().putLong(KEY_URGE_LOCKDOWN_UNTIL, until).apply()
-        Log.i(TAG, "Started 2-min urge lockdown until $until")
-    }
-
-    fun stopUrgeLockdown(context: Context) {
-        cachedUrgeLockdownUntil = 0L
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        prefs.edit().remove(KEY_URGE_LOCKDOWN_UNTIL).apply()
-        Log.i(TAG, "Stopped urge lockdown")
-    }
-
-    private fun readUrgeLockdownUntil(context: Context): Long {
-        val cached = cachedUrgeLockdownUntil
-        if (cached >= 0L) return cached
-        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val loaded = prefs.getLong(KEY_URGE_LOCKDOWN_UNTIL, 0L)
-        cachedUrgeLockdownUntil = loaded
-        return loaded
-    }
-
-    fun isUrgeLockdownActive(context: Context): Boolean {
-        return System.currentTimeMillis() < readUrgeLockdownUntil(context)
-    }
-
-    fun getUrgeLockdownRemainingSeconds(context: Context): Int {
-        val until = readUrgeLockdownUntil(context)
-        val remainingMs = until - System.currentTimeMillis()
-        return if (remainingMs > 0) ((remainingMs + 999L) / 1000L).toInt() else 0
-    }
-
-    /**
-     * Determines whether a package is permitted during an active focus schedule:
-     * - PGuard itself is always permitted
-     * - Standard Defaults: Messages, Calls (Dialer), Contacts are permitted
-     * - Home Launcher and System UI are permitted
-     * - Input Methods (keyboards) are permitted
-     * - Explicit user-selected allowedApps in the schedule are permitted
-     * - All other applications are strictly blocked
-     */
-    fun isPackageAllowed(context: Context, packageName: String, schedule: FocusSchedule): Boolean {
+    private fun isEssentialFocusPackage(context: Context, packageName: String): Boolean {
         val lower = packageName.lowercase()
         val appPkg = context.packageName.lowercase()
-
         if (lower == appPkg) return true
 
-        if (schedule.allowedApps.any { it.equals(lower, ignoreCase = true) }) {
-            return true
-        }
-
         if (lower.startsWith("com.android.systemui") ||
-            lower.contains("launcher") ||
+            lower in KNOWN_SYSTEM_LAUNCHERS ||
             lower.contains("trebuchet") ||
             lower.contains("quickstep")
         ) {
@@ -275,11 +435,46 @@ object FocusModeManager {
             return true
         }
 
-        if (lower.contains("inputmethod") || lower.contains("gboard") || lower.contains("latinime")) {
-            return true
+        return lower.contains("inputmethod") || lower.contains("gboard") || lower.contains("latinime")
+    }
+
+    fun isPackageAllowed(context: Context, packageName: String, schedule: FocusSchedule): Boolean {
+        if (isEssentialFocusPackage(context, packageName)) return true
+        return schedule.allowedApps.any { it.equals(packageName, ignoreCase = true) }
+    }
+
+    /**
+     * Evaluates Quick Focus and all overlapping active Focus Schedules together.
+     * Returns null when allowed, or a concise description of the blocking session.
+     */
+    fun getBlockingFocusReason(
+        context: Context,
+        packageName: String,
+        cal: Calendar = Calendar.getInstance()
+    ): String? {
+        if (isEssentialFocusPackage(context, packageName)) return null
+
+        val quickRemaining = getQuickFocusRemainingSeconds(context)
+        if (quickRemaining > 0) {
+            val quickAllowed = getQuickFocusAllowedApps(context)
+            if (quickAllowed.none { it.equals(packageName, ignoreCase = true) }) {
+                val minsLeft = (quickRemaining + 59) / 60
+                val label = if (minsLeft <= 1 && quickRemaining < 60) "<1 min left" else "$minsLeft min left"
+                return "Quick Focus ($label)"
+            }
         }
 
-        return false
+        val active = getActiveSchedules(context, cal)
+        if (active.isNotEmpty() &&
+            !FocusSchedule.isAllowedAcrossSchedules(packageName, active, isEssentialSystemPackage = false)
+        ) {
+            val blocking = active.first { schedule ->
+                schedule.allowedApps.none { it.equals(packageName, ignoreCase = true) }
+            }
+            return "${blocking.displayName} (${blocking.formattedWindowOnly})"
+        }
+
+        return null
     }
 
     private fun loadSchedulesFromDisk(context: Context) {

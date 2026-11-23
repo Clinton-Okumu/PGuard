@@ -36,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -361,7 +362,7 @@ private fun HabitRowItem(
 @Composable
 internal fun AddHabitDialog(
     onDismiss: () -> Unit,
-    onConfirmAdd: (title: String, iconKey: String, targetDays: Int) -> Unit
+    onConfirmAdd: (title: String, iconKey: String) -> Unit
 ) {
     var newTitle by remember { mutableStateOf("") }
     val primary = MaterialTheme.colorScheme.primary
@@ -444,10 +445,21 @@ internal fun AddHabitDialog(
 
                 OutlinedTextField(
                     value = newTitle,
-                    onValueChange = { newTitle = it },
+                    onValueChange = {
+                        if (it.length <= HabitsManager.MAX_HABIT_TITLE_LENGTH) {
+                            newTitle = it
+                        }
+                    },
                     placeholder = {
                         Text(
                             "e.g. Read 15 mins daily",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    supportingText = {
+                        Text(
+                            text = "${newTitle.length}/${HabitsManager.MAX_HABIT_TITLE_LENGTH}",
+                            style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     },
@@ -464,12 +476,14 @@ internal fun AddHabitDialog(
             }
         },
         confirmButton = {
+            val canAdd = newTitle.trim().isNotEmpty()
             TextButton(
                 onClick = {
-                    if (newTitle.isNotBlank()) {
-                        onConfirmAdd(newTitle.trim(), selectedIcon.key, 30)
+                    if (canAdd) {
+                        onConfirmAdd(newTitle.trim(), selectedIcon.key)
                     }
                 },
+                enabled = canAdd,
                 colors = ButtonDefaults.textButtonColors(contentColor = primary)
             ) {
                 Text("Add", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
@@ -641,15 +655,22 @@ private fun MilestoneCardItem(
 @Composable
 internal fun MilestoneCelebrationDialog(
     milestone: MilestoneBadge,
+    isNewUnlock: Boolean = true,
+    isUnlocked: Boolean = true,
+    currentStreak: Int = 0,
+    bestStreak: Int = 0,
     onClaimBadge: () -> Unit
 ) {
+    var appeared by remember { mutableStateOf(false) }
+    LaunchedEffect(milestone.targetDays) { appeared = true }
     val scaleAnim by animateFloatAsState(
-        targetValue = 1f,
-        animationSpec = tween(durationMillis = 600),
+        targetValue = if (appeared) 1f else 0.72f,
+        animationSpec = tween(durationMillis = 450),
         label = "celebrationScale"
     )
     val gold = MaterialTheme.pguardColors.gold
     val successColor = MaterialTheme.pguardColors.success
+    val pillAccent = if (isUnlocked) gold else MaterialTheme.colorScheme.onSurfaceVariant
 
     AlertDialog(
         onDismissRequest = onClaimBadge,
@@ -669,14 +690,21 @@ internal fun MilestoneCelebrationDialog(
                             scaleY = scaleAnim
                         }
                         .clip(CircleShape)
-                        .background(milestone.badgeColor.copy(alpha = 0.18f))
-                        .border(3.dp, milestone.badgeColor, CircleShape),
+                        .background(
+                            if (isUnlocked) milestone.badgeColor.copy(alpha = 0.18f)
+                            else MaterialTheme.colorScheme.surfaceContainerHighest
+                        )
+                        .border(
+                            width = 3.dp,
+                            color = if (isUnlocked) milestone.badgeColor else MaterialTheme.colorScheme.outlineVariant,
+                            shape = CircleShape
+                        ),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         painter = painterResource(id = milestone.iconRes),
                         contentDescription = null,
-                        tint = milestone.badgeColor,
+                        tint = if (isUnlocked) milestone.badgeColor else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(54.dp)
                     )
                 }
@@ -686,14 +714,18 @@ internal fun MilestoneCelebrationDialog(
                 Row(
                     modifier = Modifier
                         .clip(CircleShape)
-                        .background(gold.copy(alpha = 0.15f))
+                        .background(pillAccent.copy(alpha = 0.15f))
                         .padding(horizontal = 12.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "🎉 NEW MILESTONE UNLOCKED!",
+                        text = when {
+                            isNewUnlock -> "🎉 NEW MILESTONE UNLOCKED!"
+                            isUnlocked -> "🏆 MILESTONE EARNED"
+                            else -> "🔒 MILESTONE LOCKED"
+                        },
                         style = MaterialTheme.typography.labelSmall,
-                        color = gold
+                        color = pillAccent
                     )
                 }
 
@@ -736,23 +768,39 @@ internal fun MilestoneCelebrationDialog(
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
                     ) {
-                        Text(
-                            text = "Target: ${milestone.targetDays} Days",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "UNLOCKED 🏆",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = successColor
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Target: ${milestone.targetDays} Days",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = when {
+                                    isNewUnlock -> "UNLOCKED 🏆"
+                                    isUnlocked -> "EARNED ✓"
+                                    else -> "${(milestone.targetDays - currentStreak).coerceAtLeast(1)}d remaining"
+                                },
+                                style = MaterialTheme.typography.labelMedium,
+                                color = if (isUnlocked) successColor else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        if (!isUnlocked && bestStreak >= milestone.targetDays) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Previously reached on ${bestStreak}d best streak",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = gold
+                            )
+                        }
                     }
                 }
             }
@@ -770,7 +818,11 @@ internal fun MilestoneCelebrationDialog(
                 )
             ) {
                 Text(
-                    text = "Claim Badge 🏆",
+                    text = when {
+                        isNewUnlock -> "Claim Badge 🏆"
+                        isUnlocked -> "Close"
+                        else -> "Keep Going"
+                    },
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold
                 )

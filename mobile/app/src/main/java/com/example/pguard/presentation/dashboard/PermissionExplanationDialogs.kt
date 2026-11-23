@@ -368,21 +368,21 @@ private fun DisclosureSection(
 }
 
 @Composable
-fun OverlayExplanationDialog(
+fun VpnDnsExplanationDialog(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit
 ) {
     PermissionGuideDialog(
-        title = "Display Pop-up Window",
-        category = "Shield & Blocked Screen",
-        iconRes = R.drawable.ic_blocked_screen,
-        description = "Android requires this permission so PGuard can display the blocked warning screen, timer, and safe redirect immediately over restricted websites and apps.",
+        title = "Network DNS Shield",
+        category = "Local On-Device DNS Filter",
+        iconRes = R.drawable.ic_pguard_globe_shield,
+        description = "Android uses the local VPN API so PGuard can filter DNS domain lookups directly on your phone. Only DNS queries are inspected locally to block adult domains, enforce SafeSearch, and cover in-app WebViews — normal web traffic never routes through a remote VPN.",
         steps = listOf(
-            "Tap \"Open Settings\" below to open Appear on Top settings.",
-            "Locate and select \"PGuard\" in the list of applications.",
-            "Turn the switch ON for \"Allow display over other apps\" (or \"Appear on top\")."
+            "Tap \"Enable DNS Shield\" below.",
+            "Tap \"OK\" when Android asks to set up a local VPN connection.",
+            "Keep Uninstall Protection ON to prevent bypassing your DNS shield."
         ),
-        confirmLabel = "Open Settings",
+        confirmLabel = "Enable DNS Shield",
         onConfirm = onConfirm,
         onDismiss = onDismiss
     )

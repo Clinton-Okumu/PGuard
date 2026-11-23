@@ -24,6 +24,7 @@ import com.example.pguard.core.datastore.AuthDataStore
 import com.example.pguard.core.network.NetworkClient
 import com.example.pguard.data.repository.AuthRepository
 import com.example.pguard.engine.accessibility.BlockingPreferences
+import com.example.pguard.engine.accountability.TimeDelayNotificationScheduler
 import com.example.pguard.presentation.dashboard.HomeScreen
 import com.example.pguard.presentation.habits.HabitsManager
 import com.example.pguard.presentation.login.LoginScreen
@@ -104,11 +105,19 @@ class MainActivity : ComponentActivity() {
                         else -> {
                             HomeScreen(
                                 user = currentUser,
+                                onSignInRequest = {
+                                    userDismissedLogin = false
+                                },
                                 onLogout = {
                                     coroutineScope.launch {
                                         authRepository.logout()
                                         loginViewModel.resetState()
+                                        BlockingPreferences.clearPartnerCache(applicationContext)
+                                        BlockingPreferences.clearTimeDelay(applicationContext)
+                                        TimeDelayNotificationScheduler.cancel(applicationContext)
+                                        BlockingPreferences.clearPendingBlocklistDeletes(applicationContext)
                                         BlockingPreferences.markLocalDirty(applicationContext, false)
+                                        HabitsManager.clearAllUserDataOnLogout(applicationContext)
                                         userDismissedLogin = false
                                     }
                                 }

@@ -4,6 +4,8 @@ import android.app.admin.DeviceAdminReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
+import com.example.pguard.engine.accessibility.BlockingPreferences
+import com.example.pguard.engine.accountability.SecurityAlertReporter
 
 class PGuardDeviceAdminReceiver : DeviceAdminReceiver() {
 
@@ -19,6 +21,14 @@ class PGuardDeviceAdminReceiver : DeviceAdminReceiver() {
     override fun onDisabled(context: Context, intent: Intent) {
         super.onDisabled(context, intent)
         Log.w(TAG, "PGuard Device Admin disabled")
+        BlockingPreferences.loadSettings(context)
+        if (BlockingPreferences.isUninstallProtectionEnabled) {
+            SecurityAlertReporter.reportIfPartnerLinked(
+                context = context,
+                eventType = "permission_revoked",
+                message = "PGuard Device Administrator was deactivated while Uninstall Protection was active."
+            )
+        }
     }
 
     companion object {

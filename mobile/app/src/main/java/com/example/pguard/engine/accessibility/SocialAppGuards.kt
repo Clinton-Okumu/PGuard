@@ -50,6 +50,7 @@ object SocialAppGuards {
         if (text.isNullOrBlank()) return false
         val trimmed = text.trim()
         return trimmed.equals("Shorts", ignoreCase = true) ||
+            trimmed.equals("Cortos", ignoreCase = true) ||
             trimmed.startsWith("Shorts tab", ignoreCase = true) ||
             trimmed.startsWith("Shorts, ", ignoreCase = true) ||
             trimmed.equals("YouTube Shorts", ignoreCase = true)
@@ -73,7 +74,9 @@ object SocialAppGuards {
             return true
         }
 
-        if (desc == "shorts" || desc == "shorts tab" || desc.startsWith("shorts, ") || text == "shorts") {
+        if (desc == "shorts" || desc == "cortos" || desc == "shorts tab" ||
+            desc.startsWith("shorts, ") || text == "shorts" || text == "cortos"
+        ) {
             if (node.isSelected || node.isFocused) {
                 return true
             }
@@ -96,7 +99,10 @@ object SocialAppGuards {
             lower.contains("whatsapp")
     }
 
-    fun isWhatsAppChannelClickMatch(event: AccessibilityEvent): Boolean {
+    fun isWhatsAppChannelClickMatch(
+        event: AccessibilityEvent,
+        rootNode: AccessibilityNodeInfo? = null
+    ): Boolean {
         if (event.eventType != AccessibilityEvent.TYPE_VIEW_CLICKED) return false
         val text = event.text.joinToString(" ")
         val desc = event.contentDescription?.toString() ?: ""
@@ -104,34 +110,84 @@ object SocialAppGuards {
         val srcText = event.source?.text?.toString() ?: ""
         val srcId = event.source?.viewIdResourceName?.lowercase(Locale.ROOT) ?: ""
 
-        return isChannelExploreOrFollowTarget(desc) ||
-            isChannelExploreOrFollowTarget(text) ||
-            isChannelExploreOrFollowTarget(srcDesc) ||
-            isChannelExploreOrFollowTarget(srcText) ||
-            srcId.contains("newsletter_directory") ||
+        if (srcId.contains("newsletter_directory") ||
             srcId.contains("directory_search") ||
             srcId.contains("newsletter_follow")
-    }
-
-    private fun isChannelExploreOrFollowTarget(input: String?): Boolean {
-        if (input.isNullOrBlank()) return false
-        val trimmed = input.trim()
-
-        if (trimmed.equals("Follow", ignoreCase = true) ||
-            trimmed.equals("Follow channel", ignoreCase = true) ||
-            trimmed.startsWith("Follow ", ignoreCase = true) ||
-            trimmed.equals("Join channel", ignoreCase = true)
         ) {
             return true
         }
 
-        return trimmed.equals("Explore more", ignoreCase = true) ||
-            trimmed.equals("Find channels", ignoreCase = true) ||
-            trimmed.equals("Explore channels", ignoreCase = true) ||
-            trimmed.equals("Discover channels", ignoreCase = true) ||
-            trimmed.startsWith("Find channels", ignoreCase = true) ||
-            trimmed.startsWith("Explore channels", ignoreCase = true) ||
-            trimmed.equals("See all", ignoreCase = true)
+        val candidates = listOf(desc, text, srcDesc, srcText)
+        if (candidates.any { isUnambiguousWhatsAppChannelAction(it) }) {
+            return true
+        }
+
+        if (candidates.any { isContextualWhatsAppChannelAction(it) }) {
+            return rootNode != null && isWhatsAppUpdatesOrChannelsScreen(rootNode)
+        }
+
+        return false
+    }
+
+    internal fun isUnambiguousWhatsAppChannelAction(input: String?): Boolean {
+        if (input.isNullOrBlank()) return false
+        val trimmed = input.trim().lowercase(Locale.ROOT)
+        return trimmed in UNAMBIGUOUS_CHANNEL_ACTIONS ||
+            trimmed.startsWith("find channels") ||
+            trimmed.startsWith("explore channels") ||
+            trimmed.startsWith("buscar canales") ||
+            trimmed.startsWith("explorar canales") ||
+            trimmed.startsWith("rechercher des chaînes")
+    }
+
+    internal fun isContextualWhatsAppChannelAction(input: String?): Boolean {
+        if (input.isNullOrBlank()) return false
+        val trimmed = input.trim().lowercase(Locale.ROOT)
+        return trimmed in CONTEXTUAL_CHANNEL_ACTIONS ||
+            trimmed.startsWith("follow ") ||
+            trimmed.startsWith("seguir ") ||
+            trimmed.startsWith("suivre ") ||
+            trimmed.startsWith("ikuti ")
+    }
+
+    fun isWhatsAppUpdatesOrChannelsScreen(node: AccessibilityNodeInfo?, depth: Int = 0): Boolean {
+        if (node == null || depth > 12) return false
+
+        val viewId = node.viewIdResourceName?.lowercase(Locale.ROOT) ?: ""
+        val text = node.text?.toString()?.trim()?.lowercase(Locale.ROOT) ?: ""
+        val desc = node.contentDescription?.toString()?.trim()?.lowercase(Locale.ROOT) ?: ""
+
+        if (viewId.contains("newsletter_") ||
+            viewId.contains("channels_") ||
+            viewId.contains("status_and_channels") ||
+            (viewId.contains("updates_tab") && (node.isSelected || node.isFocused))
+        ) {
+            return true
+        }
+
+        if (text in CHANNEL_DIRECTORY_HEADERS || desc in CHANNEL_DIRECTORY_HEADERS) {
+            return true
+        }
+
+        if ((text in UPDATES_TAB_LABELS || desc in UPDATES_TAB_LABELS) &&
+            (node.isSelected || node.isFocused)
+        ) {
+            return true
+        }
+
+        val count = node.childCount
+        for (i in 0 until count) {
+            val child = node.getChild(i) ?: continue
+            if (isWhatsAppUpdatesOrChannelsScreen(child, depth + 1)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    internal fun isWhatsAppChannelDirectoryLabel(input: String?): Boolean {
+        if (input.isNullOrBlank()) return false
+        return input.trim().lowercase(Locale.ROOT) in CHANNEL_DIRECTORY_HEADERS
     }
 
     fun isWhatsAppChannelDirectoryActive(node: AccessibilityNodeInfo?, depth: Int = 0): Boolean {
@@ -149,20 +205,7 @@ object SocialAppGuards {
             return true
         }
 
-        if (text.equals("Find channels", ignoreCase = true) ||
-            text.equals("Explore channels", ignoreCase = true) ||
-            desc.equals("Find channels", ignoreCase = true) ||
-            desc.equals("Explore channels", ignoreCase = true) ||
-            text.equals("Search channels", ignoreCase = true) ||
-            desc.equals("Search channels", ignoreCase = true)
-        ) {
-            return true
-        }
-
-        if (text.equals("Most active", ignoreCase = true) ||
-            text.equals("Popular channels", ignoreCase = true) ||
-            desc.equals("Most active", ignoreCase = true)
-        ) {
+        if (isWhatsAppChannelDirectoryLabel(text) || isWhatsAppChannelDirectoryLabel(desc)) {
             return true
         }
 
@@ -229,26 +272,51 @@ object SocialAppGuards {
             trimmed.equals("Instagram Reels", ignoreCase = true)
     }
 
-    fun isInstagramReelsActiveInHierarchy(node: AccessibilityNodeInfo?, depth: Int = 0): Boolean {
-        if (node == null || depth > 20) return false
+    internal fun isInstagramReelsNodeActive(
+        viewId: String,
+        desc: String,
+        text: String,
+        isSelected: Boolean,
+        isFocused: Boolean
+    ): Boolean {
+        val lowerId = viewId.lowercase(Locale.ROOT)
+        val lowerDesc = desc.lowercase(Locale.ROOT)
+        val lowerText = text.lowercase(Locale.ROOT)
 
-        val viewId = node.viewIdResourceName?.lowercase(Locale.ROOT) ?: ""
-        val desc = node.contentDescription?.toString()?.lowercase(Locale.ROOT) ?: ""
-        val text = node.text?.toString()?.lowercase(Locale.ROOT) ?: ""
-
-        if (viewId.contains("clips_viewer") ||
-            viewId.contains("clips_video_container") ||
-            viewId.contains("clips_viewer_view_pager") ||
-            viewId.contains("reels_tab") ||
-            viewId.contains("clips_item")
+        // Full-screen Reels viewer containers mean Reels are actively playing
+        if (lowerId.contains("clips_viewer") ||
+            lowerId.contains("clips_video_container") ||
+            lowerId.contains("clips_viewer_view_pager") ||
+            lowerId.contains("clips_item")
         ) {
             return true
         }
 
-        if (desc == "reels" || desc == "reels tab" || desc.startsWith("reels, ") || text == "reels") {
-            if (node.isSelected || node.isFocused) {
-                return true
-            }
+        // Bottom-nav / tab nodes exist on every Instagram screen; only block when selected/focused
+        if (lowerId.contains("reels_tab") || lowerId.contains("clips_tab")) {
+            return isSelected || isFocused
+        }
+
+        if (lowerDesc == "reels" ||
+            lowerDesc == "reels tab" ||
+            lowerDesc.startsWith("reels, ") ||
+            lowerText == "reels"
+        ) {
+            return isSelected || isFocused
+        }
+
+        return false
+    }
+
+    fun isInstagramReelsActiveInHierarchy(node: AccessibilityNodeInfo?, depth: Int = 0): Boolean {
+        if (node == null || depth > 20) return false
+
+        val viewId = node.viewIdResourceName ?: ""
+        val desc = node.contentDescription?.toString() ?: ""
+        val text = node.text?.toString() ?: ""
+
+        if (isInstagramReelsNodeActive(viewId, desc, text, node.isSelected, node.isFocused)) {
+            return true
         }
 
         val count = node.childCount
@@ -260,4 +328,72 @@ object SocialAppGuards {
         }
         return false
     }
+
+    private val UNAMBIGUOUS_CHANNEL_ACTIONS = setOf(
+        "find channels",
+        "explore channels",
+        "discover channels",
+        "follow channel",
+        "join channel",
+        "search channels",
+        "buscar canales",
+        "explorar canales",
+        "seguir canal",
+        "rechercher des chaînes",
+        "kanäle finden",
+        "encontrar canais",
+        "cari saluran",
+        "kanalları bul",
+        "tafuta vituo"
+    )
+
+    private val CONTEXTUAL_CHANNEL_ACTIONS = setOf(
+        "follow",
+        "see all",
+        "explore more",
+        "seguir",
+        "ver todo",
+        "suivre",
+        "tout voir",
+        "folgen",
+        "alle ansehen",
+        "ikuti",
+        "lihat semua",
+        "takip et"
+    )
+
+    private val CHANNEL_DIRECTORY_HEADERS = setOf(
+        "find channels",
+        "explore channels",
+        "search channels",
+        "most active",
+        "popular channels",
+        "buscar canales",
+        "explorar canales",
+        "canales populares",
+        "rechercher des chaînes",
+        "kanäle finden",
+        "encontrar canais",
+        "cari saluran",
+        "kanalları bul",
+        "tafuta vituo",
+        "channels",
+        "canales",
+        "chaînes",
+        "kanäle",
+        "canais",
+        "saluran",
+        "kanallar"
+    )
+
+    private val UPDATES_TAB_LABELS = setOf(
+        "updates",
+        "novedades",
+        "actus",
+        "aktuelles",
+        "atualizações",
+        "pembaruan",
+        "güncellemeler",
+        "masasisho"
+    )
 }

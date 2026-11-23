@@ -1,17 +1,18 @@
 package com.example.pguard.presentation.focus
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.Drawable
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,18 +25,23 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -43,38 +49,51 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.pguard.R
 import com.example.pguard.engine.accessibility.BlockingPreferences
 import com.example.pguard.engine.accessibility.PGuardAccessibilityService
+import com.example.pguard.presentation.accountability.AccountabilityGuardDialogsHost
+import com.example.pguard.presentation.accountability.rememberAccountabilityGuard
 import com.example.pguard.presentation.blocklist.InstalledAppItem
 import com.example.pguard.presentation.blocklist.queryDeviceLauncherApps
-import com.example.pguard.presentation.dashboard.AccountabilityMode
+import com.example.pguard.presentation.dashboard.AlertActionCard
 import com.example.pguard.presentation.dashboard.BlockingViewModel
-import com.example.pguard.presentation.dashboard.FriendApprovalDialog
 import com.example.pguard.presentation.dashboard.TimeDelayActiveBanner
-import com.example.pguard.presentation.dashboard.TimeDelayConfirmDialog
-import com.example.pguard.presentation.dashboard.TypingChallengeDialog
+import com.example.pguard.presentation.dashboard.openAccessibilitySettings
 import com.example.pguard.presentation.dashboard.targetDisplayName
 import com.example.pguard.presentation.theme.pguardColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import java.util.Calendar
+import java.util.Locale
 
 @Composable
 fun FocusModeScreen(
@@ -85,75 +104,59 @@ fun FocusModeScreen(
     BackHandler(onBack = onBackClick)
 
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val schedules = remember { mutableStateListOf<FocusSchedule>() }
+    val focusRevision by FocusModeManager.focusRevision.collectAsState()
 
     val blockingUiState = blockingViewModel?.uiState?.collectAsState()?.value
-    val activeFrictionMode = blockingUiState?.accountabilityMode
-        ?: AccountabilityMode.fromCode(PGuardAccessibilityService.accountabilityMode)
+    val accountabilityGuard = rememberAccountabilityGuard(blockingViewModel)
+
+    var isAccessibilityEnabled by remember { mutableStateOf(PGuardAccessibilityService.isEnabled(context)) }
+    var quickFocusRemainingSecs by remember { mutableIntStateOf(FocusModeManager.getQuickFocusRemainingSeconds(context)) }
+    var currentCalendar by remember { mutableStateOf(Calendar.getInstance()) }
 
     var showHelpDialog by remember { mutableStateOf(false) }
     var showCreateDialog by remember { mutableStateOf(false) }
-    var showLimitToast by remember { mutableStateOf(false) }
-
-    var showTypingChallenge by remember { mutableStateOf(false) }
-    var showTimeDelayConfirm by remember { mutableStateOf(false) }
-    var showFriendApproval by remember { mutableStateOf(false) }
-    var pendingFrictionAction by remember { mutableStateOf<(() -> Unit)?>(null) }
-    var pendingTimeDelayTargetId by remember { mutableStateOf("") }
-    var localUnlockError by remember { mutableStateOf<String?>(null) }
+    var editingSchedule by remember { mutableStateOf<FocusSchedule?>(null) }
+    var showQuickFocusDialog by remember { mutableStateOf(false) }
 
     var showAppPickerDialog by remember { mutableStateOf(false) }
     var currentAllowedAppsTarget by remember { mutableStateOf<Set<String>>(emptySet()) }
     var onAllowedAppsSelectedCallback by remember { mutableStateOf<((Set<String>) -> Unit)?>(null) }
 
-    fun refreshSchedules() {
+    fun refreshFocusState() {
         schedules.clear()
         schedules.addAll(FocusModeManager.getSchedules(context))
+        quickFocusRemainingSecs = FocusModeManager.getQuickFocusRemainingSeconds(context)
+        currentCalendar = Calendar.getInstance()
     }
 
+    LaunchedEffect(focusRevision) {
+        refreshFocusState()
+    }
+
+    // Keep live "ACTIVE NOW" badges and Quick Focus timer updating every second
     LaunchedEffect(Unit) {
-        refreshSchedules()
-    }
-
-    LaunchedEffect(showLimitToast) {
-        if (showLimitToast) {
-            delay(3500L)
-            showLimitToast = false
+        while (true) {
+            delay(1000L)
+            quickFocusRemainingSecs = FocusModeManager.getQuickFocusRemainingSeconds(context)
+            currentCalendar = Calendar.getInstance()
         }
     }
 
-    fun triggerProtectedScheduleAction(targetId: String, action: () -> Unit) {
-        when (activeFrictionMode) {
-            AccountabilityMode.NONE -> {
-                action()
-            }
-            AccountabilityMode.SELF -> {
-                pendingFrictionAction = action
-                showTypingChallenge = true
-            }
-            AccountabilityMode.TIME_DELAY -> {
-                if (BlockingPreferences.isTimeDelayElapsed(context, targetId)) {
-                    blockingViewModel?.cancelTimeDelay(context) ?: BlockingPreferences.clearTimeDelay(context)
-                    action()
-                } else {
-                    pendingTimeDelayTargetId = targetId
-                    pendingFrictionAction = null
-                    showTimeDelayConfirm = true
-                }
-            }
-            AccountabilityMode.FRIEND -> {
-                val partner = blockingUiState?.partner
-                val isLinked = blockingUiState?.isPartnerLinked ?: false
-                if (partner != null && isLinked) {
-                    localUnlockError = null
-                    blockingViewModel?.clearUnlockErrors()
-                    pendingFrictionAction = action
-                    showFriendApproval = true
-                } else {
-                    action()
-                }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isAccessibilityEnabled = PGuardAccessibilityService.isEnabled(context)
+                refreshFocusState()
             }
         }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    fun triggerProtectedFocusAction(targetId: String, targetTitle: String, action: () -> Unit) {
+        accountabilityGuard.guard(targetId = targetId, targetTitle = targetTitle, action = action)
     }
 
     Scaffold(
@@ -167,6 +170,7 @@ fun FocusModeScreen(
         floatingActionButton = {
             ExtendedFloatingActionButton(
                 onClick = {
+                    editingSchedule = null
                     currentAllowedAppsTarget = emptySet()
                     showCreateDialog = true
                 },
@@ -192,84 +196,125 @@ fun FocusModeScreen(
             }
         }
     ) { innerPadding ->
-        Box(
+        LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .padding(horizontal = 16.dp),
+            contentPadding = PaddingValues(top = 12.dp, bottom = 96.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            if (schedules.isEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Empty List",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyLarge
+            if (!isAccessibilityEnabled) {
+                item(key = "accessibility_warning") {
+                    AlertActionCard(
+                        title = "Accessibility is OFF",
+                        subtitle = "Focus Mode cannot block apps until PGuard Accessibility Service is turned on.",
+                        actionLabel = "Turn ON",
+                        trailingIcon = R.drawable.ic_chevron_right,
+                        onAction = { openAccessibilitySettings(context) }
                     )
-                }
-            } else {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                ) {
-                    val pendingTarget = blockingUiState?.timeDelayTarget ?: BlockingPreferences.timeDelayTarget
-                    val pendingUnlockAt = blockingUiState?.timeDelayUnlockAt ?: BlockingPreferences.timeDelayUnlockAt
-                    if (pendingUnlockAt > 0L && pendingTarget.startsWith("FOCUS_SCHEDULE:")) {
-                        TimeDelayActiveBanner(
-                            targetFeatureTitle = targetDisplayName(pendingTarget),
-                            unlockAt = pendingUnlockAt,
-                            onCancel = {
-                                blockingViewModel?.cancelTimeDelay(context) ?: BlockingPreferences.clearTimeDelay(context)
-                            }
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
-                    }
-
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        items(schedules, key = { it.id }) { schedule ->
-                            FocusScheduleCard(
-                                schedule = schedule,
-                                onToggle = { isEnabled ->
-                                    if (!isEnabled) {
-                                        triggerProtectedScheduleAction("FOCUS_SCHEDULE:${schedule.id}") {
-                                            FocusModeManager.toggleSchedule(context, schedule.id, false)
-                                            refreshSchedules()
-                                        }
-                                    } else {
-                                        FocusModeManager.toggleSchedule(context, schedule.id, true)
-                                        refreshSchedules()
-                                    }
-                                },
-                                onDelete = {
-                                    triggerProtectedScheduleAction("FOCUS_SCHEDULE:${schedule.id}") {
-                                        FocusModeManager.deleteSchedule(context, schedule.id)
-                                        refreshSchedules()
-                                    }
-                                }
-                            )
-                        }
-                    }
                 }
             }
 
-            AnimatedVisibility(
-                visible = showLimitToast,
-                enter = fadeIn() + slideInVertically(initialOffsetY = { it }),
-                exit = fadeOut() + slideOutVertically(targetOffsetY = { it }),
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 86.dp)
-            ) {
-                FreeLimitPillToast(
-                    onDismiss = { showLimitToast = false },
-                    onUpgradeClick = onUpgradeClick
+            item(key = "quick_focus_card") {
+                QuickFocusCard(
+                    remainingSeconds = quickFocusRemainingSecs,
+                    onStartPreset = { mins ->
+                        FocusModeManager.startQuickFocus(context, mins)
+                    },
+                    onOpenCustom = {
+                        currentAllowedAppsTarget = emptySet()
+                        showQuickFocusDialog = true
+                    },
+                    onStop = {
+                        triggerProtectedFocusAction(
+                            targetId = "FOCUS_QUICK",
+                            targetTitle = "Stop Quick Focus"
+                        ) {
+                            FocusModeManager.stopQuickFocus(context)
+                        }
+                    }
                 )
+            }
+
+            val pendingTarget = blockingUiState?.timeDelayTarget ?: BlockingPreferences.timeDelayTarget
+            val pendingUnlockAt = blockingUiState?.timeDelayUnlockAt ?: BlockingPreferences.timeDelayUnlockAt
+            val serverReady = blockingUiState?.isTimeDelayServerReady ?: false
+            if (pendingUnlockAt > 0L && pendingTarget.startsWith("FOCUS_")) {
+                item(key = "focus_time_delay_banner") {
+                    TimeDelayActiveBanner(
+                        targetFeatureTitle = targetDisplayName(pendingTarget),
+                        unlockAt = pendingUnlockAt,
+                        isServerReady = serverReady,
+                        onCancel = {
+                            blockingViewModel?.cancelTimeDelay(context) ?: BlockingPreferences.clearTimeDelay(context)
+                        },
+                        onCompleteUnlock = {
+                            if (blockingViewModel != null) {
+                                blockingViewModel.completeReadyTimeDelay(context)
+                            } else if (BlockingPreferences.isTimeDelayElapsed(context, pendingTarget)) {
+                                BlockingPreferences.clearTimeDelay(context)
+                                when {
+                                    pendingTarget == "FOCUS_QUICK" -> FocusModeManager.stopQuickFocus(context)
+                                    pendingTarget.startsWith("FOCUS_SCHEDULE_TOGGLE:") ->
+                                        FocusModeManager.toggleSchedule(context, pendingTarget.removePrefix("FOCUS_SCHEDULE_TOGGLE:"), false)
+                                    pendingTarget.startsWith("FOCUS_SCHEDULE_DELETE:") ->
+                                        FocusModeManager.deleteSchedule(context, pendingTarget.removePrefix("FOCUS_SCHEDULE_DELETE:"))
+                                    pendingTarget.startsWith("FOCUS_SCHEDULE:") ->
+                                        FocusModeManager.toggleSchedule(context, pendingTarget.removePrefix("FOCUS_SCHEDULE:"), false)
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+
+            if (schedules.isEmpty()) {
+                item(key = "empty_schedules") {
+                    EmptySchedulesCard(
+                        onCreateSchedule = {
+                            editingSchedule = null
+                            currentAllowedAppsTarget = emptySet()
+                            showCreateDialog = true
+                        }
+                    )
+                }
+            } else {
+                items(schedules, key = { it.id }) { schedule ->
+                    FocusScheduleCard(
+                        schedule = schedule,
+                        isActiveNow = schedule.isCurrentlyActive(currentCalendar),
+                        onToggle = { isEnabled ->
+                            if (!isEnabled) {
+                                triggerProtectedFocusAction(
+                                    targetId = "FOCUS_SCHEDULE_TOGGLE:${schedule.id}",
+                                    targetTitle = "Disable ${schedule.displayName}"
+                                ) {
+                                    FocusModeManager.toggleSchedule(context, schedule.id, false)
+                                }
+                            } else {
+                                FocusModeManager.toggleSchedule(context, schedule.id, true)
+                            }
+                        },
+                        onEdit = {
+                            editingSchedule = schedule
+                            currentAllowedAppsTarget = schedule.allowedApps
+                            showCreateDialog = true
+                        },
+                        onDelete = {
+                            if (schedule.isEnabled) {
+                                triggerProtectedFocusAction(
+                                    targetId = "FOCUS_SCHEDULE_DELETE:${schedule.id}",
+                                    targetTitle = "Delete ${schedule.displayName}"
+                                ) {
+                                    FocusModeManager.deleteSchedule(context, schedule.id)
+                                }
+                            } else {
+                                FocusModeManager.deleteSchedule(context, schedule.id)
+                            }
+                        }
+                    )
+                }
             }
         }
     }
@@ -278,88 +323,19 @@ fun FocusModeScreen(
         FocusHelpDialog(onDismiss = { showHelpDialog = false })
     }
 
-    if (showTypingChallenge) {
-        TypingChallengeDialog(
-            targetFeatureTitle = "Focus Schedule",
-            onSuccess = {
-                showTypingChallenge = false
-                pendingFrictionAction?.invoke()
-                pendingFrictionAction = null
-            },
-            onDismiss = {
-                showTypingChallenge = false
-                pendingFrictionAction = null
-            }
-        )
-    }
-
-    if (showTimeDelayConfirm) {
-        TimeDelayConfirmDialog(
-            targetFeatureTitle = "Focus Schedule",
-            onConfirm = {
-                showTimeDelayConfirm = false
-                if (pendingTimeDelayTargetId.isNotBlank()) {
-                    if (blockingViewModel != null) {
-                        blockingViewModel.startTimeDelayForTarget(pendingTimeDelayTargetId, context)
-                    } else {
-                        val duration = BlockingPreferences.DEFAULT_TIME_DELAY_MS
-                        BlockingPreferences.setTimeDelay(context, System.currentTimeMillis() + duration, pendingTimeDelayTargetId, duration)
-                    }
-                }
-                pendingTimeDelayTargetId = ""
-                pendingFrictionAction = null
-            },
-            onDismiss = {
-                showTimeDelayConfirm = false
-                pendingTimeDelayTargetId = ""
-                pendingFrictionAction = null
-            }
-        )
-    }
-
-    if (showFriendApproval) {
-        FriendApprovalDialog(
-            targetFeatureTitle = "Focus Schedule",
-            partnerEmail = blockingUiState?.partner?.partnerEmail ?: "",
-            onRequestCode = {
-                localUnlockError = null
-                blockingViewModel?.requestPartnerApprovalCode("Focus Schedule")
-            },
-            onSubmitCode = { code ->
-                if (blockingViewModel != null) {
-                    blockingViewModel.verifyExternalUnlockCode(
-                        enteredCode = code,
-                        onSuccess = {
-                            showFriendApproval = false
-                            localUnlockError = null
-                            pendingFrictionAction?.invoke()
-                            pendingFrictionAction = null
-                        },
-                        onError = { err ->
-                            localUnlockError = err
-                        }
-                    )
-                } else {
-                    localUnlockError = "Accountability verification service is unavailable."
-                }
-            },
-            onDismiss = {
-                showFriendApproval = false
-                localUnlockError = null
-                blockingViewModel?.clearUnlockErrors()
-                pendingFrictionAction = null
-            },
-            isVerifying = blockingUiState?.isVerifyingUnlockCode ?: false,
-            errorMessage = localUnlockError ?: blockingUiState?.unlockCodeError,
-            requestError = blockingUiState?.unlockRequestError
-        )
-    }
+    AccountabilityGuardDialogsHost(
+        controller = accountabilityGuard,
+        blockingViewModel = blockingViewModel
+    )
 
     if (showCreateDialog) {
         CreateScheduleDialog(
-            initialSchedule = null,
+            initialSchedule = editingSchedule,
             selectedAllowedApps = currentAllowedAppsTarget,
-            onDismiss = { showCreateDialog = false },
+            onDismiss = {
+                showCreateDialog = false
+                editingSchedule = null
+            },
             onPickAllowedAppsClick = { currentSet ->
                 currentAllowedAppsTarget = currentSet
                 onAllowedAppsSelectedCallback = { updatedSet ->
@@ -367,11 +343,29 @@ fun FocusModeScreen(
                 }
                 showAppPickerDialog = true
             },
-            onSaveSchedule = { newSchedule ->
-                FocusModeManager.saveSchedule(context, newSchedule)
-                refreshSchedules()
+            onSaveSchedule = { saved ->
+                FocusModeManager.saveSchedule(context, saved)
                 showCreateDialog = false
+                editingSchedule = null
             }
+        )
+    }
+
+    if (showQuickFocusDialog) {
+        QuickFocusDialog(
+            selectedAllowedApps = currentAllowedAppsTarget,
+            onPickAllowedAppsClick = { currentSet ->
+                currentAllowedAppsTarget = currentSet
+                onAllowedAppsSelectedCallback = { updatedSet ->
+                    currentAllowedAppsTarget = updatedSet
+                }
+                showAppPickerDialog = true
+            },
+            onStartQuickFocus = { durationMins, allowed ->
+                FocusModeManager.startQuickFocus(context, durationMins, allowed)
+                showQuickFocusDialog = false
+            },
+            onDismiss = { showQuickFocusDialog = false }
         )
     }
 
@@ -436,19 +430,209 @@ private fun FocusModeTopBar(
 }
 
 @Composable
-private fun FocusScheduleCard(
-    schedule: FocusSchedule,
-    onToggle: (Boolean) -> Unit,
-    onDelete: () -> Unit
+private fun QuickFocusCard(
+    remainingSeconds: Int,
+    onStartPreset: (Int) -> Unit,
+    onOpenCustom: () -> Unit,
+    onStop: () -> Unit
 ) {
-    var isAccordionExpanded by remember { mutableStateOf(false) }
     val primary = MaterialTheme.colorScheme.primary
-    val extendedColors = MaterialTheme.pguardColors
+    val success = MaterialTheme.pguardColors.success
+    val isActive = remainingSeconds > 0
 
     Card(
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(1.dp, if (isActive) success.copy(alpha = 0.55f) else MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (isActive) "Quick Focus Active" else "Quick Focus",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = if (isActive) {
+                            "Blocking non-essential apps right now"
+                        } else {
+                            "Start an instant focus sprint without adding a schedule"
+                        },
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+
+                if (isActive) {
+                    val mins = remainingSeconds / 60
+                    val secs = remainingSeconds % 60
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = success.copy(alpha = 0.16f)
+                    ) {
+                        Text(
+                            text = String.format(Locale.US, "%02d:%02d", mins, secs),
+                            color = success,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            if (isActive) {
+                OutlinedButton(
+                    onClick = onStop,
+                    shape = MaterialTheme.shapes.small,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Stop Early",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            } else {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(15 to "15m", 30 to "30m", 60 to "1h").forEach { (mins, label) ->
+                        OutlinedButton(
+                            onClick = { onStartPreset(mins) },
+                            shape = MaterialTheme.shapes.small,
+                            border = BorderStroke(1.dp, primary.copy(alpha = 0.6f)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = primary),
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelLarge,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Button(
+                        onClick = onOpenCustom,
+                        shape = MaterialTheme.shapes.small,
+                        colors = ButtonDefaults.buttonColors(containerColor = primary),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
+                        modifier = Modifier.weight(1.1f)
+                    ) {
+                        Text(
+                            text = "Custom",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptySchedulesCard(onCreateSchedule: () -> Unit) {
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 28.dp)
+        ) {
+            Icon(
+                painter = painterResource(id = R.drawable.ic_focus_mode),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(36.dp)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "No Recurring Focus Schedules",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "Schedule daily deep-work or sleep windows where only essential tools stay accessible.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            OutlinedButton(
+                onClick = onCreateSchedule,
+                shape = MaterialTheme.shapes.small,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Text(
+                    text = "Create First Schedule",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FocusScheduleCard(
+    schedule: FocusSchedule,
+    isActiveNow: Boolean,
+    onToggle: (Boolean) -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val context = LocalContext.current
+    var isAccordionExpanded by remember { mutableStateOf(false) }
+    val primary = MaterialTheme.colorScheme.primary
+    val extendedColors = MaterialTheme.pguardColors
+
+    val resolvedAppLabels = remember(schedule.allowedApps) {
+        val pm = context.packageManager
+        schedule.allowedApps.map { pkg ->
+            try {
+                val info = pm.getApplicationInfo(pkg, 0)
+                pm.getApplicationLabel(info).toString()
+            } catch (_: Exception) {
+                pkg
+            }
+        }.sorted()
+    }
+
+    Card(
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+        border = BorderStroke(
+            1.dp,
+            if (isActiveNow) extendedColors.success.copy(alpha = 0.55f) else MaterialTheme.colorScheme.outlineVariant
+        ),
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(
@@ -461,17 +645,46 @@ private fun FocusScheduleCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text(
-                    text = schedule.formattedTimeRange,
-                    color = primary,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.weight(1f)
-                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = schedule.displayName,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        if (isActiveNow) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = extendedColors.success.copy(alpha = 0.16f)
+                            ) {
+                                Text(
+                                    text = "ACTIVE NOW",
+                                    color = extendedColors.success,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = schedule.formattedTimeRange,
+                        color = primary,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     Switch(
                         checked = schedule.isEnabled,
@@ -484,6 +697,17 @@ private fun FocusScheduleCard(
                             uncheckedBorderColor = Color.Transparent
                         )
                     )
+
+                    if (!schedule.isEnabled) {
+                        IconButton(onClick = onEdit) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_edit),
+                                contentDescription = "Edit Schedule",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
 
                     IconButton(onClick = onDelete) {
                         Icon(
@@ -532,23 +756,25 @@ private fun FocusScheduleCard(
                     painter = painterResource(id = R.drawable.ic_chevron_right),
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier
+                        .size(16.dp)
+                        .rotate(if (isAccordionExpanded) 90f else 0f)
                 )
             }
 
             if (isAccordionExpanded) {
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
-                    text = "Messages, Calls, Contacts & PGuard are default allowed.",
+                    text = "Messages, Calls, Contacts, Keyboards & PGuard are allowed by default.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.bodySmall
                 )
 
-                if (schedule.allowedApps.isNotEmpty()) {
+                if (resolvedAppLabels.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "Additional allowed: ${schedule.allowedApps.joinToString(", ")}",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = "Additional allowed: ${resolvedAppLabels.joinToString(", ")}",
+                        color = MaterialTheme.colorScheme.onSurface,
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
@@ -565,7 +791,11 @@ private fun FocusScheduleCard(
                         modifier = Modifier.size(13.dp)
                     )
                     Text(
-                        text = "Allowed apps are locked once scheduled to prevent bypass.",
+                        text = if (schedule.isEnabled) {
+                            "Allowed apps are locked while enabled. Disable schedule to edit."
+                        } else {
+                            "Schedule is paused — tap the edit icon above to adjust apps or times."
+                        },
                         color = primary.copy(alpha = 0.9f),
                         style = MaterialTheme.typography.labelMedium
                     )
@@ -584,18 +814,24 @@ private fun AllowedAppsPickerDialog(
 ) {
     val selected = remember { mutableStateListOf<String>().apply { addAll(alreadySelectedPackages) } }
     var apps by remember { mutableStateOf<List<InstalledAppItem>>(emptyList()) }
+    var isLoadingApps by remember { mutableStateOf(true) }
     var searchQuery by remember { mutableStateOf("") }
     val primary = MaterialTheme.colorScheme.primary
 
     LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            apps = queryDeviceLauncherApps(context)
+        isLoadingApps = true
+        apps = withContext(Dispatchers.IO) {
+            queryDeviceLauncherApps(context)
         }
+        isLoadingApps = false
     }
 
     val filteredApps = remember(searchQuery, apps) {
         if (searchQuery.isBlank()) apps
-        else apps.filter { it.name.contains(searchQuery, ignoreCase = true) || it.packageName.contains(searchQuery, ignoreCase = true) }
+        else apps.filter {
+            it.name.contains(searchQuery, ignoreCase = true) ||
+                it.packageName.contains(searchQuery, ignoreCase = true)
+        }
     }
 
     Dialog(onDismissRequest = onDismiss) {
@@ -605,7 +841,7 @@ private fun AllowedAppsPickerDialog(
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
             modifier = Modifier
                 .fillMaxWidth()
-                .height(480.dp)
+                .height(520.dp)
         ) {
             Column(
                 modifier = Modifier
@@ -618,47 +854,129 @@ private fun AllowedAppsPickerDialog(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Text(
-                    text = "These apps will bypass blocking during focus time.",
+                    text = "These apps stay accessible during your focus session.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(filteredApps, key = { it.packageName }) { app ->
-                        val isChecked = selected.contains(app.packageName)
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    if (isChecked) selected.remove(app.packageName)
-                                    else selected.add(app.packageName)
-                                }
-                                .padding(vertical = 6.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text(
-                                text = app.name,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                style = MaterialTheme.typography.bodyMedium,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Checkbox(
-                                checked = isChecked,
-                                onCheckedChange = { check ->
-                                    if (check) selected.add(app.packageName)
-                                    else selected.remove(app.packageName)
-                                },
-                                colors = CheckboxDefaults.colors(
-                                    checkedColor = primary,
-                                    uncheckedColor = MaterialTheme.colorScheme.onSurfaceVariant
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = { Text("Search installed apps...") },
+                    singleLine = true,
+                    trailingIcon = if (searchQuery.isNotEmpty()) {
+                        {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_close),
+                                    contentDescription = "Clear search",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(16.dp)
                                 )
-                            )
+                            }
+                        }
+                    } else null,
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = primary,
+                        unfocusedBorderColor = MaterialTheme.colorScheme.outline
+                    )
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                if (isLoadingApps) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        CircularProgressIndicator(color = primary)
+                    }
+                } else if (filteredApps.isEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxWidth(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "No apps match \"$searchQuery\"",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        items(filteredApps, key = { it.packageName }) { app ->
+                            val isChecked = selected.contains(app.packageName)
+                            val iconBitmap = remember(app.packageName) { app.icon?.toFocusComposeBitmap() }
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        if (isChecked) selected.remove(app.packageName)
+                                        else selected.add(app.packageName)
+                                    }
+                                    .padding(vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    if (iconBitmap != null) {
+                                        Image(
+                                            bitmap = iconBitmap,
+                                            contentDescription = app.name,
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                        )
+                                    } else {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                painter = painterResource(id = R.drawable.ic_focus_mode),
+                                                contentDescription = null,
+                                                tint = primary,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        text = app.name,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Checkbox(
+                                    checked = isChecked,
+                                    onCheckedChange = { check ->
+                                        if (check) selected.add(app.packageName)
+                                        else selected.remove(app.packageName)
+                                    },
+                                    colors = CheckboxDefaults.colors(
+                                        checkedColor = primary,
+                                        uncheckedColor = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                )
+                            }
                         }
                     }
                 }
@@ -683,5 +1001,17 @@ private fun AllowedAppsPickerDialog(
                 }
             }
         }
+    }
+}
+
+private fun Drawable.toFocusComposeBitmap(width: Int = 72, height: Int = 72): ImageBitmap? {
+    return try {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        setBounds(0, 0, canvas.width, canvas.height)
+        draw(canvas)
+        bitmap.asImageBitmap()
+    } catch (_: Exception) {
+        null
     }
 }

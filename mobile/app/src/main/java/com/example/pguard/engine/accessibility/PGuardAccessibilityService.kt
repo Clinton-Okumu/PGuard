@@ -2,6 +2,10 @@ package com.example.pguard.engine.accessibility
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.net.VpnService
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -10,7 +14,9 @@ import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Toast
+import com.example.pguard.engine.accountability.SecurityAlertReporter
 import com.example.pguard.engine.filter.ContentFilter
+import com.example.pguard.engine.vpn.PGuardVpnService
 import com.example.pguard.presentation.focus.FocusModeManager
 import com.example.pguard.presentation.habits.HabitsManager
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -23,12 +29,18 @@ class PGuardAccessibilityService : AccessibilityService() {
     companion object {
         private const val TAG = "PGuardAccessibility"
         private const val BLOCK_COOLDOWN_MS = 1500L
+        private const val SCOPED_DISMISS_COOLDOWN_MS = 2000L
         private const val SHORTS_COOLDOWN_MS = 1200L
         private const val WHATSAPP_COOLDOWN_MS = 1200L
         private const val INSTAGRAM_COOLDOWN_MS = 1200L
         private const val TIKTOK_COOLDOWN_MS = 1500L
         private const val DEEP_SCAN_THROTTLE_MS = 250L
         private const val MAX_INSTALL_TIME_CACHE_SIZE = 512
+        private val installTimeCache = ConcurrentHashMap<String, Long>()
+
+        fun invalidateInstallTimeCache(packageName: String) {
+            installTimeCache.remove(packageName)
+        }
 
         const val PREFS_NAME = BlockingPreferences.PREFS_NAME
         const val KEY_ADULT = BlockingPreferences.KEY_ADULT
@@ -62,6 +74,7 @@ class PGuardAccessibilityService : AccessibilityService() {
         val isUninstallProtectionEnabled: Boolean get() = BlockingPreferences.isUninstallProtectionEnabled
         val isUnsupportedBrowsersBlockingEnabled: Boolean get() = BlockingPreferences.isUnsupportedBrowsersBlockingEnabled
         val isNewlyInstalledAppsBlockingEnabled: Boolean get() = BlockingPreferences.isNewlyInstalledAppsBlockingEnabled
+        val isDnsVpnEnabled: Boolean get() = BlockingPreferences.isDnsVpnEnabled
         val newAppsEnabledAt: Long get() = BlockingPreferences.newAppsEnabledAt
         val blockedScreenMessage: String get() = BlockingPreferences.blockedScreenMessage
         val blockedScreenCountdown: Int get() = BlockingPreferences.blockedScreenCountdown
@@ -78,13 +91,6 @@ class PGuardAccessibilityService : AccessibilityService() {
         var appContext: Context?
             get() = BlockingPreferences.appContext
             set(value) { BlockingPreferences.appContext = value }
-
-        @Volatile
-        var blockSuppressionUntil: Long = 0L
-
-        fun suppressBlockingFor(durationMs: Long = 3000L) {
-            blockSuppressionUntil = System.currentTimeMillis() + durationMs
-        }
 
         fun loadSettings(context: Context) = BlockingPreferences.loadSettings(context)
         fun addBlockedApp(context: Context, packageName: String, label: String = packageName) =
@@ -169,7 +175,7 @@ class PGuardAccessibilityService : AccessibilityService() {
     }
 
     private val contentFilter = ContentFilter.Default
-    private val installTimeCache = ConcurrentHashMap<String, Long>()
+    private val scopedSuppressions = ConcurrentHashMap<String, Long>()
 
     private var lastBlockedUrl: String? = null
     private var lastBlockedTimestamp: Long = 0L
@@ -180,6 +186,8 @@ class PGuardAccessibilityService : AccessibilityService() {
     private var lastAntiTamperBlockedTimestamp: Long = 0L
     private var lastUnsupportedBrowserBlockedTimestamp: Long = 0L
     private var lastAppBlockedTimestamp: Long = 0L
+    private var lastFocusBlockedTimestamp: Long = 0L
+    private var lastUrgeBlockedTimestamp: Long = 0L
 
     private var lastBrowserDeepScanMs: Long = 0L
     private var lastSocialHierarchyScanMs: Long = 0L
@@ -187,6 +195,21 @@ class PGuardAccessibilityService : AccessibilityService() {
     private val mainHandler = Handler(Looper.getMainLooper())
     val overlayManager by lazy { AccessibilityOverlayManager(this) }
     private val dynamicInstallReceiver = com.example.pguard.engine.receiver.NewAppInstallReceiver()
+
+    private fun suppressScope(scopeKey: String, durationMs: Long = SCOPED_DISMISS_COOLDOWN_MS) {
+        if (scopedSuppressions.size >= 128) {
+            scopedSuppressions.clear()
+        }
+        scopedSuppressions[scopeKey] = System.currentTimeMillis() + durationMs
+    }
+
+    private fun isScopeSuppressed(scopeKey: String): Boolean {
+        val until = scopedSuppressions[scopeKey] ?: return false
+        val now = System.currentTimeMillis()
+        if (now < until) return true
+        scopedSuppressions.remove(scopeKey, until)
+        return false
+    }
 
     @Suppress("DEPRECATION")
     override fun onServiceConnected() {
@@ -204,10 +227,11 @@ class PGuardAccessibilityService : AccessibilityService() {
         serviceInfo = info
 
         try {
-            val filter = android.content.IntentFilter(android.content.Intent.ACTION_PACKAGE_ADDED).apply {
+            val filter = IntentFilter(Intent.ACTION_PACKAGE_ADDED).apply {
+                addAction(Intent.ACTION_PACKAGE_REMOVED)
                 addDataScheme("package")
             }
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 registerReceiver(dynamicInstallReceiver, filter, Context.RECEIVER_EXPORTED)
             } else {
                 registerReceiver(dynamicInstallReceiver, filter)
@@ -217,6 +241,15 @@ class PGuardAccessibilityService : AccessibilityService() {
             Log.w(TAG, "Failed to register dynamic install receiver: ${e.message}")
         }
 
+        // Auto-resume local DNS Shield VPN if user enabled it and consent is granted
+        try {
+            if (BlockingPreferences.isDnsVpnEnabled && VpnService.prepare(this) == null && !PGuardVpnService.isRunning.value) {
+                PGuardVpnService.start(this)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to auto-resume DNS VPN service: ${e.message}")
+        }
+
         Log.i(TAG, "PGuard Accessibility Service connected and active.")
     }
 
@@ -224,11 +257,11 @@ class PGuardAccessibilityService : AccessibilityService() {
         if (event == null) return
         val packageName = event.packageName?.toString() ?: return
 
-        if (overlayManager.isFullScreenShowing || System.currentTimeMillis() < blockSuppressionUntil) {
+        if (overlayManager.isFullScreenShowing) {
             return
         }
 
-        // 0. Emergency Urge Lockdown (2-minute focus lockdown during peak urges: locks phone from use)
+        // 0. Emergency Urge Lockdown (never suppressed)
         if (FocusModeManager.isUrgeLockdownActive(this)) {
             if (!FocusModeManager.isPackageAllowedDuringUrgeLockdown(this, packageName)) {
                 triggerUrgeLockdownBlock(packageName)
@@ -236,73 +269,115 @@ class PGuardAccessibilityService : AccessibilityService() {
             }
         }
 
-        // 1. Focus Mode Scheduled App Blocking
-        val activeFocusSchedule = FocusModeManager.getActiveSchedule(this)
-        if (activeFocusSchedule != null && !FocusModeManager.isPackageAllowed(this, packageName, activeFocusSchedule)) {
-            triggerFocusBlock(packageName, activeFocusSchedule)
+        // 1. Anti-Tamper / Uninstall Protection (never suppressed, highest non-lockdown priority)
+        if (isUninstallProtectionEnabled && AntiTamperGuard.isTamperPackage(packageName)) {
+            if (inspectTamperAndUninstall(event)) {
+                return
+            }
+        }
+
+        // 2. Focus Mode Scheduled / Quick Focus Blocking (never suppressed)
+        val focusBlockReason = FocusModeManager.getBlockingFocusReason(this, packageName)
+        if (focusBlockReason != null) {
+            triggerFocusBlock(packageName, focusBlockReason)
             return
         }
 
-        // 2. App Blocking (Blocked apps from blocklist / auto-blocked newly installed apps)
+        // 3. App Blocking (Blocked apps from blocklist / auto-blocked newly installed apps)
         val isAppWhitelisted = whitelistedAppPackages.contains(packageName)
         if (!isAppWhitelisted) {
-            if (blockedAppPackages.contains(packageName) && packageName != applicationContext.packageName) {
+            if (blockedAppPackages.contains(packageName) &&
+                packageName != applicationContext.packageName &&
+                !isScopeSuppressed("app:$packageName")
+            ) {
                 triggerAppBlock(packageName)
                 return
             }
 
             if (isNewlyInstalledAppsBlockingEnabled && newAppsEnabledAt > 0L &&
-                packageName != applicationContext.packageName && !isSystemOrLauncherPackage(packageName)
+                !BlockingPreferences.isNewAppApproved(packageName) &&
+                !isScopeSuppressed("app:$packageName") &&
+                NewAppInstallGuard.shouldAutoBlockInstalledApp(applicationContext, packageName)
             ) {
                 val firstInstall = getCachedFirstInstallTime(packageName)
                 if (firstInstall >= newAppsEnabledAt) {
                     val appName = getAppLabelSafe(packageName)
                     addBlockedApp(applicationContext, packageName, appName)
+                    NewAppInstallGuard.syncBlockedAppToBackendAsync(applicationContext, packageName, appName)
                     triggerAppBlock(packageName)
                     return
                 }
             }
         }
 
-        // 3. Unsupported Browsers Blocking
-        if (isUnsupportedBrowsersBlockingEnabled && BrowserInspector.isUnsupportedBrowser(packageName, applicationContext)) {
+        // 4. Unsupported Browsers Blocking
+        if (isUnsupportedBrowsersBlockingEnabled &&
+            !isAppWhitelisted &&
+            !isScopeSuppressed("unsupported_browser:$packageName") &&
+            BrowserInspector.isUnsupportedBrowser(packageName, applicationContext)
+        ) {
             triggerUnsupportedBrowserBlock(packageName)
             return
         }
 
-        // 4. Browser URL and Content Scanning
+        // 5. Browser URL and Content Scanning
         if (BrowserInspector.isBrowser(packageName, applicationContext)) {
-            inspectBrowserActivity(event)
+            inspectBrowserActivity(event, packageName)
             return
         }
 
-        // 5. YouTube Shorts Blocking
+        // 6. YouTube Shorts Blocking
         if (isShortsBlockingEnabled && SocialAppGuards.isYouTubePackage(packageName)) {
-            inspectYouTube(event)
+            inspectYouTube(event, packageName)
             return
         }
 
-        // 6. WhatsApp Channel Exploration & Following Blocking
+        // 7. WhatsApp Channel Exploration & Following Blocking
         if (isWhatsAppChannelsBlockingEnabled && SocialAppGuards.isWhatsAppPackage(packageName)) {
-            inspectWhatsApp(event)
+            inspectWhatsApp(event, packageName)
             return
         }
 
-        // 7. TikTok Full App Blocking
+        // 8. TikTok Full App Blocking
         if (isTikTokBlockingEnabled && SocialAppGuards.isTikTokPackage(packageName)) {
-            triggerTikTokBlock()
+            if (!isScopeSuppressed("tiktok:$packageName")) {
+                triggerTikTokBlock(packageName)
+            }
             return
         }
 
-        // 8. Instagram Reels Blocking
+        // 9. Instagram Reels Blocking
         if (isInstagramReelsBlockingEnabled && SocialAppGuards.isInstagramPackage(packageName)) {
-            inspectInstagram(event)
+            inspectInstagram(event, packageName)
             return
         }
 
-        // 9. Anti-Tamper / Uninstall Protection
-        if (isUninstallProtectionEnabled && AntiTamperGuard.isTamperPackage(packageName)) {
-            inspectTamperAndUninstall(event)
+        // 10. Lightweight in-app WebView defense-in-depth (complements DNS VPN Shield)
+        if (!isAppWhitelisted &&
+            packageName != applicationContext.packageName &&
+            (isAdultBlockingEnabled || customBlocklist.isNotEmpty()) &&
+            !isScopeSuppressed("webview:$packageName")
+        ) {
+            inspectEmbeddedWebViewEvent(event, packageName)
+        }
+    }
+
+    private fun inspectEmbeddedWebViewEvent(event: AccessibilityEvent, packageName: String) {
+        val eventClass = event.className?.toString().orEmpty()
+        val srcClass = event.source?.className?.toString().orEmpty()
+        val isWebView = eventClass.contains("WebView", ignoreCase = true) ||
+            srcClass.contains("WebView", ignoreCase = true)
+        if (!isWebView) return
+
+        val eventText = extractEventText(event)
+        if (eventText.isBlank()) return
+        if (contentFilter.matchesWhitelist(eventText, whitelistedKeywords)) return
+
+        val blockedMatch = contentFilter.matchesCustomBlocklist(eventText, customBlocklist) ||
+            (isAdultBlockingEnabled && contentFilter.findAdultPageContent(listOf(eventText)) != null)
+        if (blockedMatch) {
+            Log.w(TAG, "In-app WebView block in $packageName: $eventText")
+            triggerBlock(eventText, packageName, scopePrefix = "webview")
         }
     }
 
@@ -330,62 +405,99 @@ class PGuardAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun inspectBrowserActivity(event: AccessibilityEvent) {
+    private fun inspectBrowserActivity(event: AccessibilityEvent, packageName: String) {
+        if (isScopeSuppressed("browser:$packageName")) return
+
         val rootNode = findRootNode(event)
 
-        // Fast Path 0: Check if current browser address bar URL is whitelisted
-        val detectedUrl = BrowserInspector.extractUrl(rootNode, event)
-        if (detectedUrl != null && contentFilter.matchesWhitelist(detectedUrl, whitelistedKeywords)) {
-            return
+        // Fast Path 0: Verified address-bar URL lookup via direct package view IDs / EditText source
+        val detectedUrl = BrowserInspector.extractUrlInfo(rootNode, event, allowFallbackTraversal = false)
+        if (detectedUrl != null) {
+            if (detectedUrl.isTrustedAddressBar &&
+                contentFilter.matchesWhitelist(detectedUrl.value, whitelistedKeywords)
+            ) {
+                return
+            }
+            if (shouldBlockUrlOrQuery(detectedUrl.value)) {
+                Log.w(TAG, "Instant block triggered by address bar URL: ${detectedUrl.value}")
+                triggerBlock(detectedUrl.value, packageName)
+                return
+            }
         }
 
-        // Fast Path 1 (0ms latency): Check incoming event text & event source text immediately
+        // Fast Path 1: Incoming event text (distinguish editable address/search bar from passive page snippets)
         val eventText = extractEventText(event)
-        if (eventText.isNotBlank() && shouldBlock(eventText)) {
-            Log.w(TAG, "Instant block triggered by event text: $eventText")
-            triggerBlock(eventText)
-            return
+        if (eventText.isNotBlank()) {
+            val source = event.source
+            val isHighIntentSource = source != null &&
+                BrowserInspector.isAddressBarSource(source.viewIdResourceName, source.className?.toString())
+            if (isHighIntentSource) {
+                if (contentFilter.matchesWhitelist(eventText, whitelistedKeywords)) {
+                    return
+                }
+                if (shouldBlockUrlOrQuery(eventText)) {
+                    Log.w(TAG, "Instant block triggered by input event text: $eventText")
+                    triggerBlock(eventText, packageName)
+                    return
+                }
+            } else if (!contentFilter.matchesWhitelist(eventText, whitelistedKeywords) &&
+                shouldBlockPageSnippet(eventText)
+            ) {
+                Log.w(TAG, "Instant block triggered by page snippet: $eventText")
+                triggerBlock(eventText, packageName)
+                return
+            }
         }
 
-        // Fast Path 2: Address bar / search input / navigation URL
-        if (detectedUrl != null && shouldBlock(detectedUrl)) {
-            Log.w(TAG, "Instant block triggered by address bar URL: $detectedUrl")
-            triggerBlock(detectedUrl)
-            return
-        }
-
-        // Throttle expensive IPC + recursive hierarchy scans during rapid content updates
+        // Throttle expensive deep hierarchy scans during rapid content updates
         val now = System.currentTimeMillis()
         if (rootNode == null || (now - lastBrowserDeepScanMs) < DEEP_SCAN_THROTTLE_MS) {
             return
         }
         lastBrowserDeepScanMs = now
 
-        // Fast Path 3: Direct keyword inspection using native findAccessibilityNodeInfosByText
-        val highPriorityKeywords = listOf("porn", "fuck", "nsfw", "sex", "pussy", "dick", "nude", "xxx")
-        for (kw in highPriorityKeywords) {
-            try {
-                val matchingNodes = rootNode.findAccessibilityNodeInfosByText(kw)
-                if (!matchingNodes.isNullOrEmpty()) {
-                    for (node in matchingNodes) {
-                        val txt = node.text?.toString() ?: node.contentDescription?.toString() ?: ""
-                        if (txt.isNotBlank() && shouldBlock(txt)) {
-                            Log.w(TAG, "Instant native keyword match on '$kw': $txt")
-                            triggerBlock(txt)
-                            return
-                        }
-                    }
+        // Fallback address-bar scan if direct IDs missed
+        if (detectedUrl == null) {
+            val fallbackUrl = BrowserInspector.extractUrlInfo(rootNode, event, allowFallbackTraversal = true)
+            if (fallbackUrl != null) {
+                if (fallbackUrl.isTrustedAddressBar &&
+                    contentFilter.matchesWhitelist(fallbackUrl.value, whitelistedKeywords)
+                ) {
+                    return
                 }
-            } catch (_: Exception) {}
+                if (shouldBlockUrlOrQuery(fallbackUrl.value)) {
+                    Log.w(TAG, "Throttled fallback address bar match: ${fallbackUrl.value}")
+                    triggerBlock(fallbackUrl.value, packageName)
+                    return
+                }
+            }
         }
 
-        // Fast Path 4: Fallback deep scan on visible web content
-        val matchedContent = BrowserInspector.findRestrictedContent(rootNode) { text ->
-            shouldBlock(text)
+        // Single-pass bounded collection for custom blocklist + tiered adult page scoring
+        val pageTexts = BrowserInspector.collectVisibleWebTexts(rootNode)
+        if (pageTexts.isEmpty()) return
+
+        for (txt in pageTexts) {
+            if (!contentFilter.matchesWhitelist(txt, whitelistedKeywords) &&
+                shouldBlockCustomOrSocialUrl(txt)
+            ) {
+                Log.w(TAG, "Deep scan custom/social match: $txt")
+                triggerBlock(txt, packageName)
+                return
+            }
         }
-        if (matchedContent != null) {
-            Log.w(TAG, "Deep scan match: $matchedContent")
-            triggerBlock(matchedContent)
+
+        if (isAdultBlockingEnabled) {
+            val scannableTexts = if (whitelistedKeywords.isEmpty()) {
+                pageTexts
+            } else {
+                pageTexts.filterNot { contentFilter.matchesWhitelist(it, whitelistedKeywords) }
+            }
+            val matchedAdult = contentFilter.findAdultPageContent(scannableTexts)
+            if (matchedAdult != null) {
+                Log.w(TAG, "Tiered adult page match: $matchedAdult")
+                triggerBlock(matchedAdult, packageName)
+            }
         }
     }
 
@@ -435,26 +547,27 @@ class PGuardAccessibilityService : AccessibilityService() {
         return sb.toString().trim()
     }
 
-    private fun shouldBlock(input: String): Boolean {
+    private fun shouldBlockCustomOrSocialUrl(input: String): Boolean {
+        if (isShortsBlockingEnabled && isYouTubeShortsUrl(input)) return true
+        if (isWhatsAppChannelsBlockingEnabled && isWhatsAppChannelUrl(input)) return true
+        if (isInstagramReelsBlockingEnabled && isInstagramReelsUrl(input)) return true
+        if (isTikTokBlockingEnabled && isTikTokUrl(input)) return true
+        return contentFilter.matchesCustomBlocklist(input, customBlocklist)
+    }
+
+    private fun shouldBlockUrlOrQuery(input: String): Boolean {
         if (contentFilter.matchesWhitelist(input, whitelistedKeywords)) {
             return false
         }
         if (isAdultBlockingEnabled && contentFilter.isAdultContent(input)) {
             return true
         }
-        if (isShortsBlockingEnabled && isYouTubeShortsUrl(input)) {
-            return true
-        }
-        if (isWhatsAppChannelsBlockingEnabled && isWhatsAppChannelUrl(input)) {
-            return true
-        }
-        if (isInstagramReelsBlockingEnabled && isInstagramReelsUrl(input)) {
-            return true
-        }
-        if (isTikTokBlockingEnabled && isTikTokUrl(input)) {
-            return true
-        }
-        return contentFilter.matchesCustomBlocklist(input, customBlocklist)
+        return shouldBlockCustomOrSocialUrl(input)
+    }
+
+    private fun shouldBlockPageSnippet(input: String): Boolean {
+        if (shouldBlockCustomOrSocialUrl(input)) return true
+        return isAdultBlockingEnabled && contentFilter.findAdultPageContent(listOf(input)) != null
     }
 
     private fun isYouTubeShortsUrl(input: String): Boolean {
@@ -475,7 +588,25 @@ class PGuardAccessibilityService : AccessibilityService() {
     private fun isTikTokUrl(input: String): Boolean =
         input.lowercase(Locale.ROOT).trim().contains("tiktok.com")
 
-    private fun triggerBlock(target: String) {
+    private fun resolveSafeRedirectUrl(): String {
+        val result = BlockedScreenConfig.validateRedirectUrl(
+            raw = redirectUrl,
+            contentFilter = contentFilter,
+            customBlocklist = customBlocklist,
+            blockAdultContent = isAdultBlockingEnabled,
+            blockShorts = isShortsBlockingEnabled,
+            blockWhatsAppChannels = isWhatsAppChannelsBlockingEnabled,
+            blockInstagramReels = isInstagramReelsBlockingEnabled,
+            blockTikTok = isTikTokBlockingEnabled
+        )
+        return (result as? BlockedScreenConfig.ValidationResult.Valid)?.normalized.orEmpty()
+    }
+
+    private fun triggerBlock(
+        target: String,
+        packageName: String,
+        scopePrefix: String = "browser"
+    ) {
         val now = System.currentTimeMillis()
         if (target == lastBlockedUrl && (now - lastBlockedTimestamp) < BLOCK_COOLDOWN_MS) {
             return
@@ -485,15 +616,19 @@ class PGuardAccessibilityService : AccessibilityService() {
         lastBlockedTimestamp = now
         HabitsManager.recordBlockInterception(applicationContext)
 
+        val scopeKey = "$scopePrefix:$packageName"
         Log.w(TAG, "BLOCKED restricted content detected: $target")
 
         overlayManager.showFullScreenOverlay(
             target = target,
-            message = blockedScreenMessage,
+            message = BlockedScreenConfig.resolveOverlayMessage(blockedScreenMessage, BlockedScreenConfig.DEFAULT_MESSAGE),
             countdownSeconds = blockedScreenCountdown,
-            redirectUrl = redirectUrl,
+            redirectUrl = resolveSafeRedirectUrl(),
+            onBeforeRedirect = {
+                suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS)
+            },
             onGoBack = {
-                suppressBlockingFor(3000L)
+                suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS)
                 val backHandled = performGlobalAction(GLOBAL_ACTION_BACK)
                 if (!backHandled) {
                     performGlobalAction(GLOBAL_ACTION_HOME)
@@ -501,8 +636,12 @@ class PGuardAccessibilityService : AccessibilityService() {
                     mainHandler.postDelayed({
                         val currentPkg = rootInActiveWindow?.packageName?.toString()
                         if (currentPkg != null && BrowserInspector.isBrowser(currentPkg, applicationContext)) {
-                            val url = BrowserInspector.extractUrl(rootInActiveWindow, null)
-                            if (url != null && shouldBlock(url)) {
+                            val url = BrowserInspector.extractUrlInfo(
+                                rootInActiveWindow,
+                                null,
+                                allowFallbackTraversal = false
+                            )?.value
+                            if (url != null && shouldBlockUrlOrQuery(url)) {
                                 performGlobalAction(GLOBAL_ACTION_HOME)
                             }
                         }
@@ -518,37 +657,39 @@ class PGuardAccessibilityService : AccessibilityService() {
         return true
     }
 
-    private fun inspectYouTube(event: AccessibilityEvent) {
-        if (!isShortsBlockingEnabled) return
+    private fun inspectYouTube(event: AccessibilityEvent, packageName: String) {
+        if (!isShortsBlockingEnabled || isScopeSuppressed("shorts:$packageName")) return
         val now = System.currentTimeMillis()
         if (now - lastShortsBlockedTimestamp < SHORTS_COOLDOWN_MS) return
 
         if (SocialAppGuards.isYouTubeShortsEventMatch(event)) {
-            triggerShortsBlock()
+            triggerShortsBlock(packageName)
             return
         }
 
         if (!canRunSocialHierarchyScan(now)) return
         val rootNode = findRootNode(event) ?: rootInActiveWindow ?: event.source ?: return
         if (SocialAppGuards.isShortsActiveInHierarchy(rootNode)) {
-            triggerShortsBlock()
+            triggerShortsBlock(packageName)
         }
     }
 
-    private fun triggerShortsBlock() {
+    private fun triggerShortsBlock(packageName: String) {
         val now = System.currentTimeMillis()
         if (now - lastShortsBlockedTimestamp < SHORTS_COOLDOWN_MS) return
         lastShortsBlockedTimestamp = now
         HabitsManager.recordBlockInterception(applicationContext)
 
+        val scopeKey = "shorts:$packageName"
         Log.w(TAG, "BLOCKED: YouTube Shorts detected, showing full-screen overlay")
         overlayManager.showFullScreenOverlay(
             target = "YouTube Shorts",
-            message = if (blockedScreenMessage.isNotBlank()) blockedScreenMessage else "YouTube Shorts is blocked.",
+            message = BlockedScreenConfig.resolveOverlayMessage(blockedScreenMessage, "YouTube Shorts is blocked."),
             countdownSeconds = blockedScreenCountdown,
-            redirectUrl = redirectUrl,
+            redirectUrl = resolveSafeRedirectUrl(),
+            onBeforeRedirect = { suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS) },
             onGoBack = {
-                suppressBlockingFor(3000L)
+                suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS)
                 if (!performGlobalAction(GLOBAL_ACTION_BACK)) {
                     performGlobalAction(GLOBAL_ACTION_HOME)
                 }
@@ -556,37 +697,39 @@ class PGuardAccessibilityService : AccessibilityService() {
         )
     }
 
-    private fun inspectWhatsApp(event: AccessibilityEvent) {
-        if (!isWhatsAppChannelsBlockingEnabled) return
+    private fun inspectWhatsApp(event: AccessibilityEvent, packageName: String) {
+        if (!isWhatsAppChannelsBlockingEnabled || isScopeSuppressed("whatsapp:$packageName")) return
         val now = System.currentTimeMillis()
         if (now - lastWhatsAppBlockedTimestamp < WHATSAPP_COOLDOWN_MS) return
 
-        if (SocialAppGuards.isWhatsAppChannelClickMatch(event)) {
-            triggerWhatsAppBlock("Exploring or following new WhatsApp channels is blocked.")
+        val rootNode = findRootNode(event) ?: rootInActiveWindow ?: event.source
+        if (SocialAppGuards.isWhatsAppChannelClickMatch(event, rootNode)) {
+            triggerWhatsAppBlock(packageName, "Exploring or following new WhatsApp channels is blocked.")
             return
         }
 
-        if (!canRunSocialHierarchyScan(now)) return
-        val rootNode = findRootNode(event) ?: rootInActiveWindow ?: event.source ?: return
+        if (rootNode == null || !canRunSocialHierarchyScan(now)) return
         if (SocialAppGuards.isWhatsAppChannelDirectoryActive(rootNode)) {
-            triggerWhatsAppBlock("Exploring new WhatsApp channels is blocked.")
+            triggerWhatsAppBlock(packageName, "Exploring new WhatsApp channels is blocked.")
         }
     }
 
-    private fun triggerWhatsAppBlock(reason: String) {
+    private fun triggerWhatsAppBlock(packageName: String, reason: String) {
         val now = System.currentTimeMillis()
         if (now - lastWhatsAppBlockedTimestamp < WHATSAPP_COOLDOWN_MS) return
         lastWhatsAppBlockedTimestamp = now
         HabitsManager.recordBlockInterception(applicationContext)
 
+        val scopeKey = "whatsapp:$packageName"
         Log.w(TAG, "BLOCKED: $reason, showing full-screen overlay")
         overlayManager.showFullScreenOverlay(
             target = "WhatsApp Channels",
-            message = reason,
+            message = BlockedScreenConfig.resolveOverlayMessage(blockedScreenMessage, reason),
             countdownSeconds = blockedScreenCountdown,
-            redirectUrl = redirectUrl,
+            redirectUrl = resolveSafeRedirectUrl(),
+            onBeforeRedirect = { suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS) },
             onGoBack = {
-                suppressBlockingFor(3000L)
+                suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS)
                 if (!performGlobalAction(GLOBAL_ACTION_BACK)) {
                     performGlobalAction(GLOBAL_ACTION_HOME)
                 }
@@ -594,56 +737,60 @@ class PGuardAccessibilityService : AccessibilityService() {
         )
     }
 
-    private fun triggerTikTokBlock() {
+    private fun triggerTikTokBlock(packageName: String) {
         val now = System.currentTimeMillis()
         if (now - lastTikTokBlockedTimestamp < TIKTOK_COOLDOWN_MS) return
         lastTikTokBlockedTimestamp = now
         HabitsManager.recordBlockInterception(applicationContext)
 
+        val scopeKey = "tiktok:$packageName"
         Log.w(TAG, "BLOCKED: TikTok application opened, showing full-screen overlay")
         overlayManager.showFullScreenOverlay(
             target = "TikTok",
-            message = "TikTok is completely blocked.",
+            message = BlockedScreenConfig.resolveOverlayMessage(blockedScreenMessage, "TikTok is completely blocked."),
             countdownSeconds = blockedScreenCountdown,
-            redirectUrl = redirectUrl,
+            redirectUrl = resolveSafeRedirectUrl(),
+            onBeforeRedirect = { suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS) },
             onGoBack = {
-                suppressBlockingFor(3000L)
+                suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS)
                 performGlobalAction(GLOBAL_ACTION_HOME)
             }
         )
     }
 
-    private fun inspectInstagram(event: AccessibilityEvent) {
-        if (!isInstagramReelsBlockingEnabled) return
+    private fun inspectInstagram(event: AccessibilityEvent, packageName: String) {
+        if (!isInstagramReelsBlockingEnabled || isScopeSuppressed("instagram:$packageName")) return
         val now = System.currentTimeMillis()
         if (now - lastInstagramBlockedTimestamp < INSTAGRAM_COOLDOWN_MS) return
 
         if (SocialAppGuards.isInstagramReelsEventMatch(event)) {
-            triggerInstagramReelsBlock()
+            triggerInstagramReelsBlock(packageName)
             return
         }
 
         if (!canRunSocialHierarchyScan(now)) return
         val rootNode = findRootNode(event) ?: rootInActiveWindow ?: event.source ?: return
         if (SocialAppGuards.isInstagramReelsActiveInHierarchy(rootNode)) {
-            triggerInstagramReelsBlock()
+            triggerInstagramReelsBlock(packageName)
         }
     }
 
-    private fun triggerInstagramReelsBlock() {
+    private fun triggerInstagramReelsBlock(packageName: String) {
         val now = System.currentTimeMillis()
         if (now - lastInstagramBlockedTimestamp < INSTAGRAM_COOLDOWN_MS) return
         lastInstagramBlockedTimestamp = now
         HabitsManager.recordBlockInterception(applicationContext)
 
+        val scopeKey = "instagram:$packageName"
         Log.w(TAG, "BLOCKED: Instagram Reels detected, showing full-screen overlay")
         overlayManager.showFullScreenOverlay(
             target = "Instagram Reels",
-            message = "Instagram Reels are blocked.",
+            message = BlockedScreenConfig.resolveOverlayMessage(blockedScreenMessage, "Instagram Reels are blocked."),
             countdownSeconds = blockedScreenCountdown,
-            redirectUrl = redirectUrl,
+            redirectUrl = resolveSafeRedirectUrl(),
+            onBeforeRedirect = { suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS) },
             onGoBack = {
-                suppressBlockingFor(3000L)
+                suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS)
                 if (!performGlobalAction(GLOBAL_ACTION_BACK)) {
                     performGlobalAction(GLOBAL_ACTION_HOME)
                 }
@@ -652,6 +799,9 @@ class PGuardAccessibilityService : AccessibilityService() {
     }
 
     private fun triggerUrgeLockdownBlock(packageName: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastUrgeBlockedTimestamp < 1500L) return
+        lastUrgeBlockedTimestamp = now
         HabitsManager.recordBlockInterception(applicationContext)
         if (overlayManager.isFullScreenShowing) return
 
@@ -665,16 +815,20 @@ class PGuardAccessibilityService : AccessibilityService() {
         )
     }
 
-    private fun triggerFocusBlock(packageName: String, schedule: com.example.pguard.presentation.focus.FocusSchedule) {
+    private fun triggerFocusBlock(packageName: String, focusInfo: String) {
+        val now = System.currentTimeMillis()
+        if (now - lastFocusBlockedTimestamp < 1500L) return
+        lastFocusBlockedTimestamp = now
+
         performGlobalAction(GLOBAL_ACTION_HOME)
         HabitsManager.recordBlockInterception(applicationContext)
         if (overlayManager.isFullScreenShowing) return
 
         val appName = getAppLabelSafe(packageName)
-        Log.w(TAG, "BLOCKED: Focus Mode Active. App $appName is blocked during ${schedule.formattedTimeRange}")
+        Log.w(TAG, "BLOCKED: Focus Mode Active. App $appName is blocked during $focusInfo")
         overlayManager.showFocusOverlay(
             appName = appName,
-            scheduleInfo = schedule.formattedDuration,
+            scheduleInfo = focusInfo,
             onGoHome = { performGlobalAction(GLOBAL_ACTION_HOME) }
         )
     }
@@ -686,14 +840,16 @@ class PGuardAccessibilityService : AccessibilityService() {
         HabitsManager.recordBlockInterception(applicationContext)
 
         val appName = getAppLabelSafe(packageName)
+        val scopeKey = "app:$packageName"
         Log.w(TAG, "BLOCKED: Blocked application accessed: $appName ($packageName)")
         overlayManager.showFullScreenOverlay(
             target = appName,
-            message = "This app is in your Blocklist.",
+            message = BlockedScreenConfig.resolveOverlayMessage(blockedScreenMessage, "This app is in your Blocklist."),
             countdownSeconds = blockedScreenCountdown,
-            redirectUrl = redirectUrl,
+            redirectUrl = resolveSafeRedirectUrl(),
+            onBeforeRedirect = { suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS) },
             onGoBack = {
-                suppressBlockingFor(3000L)
+                suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS)
                 performGlobalAction(GLOBAL_ACTION_HOME)
             }
         )
@@ -703,37 +859,41 @@ class PGuardAccessibilityService : AccessibilityService() {
         val now = System.currentTimeMillis()
         if (now - lastUnsupportedBrowserBlockedTimestamp < 1500L) return
         lastUnsupportedBrowserBlockedTimestamp = now
+        HabitsManager.recordBlockInterception(applicationContext)
 
         val browserName = BrowserInspector.getBrowserDisplayName(packageName, applicationContext)
+        val scopeKey = "unsupported_browser:$packageName"
         Log.w(TAG, "BLOCKED: Unsupported browser detected: $browserName ($packageName)")
 
-        val supportedListStr = BrowserInspector.SUPPORTED_BROWSER_NAMES.joinToString(", ")
         overlayManager.showFullScreenOverlay(
             target = browserName,
-            message = "This browser is unsupported. Supported browsers are: $supportedListStr.",
+            message = "This browser isn't supported by PGuard. Switch to Chrome, Samsung Internet, Edge, Firefox, Brave, or another supported browser.",
             countdownSeconds = blockedScreenCountdown,
-            redirectUrl = redirectUrl,
+            redirectUrl = "",
+            onBeforeRedirect = { suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS) },
             onGoBack = {
-                suppressBlockingFor(3000L)
+                suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS)
                 performGlobalAction(GLOBAL_ACTION_HOME)
             }
         )
     }
 
-    private fun isSystemOrLauncherPackage(pkg: String): Boolean {
-        if (pkg == packageName || pkg == "android" || pkg == "com.android.systemui") return true
-        val lower = pkg.lowercase()
-        return lower.contains("launcher") || lower.contains("trebuchet") || lower.contains("quickstep")
-    }
+    private fun inspectTamperAndUninstall(event: AccessibilityEvent): Boolean {
+        if (!isUninstallProtectionEnabled) return false
+        val pkg = event.packageName?.toString() ?: return false
+        val rootNode = findRootNode(event) ?: return false
 
-    private fun inspectTamperAndUninstall(event: AccessibilityEvent) {
-        if (!isUninstallProtectionEnabled) return
-        val pkg = event.packageName?.toString() ?: return
-        val rootNode = findRootNode(event) ?: return
-
-        if (AntiTamperGuard.shouldBlockTamper(pkg, rootNode, applicationContext.packageName)) {
+        if (AntiTamperGuard.shouldBlockTamper(
+                pkg = pkg,
+                root = rootNode,
+                appPackageName = applicationContext.packageName,
+                isAccessibilityServiceRunning = true
+            )
+        ) {
             triggerUninstallBlock()
+            return true
         }
+        return false
     }
 
     private fun triggerUninstallBlock() {
@@ -742,6 +902,11 @@ class PGuardAccessibilityService : AccessibilityService() {
         lastAntiTamperBlockedTimestamp = now
 
         Log.w(TAG, "Anti-tamper: Detected attempt to uninstall or tamper with PGuard. Blocking and returning to Home.")
+        SecurityAlertReporter.reportIfPartnerLinked(
+            applicationContext,
+            "uninstall_attempt",
+            "An attempt to uninstall, force-stop, or disable PGuard protection was intercepted."
+        )
         performGlobalAction(GLOBAL_ACTION_HOME)
 
         mainHandler.post {
@@ -758,9 +923,16 @@ class PGuardAccessibilityService : AccessibilityService() {
         overlayManager.hideAll()
     }
 
-    override fun onUnbind(intent: android.content.Intent?): Boolean {
+    override fun onUnbind(intent: Intent?): Boolean {
         _isRunning.value = false
         overlayManager.hideAll()
+        if (isUninstallProtectionEnabled) {
+            SecurityAlertReporter.reportIfPartnerLinked(
+                applicationContext,
+                "permission_revoked",
+                "PGuard Accessibility Service was disabled while Uninstall Protection was active."
+            )
+        }
         return super.onUnbind(intent)
     }
 
