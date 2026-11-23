@@ -11,6 +11,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.text.TextUtils
 import android.util.Log
 import android.util.TypedValue
@@ -50,6 +51,30 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
     @Volatile
     var isFullScreenShowing: Boolean = false
         private set
+
+    @Volatile
+    private var lastOverlayAttachRequestMs: Long = 0L
+
+    fun isOverlayCurrentlyAttached(): Boolean {
+        if (!isFullScreenShowing) return false
+        synchronized(activeViews) {
+            if (activeViews.isEmpty()) {
+                isFullScreenShowing = false
+                return false
+            }
+            if ((SystemClock.elapsedRealtime() - lastOverlayAttachRequestMs) <= 1500L) {
+                return true
+            }
+            val anyAttached = activeViews.any { it.isAttachedToWindow }
+            if (!anyAttached) {
+                Log.w(TAG, "Detected orphaned overlay state; resetting lock")
+                activeViews.clear()
+                isFullScreenShowing = false
+                return false
+            }
+            return true
+        }
+    }
 
     private fun isCrossWindowBlurSupported(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -531,6 +556,17 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                 Log.w(TAG, "Could not set blurBehindRadius: ${e.message}")
             }
         }
+        root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) {}
+
+            override fun onViewDetachedFromWindow(v: View) {
+                synchronized(activeViews) {
+                    activeViews.remove(v)
+                    isFullScreenShowing = activeViews.isNotEmpty()
+                }
+            }
+        })
+        lastOverlayAttachRequestMs = SystemClock.elapsedRealtime()
         windowManager.addView(root, layoutParams)
         activeViews.add(root)
         isFullScreenShowing = true

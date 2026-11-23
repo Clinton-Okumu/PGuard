@@ -7,8 +7,12 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
 import android.net.VpnService
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -23,6 +27,7 @@ import com.example.pguard.engine.dns.DnsDomainFilter
 import com.example.pguard.engine.dns.DnsFilterConfig
 import com.example.pguard.engine.dns.DnsPacketCodec
 import com.example.pguard.engine.dns.DnsQuestion
+import com.example.pguard.engine.dns.DnsResponseCache
 import com.example.pguard.presentation.habits.HabitsManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -32,9 +37,11 @@ import java.io.FileOutputStream
 import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -49,7 +56,8 @@ class PGuardVpnService : VpnService() {
         private const val NOTIFICATION_ID = 4102
         private const val DNS_PORT = 53
         private const val MTU = 1500
-        private const val UPSTREAM_TIMEOUT_MS = 2500
+        private const val UPSTREAM_TIMEOUT_MS = 1200
+        private const val MAX_SELF_HEAL_RESTARTS = 5
         private const val INTERCEPTION_DEDUP_MS = 5000L
         private const val MAX_INTERCEPTION_CACHE = 512
 
@@ -87,6 +95,12 @@ class PGuardVpnService : VpnService() {
 
     private val queryIdSeq = AtomicInteger(1000)
     private val recentInterceptions = ConcurrentHashMap<String, Long>()
+    private val dnsCache = DnsResponseCache()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    @Volatile
+    private var consecutiveRestartFailures = 0
+    private var restartRunnable: Runnable? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private lateinit var dnsFilter: DnsDomainFilter
 
     override fun onCreate() {
@@ -167,6 +181,9 @@ class PGuardVpnService : VpnService() {
 
     @Synchronized
     private fun startVpnIfNeeded() {
+        restartRunnable?.let { mainHandler.removeCallbacks(it) }
+        restartRunnable = null
+
         if (running && tunInterface != null) return
 
         val pfd = establishTun()
@@ -178,19 +195,91 @@ class PGuardVpnService : VpnService() {
             return
         }
 
+        dnsCache.clear()
         tunInterface = pfd
         tunOutput = FileOutputStream(pfd.fileDescriptor)
-        workerPool = Executors.newFixedThreadPool(8) { runnable ->
-            Thread(runnable, "pguard-dns-worker").apply { isDaemon = true }
-        }
+        workerPool = ThreadPoolExecutor(
+            4,
+            24,
+            30L,
+            TimeUnit.SECONDS,
+            ArrayBlockingQueue(128),
+            { runnable -> Thread(runnable, "pguard-dns-worker").apply { isDaemon = true } },
+            ThreadPoolExecutor.DiscardOldestPolicy()
+        )
         running = true
         _isRunning.value = true
+        registerNetworkCallback()
 
         readerThread = Thread({ runPacketLoop(pfd) }, "pguard-tun-reader").apply {
             isDaemon = true
             start()
         }
         Log.i(TAG, "PGuard DNS Shield VPN started")
+    }
+
+    private fun registerNetworkCallback() {
+        if (networkCallback != null) return
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                dnsCache.clear()
+            }
+
+            override fun onLost(network: Network) {
+                dnsCache.clear()
+            }
+        }
+        try {
+            cm.registerDefaultNetworkCallback(callback)
+            networkCallback = callback
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not register network callback: ${e.message}")
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        val callback = networkCallback ?: return
+        networkCallback = null
+        val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+        try {
+            cm.unregisterNetworkCallback(callback)
+        } catch (_: Exception) {}
+    }
+
+    @Synchronized
+    private fun handleUnexpectedReaderExit(failedPfd: ParcelFileDescriptor) {
+        if (tunInterface !== failedPfd) return
+        Log.w(TAG, "TUN reader loop exited unexpectedly; resetting broken VPN interface")
+        stopVpn()
+
+        if (BlockingPreferences.isDnsVpnEnabled &&
+            prepare(applicationContext) == null &&
+            consecutiveRestartFailures < MAX_SELF_HEAL_RESTARTS
+        ) {
+            val delayMs = when (consecutiveRestartFailures) {
+                0 -> 1000L
+                1 -> 2000L
+                else -> 5000L
+            }
+            consecutiveRestartFailures++
+            val runnable = Runnable {
+                restartRunnable = null
+                if (BlockingPreferences.isDnsVpnEnabled && prepare(applicationContext) == null) {
+                    BlockingPreferences.loadSettings(applicationContext)
+                    startForegroundWithNotification()
+                    startVpnIfNeeded()
+                } else {
+                    stopForegroundCompat()
+                    stopSelf()
+                }
+            }
+            restartRunnable = runnable
+            mainHandler.postDelayed(runnable, delayMs)
+        } else {
+            stopForegroundCompat()
+            stopSelf()
+        }
     }
 
     private fun establishTun(): ParcelFileDescriptor? {
@@ -234,63 +323,85 @@ class PGuardVpnService : VpnService() {
         val input = FileInputStream(pfd.fileDescriptor)
         val buffer = ByteArray(MTU)
 
-        while (running) {
-            try {
-                val readLen = input.read(buffer)
-                if (readLen <= 0) continue
+        try {
+            while (running && tunInterface === pfd) {
+                try {
+                    val readLen = input.read(buffer)
+                    if (readLen <= 0) continue
+                    consecutiveRestartFailures = 0
 
-                val packetCopy = buffer.copyOf(readLen)
-                val udpPacket = IpUdpPacketCodec.parseUdp(packetCopy, readLen) ?: continue
-                if (udpPacket.dstPort != DNS_PORT) continue
+                    val packetCopy = buffer.copyOf(readLen)
+                    val udpPacket = IpUdpPacketCodec.parseUdp(packetCopy, readLen) ?: continue
+                    if (udpPacket.dstPort != DNS_PORT) continue
 
-                val pool = workerPool
-                if (pool != null && !pool.isShutdown) {
-                    pool.execute { handleDnsUdpPacket(udpPacket) }
+                    val pool = workerPool
+                    if (pool != null && !pool.isShutdown) {
+                        pool.execute { handleDnsUdpPacket(udpPacket) }
+                    }
+                } catch (e: Exception) {
+                    if (running && tunInterface === pfd) {
+                        Log.w(TAG, "TUN read loop interrupted: ${e.message}")
+                    }
+                    break
                 }
-            } catch (e: Exception) {
-                if (running) {
-                    Log.w(TAG, "TUN read loop interrupted: ${e.message}")
-                }
-                break
+            }
+        } finally {
+            if (running && tunInterface === pfd) {
+                mainHandler.post { handleUnexpectedReaderExit(pfd) }
             }
         }
     }
 
     private fun handleDnsUdpPacket(request: IpUdpPacketCodec.UdpPacket) {
-        val dnsPayload = request.payload
-        val question = DnsPacketCodec.parseQuery(dnsPayload, dnsPayload.size) ?: return
+        try {
+            val dnsPayload = request.payload
+            val question = DnsPacketCodec.parseQuery(dnsPayload, dnsPayload.size) ?: return
 
-        val config = DnsFilterConfig(
-            blockAdultContent = BlockingPreferences.isAdultBlockingEnabled,
-            blockTikTok = BlockingPreferences.isTikTokBlockingEnabled,
-            customBlocklist = BlockingPreferences.customBlocklist.toList(),
-            whitelist = BlockingPreferences.whitelistedKeywords.toList()
-        )
+            val config = DnsFilterConfig(
+                blockAdultContent = BlockingPreferences.isAdultBlockingEnabled,
+                blockTikTok = BlockingPreferences.isTikTokBlockingEnabled,
+                customBlocklist = BlockingPreferences.customBlocklist.toList(),
+                whitelist = BlockingPreferences.whitelistedKeywords.toList()
+            )
 
-        val responseDns: ByteArray? = when (val decision = dnsFilter.evaluate(question.domain, config)) {
-            is DnsDecision.Block -> {
-                if (decision.recordInterception) {
-                    recordThrottledInterception(question.domain, decision.reason)
+            val responseDns: ByteArray = when (val decision = dnsFilter.evaluate(question.domain, config)) {
+                is DnsDecision.Block -> {
+                    if (decision.recordInterception) {
+                        recordThrottledInterception(question.domain, decision.reason)
+                    }
+                    DnsPacketCodec.buildNxDomainResponse(dnsPayload, dnsPayload.size, question)
                 }
-                DnsPacketCodec.buildNxDomainResponse(dnsPayload, dnsPayload.size, question)
+
+                is DnsDecision.SafeSearchRedirect -> {
+                    val modeKey = "safe:${decision.safeHost}"
+                    dnsCache.get(question.domain, question.qType, modeKey, question.transactionId)
+                        ?: resolveSafeSearch(dnsPayload, question, decision.safeHost)?.also { resolved ->
+                            dnsCache.put(question.domain, question.qType, modeKey, resolved)
+                        }
+                        ?: DnsPacketCodec.buildServFailResponse(dnsPayload, dnsPayload.size, question)
+                }
+
+                DnsDecision.AllowFamilyFiltered -> {
+                    dnsCache.get(question.domain, question.qType, "family", question.transactionId)
+                        ?: forwardDnsUpstream(dnsPayload, primary = "1.1.1.3", fallback = "1.0.0.3")?.also { resolved ->
+                            dnsCache.put(question.domain, question.qType, "family", resolved)
+                        }
+                        ?: DnsPacketCodec.buildServFailResponse(dnsPayload, dnsPayload.size, question)
+                }
+
+                DnsDecision.AllowUnfiltered -> {
+                    dnsCache.get(question.domain, question.qType, "unfiltered", question.transactionId)
+                        ?: forwardDnsUpstream(dnsPayload, primary = "1.1.1.1", fallback = "8.8.8.8")?.also { resolved ->
+                            dnsCache.put(question.domain, question.qType, "unfiltered", resolved)
+                        }
+                        ?: DnsPacketCodec.buildServFailResponse(dnsPayload, dnsPayload.size, question)
+                }
             }
 
-            is DnsDecision.SafeSearchRedirect -> {
-                resolveSafeSearch(dnsPayload, question, decision.safeHost)
-            }
-
-            DnsDecision.AllowFamilyFiltered -> {
-                forwardDnsUpstream(dnsPayload, primary = "1.1.1.3", fallback = "1.0.0.3")
-            }
-
-            DnsDecision.AllowUnfiltered -> {
-                forwardDnsUpstream(dnsPayload, primary = "1.1.1.1", fallback = "8.8.8.8")
-            }
-        }
-
-        if (responseDns != null) {
             val responseIpPacket = IpUdpPacketCodec.buildUdpResponse(request, responseDns)
             writeToTun(responseIpPacket)
+        } catch (t: Throwable) {
+            Log.w(TAG, "Error processing DNS packet: ${t.message}")
         }
     }
 
@@ -383,6 +494,8 @@ class PGuardVpnService : VpnService() {
     private fun stopVpn() {
         running = false
         _isRunning.value = false
+        unregisterNetworkCallback()
+        dnsCache.clear()
 
         try {
             tunInterface?.close()
@@ -414,8 +527,21 @@ class PGuardVpnService : VpnService() {
         } catch (_: Exception) {}
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        if (BlockingPreferences.isDnsVpnEnabled && prepare(applicationContext) == null) {
+            try {
+                start(applicationContext)
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not restart DNS VPN from onTaskRemoved: ${e.message}")
+            }
+        }
+    }
+
     override fun onRevoke() {
         Log.w(TAG, "VPN permission revoked by system or another VPN app")
+        restartRunnable?.let { mainHandler.removeCallbacks(it) }
+        restartRunnable = null
         if (BlockingPreferences.isDnsVpnEnabled) {
             SecurityAlertReporter.reportIfPartnerLinked(
                 applicationContext,
@@ -430,6 +556,8 @@ class PGuardVpnService : VpnService() {
     }
 
     override fun onDestroy() {
+        restartRunnable?.let { mainHandler.removeCallbacks(it) }
+        restartRunnable = null
         stopVpn()
         stopForegroundCompat()
         super.onDestroy()

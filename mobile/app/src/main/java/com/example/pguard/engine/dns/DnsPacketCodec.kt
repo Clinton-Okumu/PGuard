@@ -67,6 +67,50 @@ object DnsPacketCodec {
         question: DnsQuestion
     ): ByteArray = buildEmptyAnswerResponse(queryPayload, queryLength, question, rcode = 0)
 
+    fun buildServFailResponse(
+        queryPayload: ByteArray,
+        queryLength: Int,
+        question: DnsQuestion
+    ): ByteArray = buildEmptyAnswerResponse(queryPayload, queryLength, question, rcode = 2)
+
+    fun withTransactionId(response: ByteArray, transactionId: Int): ByteArray {
+        val copy = response.copyOf()
+        if (copy.size >= 2) {
+            writeU16(copy, 0, transactionId)
+        }
+        return copy
+    }
+
+    fun extractMinTtlSeconds(response: ByteArray, length: Int = response.size): Int? {
+        if (length < HEADER_SIZE || length > response.size) return null
+        val qdCount = u16(response, 4)
+        val anCount = u16(response, 6)
+        if (anCount <= 0) return null
+
+        var offset = HEADER_SIZE
+        repeat(qdCount) {
+            offset = skipName(response, offset, length) ?: return null
+            if (offset + 4 > length) return null
+            offset += 4
+        }
+
+        var minTtl: Int? = null
+        repeat(anCount) {
+            offset = skipName(response, offset, length) ?: return minTtl
+            if (offset + 10 > length) return minTtl
+            val rawTtl = u32(response, offset + 4)
+            val clampedTtl = if (rawTtl < 0) Int.MAX_VALUE else rawTtl
+            val rdLength = u16(response, offset + 8)
+            offset += 10
+            if (offset + rdLength > length) return minTtl
+            if (clampedTtl > 0) {
+                minTtl = if (minTtl == null) clampedTtl else minOf(minTtl, clampedTtl)
+            }
+            offset += rdLength
+        }
+        return minTtl
+    }
+
     private fun buildEmptyAnswerResponse(
         queryPayload: ByteArray,
         queryLength: Int,

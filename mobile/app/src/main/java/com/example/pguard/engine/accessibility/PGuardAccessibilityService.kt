@@ -35,7 +35,8 @@ class PGuardAccessibilityService : AccessibilityService() {
         private const val INSTAGRAM_COOLDOWN_MS = 1200L
         private const val TIKTOK_COOLDOWN_MS = 1500L
         private const val DEEP_SCAN_THROTTLE_MS = 250L
-        private const val IN_APP_ADULT_SCAN_THROTTLE_MS = 300L
+        private const val IN_APP_ADULT_SCAN_THROTTLE_MS = 400L
+        private const val VPN_WATCHDOG_INTERVAL_MS = 60_000L
         private const val MAX_INSTALL_TIME_CACHE_SIZE = 512
         private val installTimeCache = ConcurrentHashMap<String, Long>()
 
@@ -192,6 +193,7 @@ class PGuardAccessibilityService : AccessibilityService() {
 
     private var lastBrowserDeepScanMs: Long = 0L
     private var lastInAppAdultScanMs: Long = 0L
+    private var lastVpnWatchdogCheckMs: Long = 0L
     private var lastSocialHierarchyScanMs: Long = 0L
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -221,10 +223,10 @@ class PGuardAccessibilityService : AccessibilityService() {
         FocusModeManager.init(this)
 
         val info = serviceInfo ?: android.accessibilityservice.AccessibilityServiceInfo()
-        info.flags = info.flags or
-            android.accessibilityservice.AccessibilityServiceInfo.FLAG_REQUEST_ENHANCED_WEB_ACCESSIBILITY or
+        info.flags = (info.flags and
+            android.accessibilityservice.AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS.inv() and
+            android.accessibilityservice.AccessibilityServiceInfo.FLAG_REQUEST_ENHANCED_WEB_ACCESSIBILITY.inv()) or
             android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
-            android.accessibilityservice.AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
             android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
         serviceInfo = info
 
@@ -259,9 +261,11 @@ class PGuardAccessibilityService : AccessibilityService() {
         if (event == null) return
         val packageName = event.packageName?.toString() ?: return
 
-        if (overlayManager.isFullScreenShowing) {
+        if (overlayManager.isOverlayCurrentlyAttached()) {
             return
         }
+
+        maybeAutoResumeDnsVpn()
 
         // 0. Emergency Urge Lockdown (never suppressed)
         if (FocusModeManager.isUrgeLockdownActive(this)) {
@@ -448,7 +452,7 @@ class PGuardAccessibilityService : AccessibilityService() {
         lastInAppAdultScanMs = now
 
         val rootNode = findRootNode(event) ?: return
-        val visibleTexts = BrowserInspector.collectVisibleWebTexts(rootNode, maxDepth = 22, maxItems = 120)
+        val visibleTexts = BrowserInspector.collectVisibleWebTexts(rootNode, maxDepth = 18, maxItems = 90)
         if (visibleTexts.isEmpty()) return
 
         if (isAdultBlockingEnabled) {
@@ -733,6 +737,21 @@ class PGuardAccessibilityService : AccessibilityService() {
             blockTikTok = isTikTokBlockingEnabled
         )
         return (result as? BlockedScreenConfig.ValidationResult.Valid)?.normalized.orEmpty()
+    }
+
+    private fun maybeAutoResumeDnsVpn() {
+        if (!BlockingPreferences.isDnsVpnEnabled) return
+        val now = System.currentTimeMillis()
+        if ((now - lastVpnWatchdogCheckMs) < VPN_WATCHDOG_INTERVAL_MS) return
+        lastVpnWatchdogCheckMs = now
+        try {
+            if (!PGuardVpnService.isRunning.value && VpnService.prepare(this) == null) {
+                PGuardVpnService.start(this)
+                Log.i(TAG, "Watchdog resumed DNS Shield VPN service")
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Watchdog could not resume DNS VPN service: ${e.message}")
+        }
     }
 
     private fun triggerBlock(
