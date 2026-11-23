@@ -205,4 +205,14 @@ class ContentFilterTest {
         assertTrue(filter.findAdultPageContent(strongPage) != null)
         assertTrue(filter.findAdultPageContent(denseContextualPage) != null)
     }
+
+    @Test
+    fun `allows SFW reddit porn network names while blocking real adult subreddits`() {
+        assertFalse(filter.isAdultContent("https://www.reddit.com/r/FoodPorn"))
+        assertFalse(filter.isAdultContent("r/EarthPorn"))
+        assertTrue(filter.findAdultPageContent(listOf("Welcome to r/FoodPorn", "Homemade pasta")) == null)
+
+        assertTrue(filter.isAdultContent("https://www.reddit.com/r/myporn00/comments/123"))
+        assertTrue(filter.isAdultContent("https://pornhub.com/r/FoodPorn"))
+    }
 }

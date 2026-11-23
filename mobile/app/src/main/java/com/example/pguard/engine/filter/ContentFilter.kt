@@ -1,5 +1,6 @@
 package com.example.pguard.engine.filter
 
+import com.example.pguard.engine.accessibility.InAppAdultGuard
 import java.net.IDN
 import java.net.URLDecoder
 import java.text.Normalizer
@@ -33,7 +34,8 @@ class ContentFilter(
 ) {
 
     fun isAdultContent(rawInput: String): Boolean {
-        val target = Target.parse(rawInput)
+        val cleaned = InAppAdultGuard.stripSfwRedditSubreddits(rawInput)
+        val target = Target.parse(cleaned)
         if (target.isEmpty) return false
 
         if (target.hostTld != null && target.hostTld in adultTlds) return true
@@ -70,7 +72,8 @@ class ContentFilter(
         val matchedContextualRules = HashSet<Int>()
 
         for (rawText in pageTexts) {
-            val target = Target.parse(rawText)
+            val cleaned = InAppAdultGuard.stripSfwRedditSubreddits(rawText)
+            val target = Target.parse(cleaned)
             if (target.isEmpty) continue
 
             if (target.hostTld != null && target.hostTld in adultTlds) return rawText

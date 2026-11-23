@@ -35,6 +35,7 @@ class PGuardAccessibilityService : AccessibilityService() {
         private const val INSTAGRAM_COOLDOWN_MS = 1200L
         private const val TIKTOK_COOLDOWN_MS = 1500L
         private const val DEEP_SCAN_THROTTLE_MS = 250L
+        private const val IN_APP_ADULT_SCAN_THROTTLE_MS = 300L
         private const val MAX_INSTALL_TIME_CACHE_SIZE = 512
         private val installTimeCache = ConcurrentHashMap<String, Long>()
 
@@ -190,6 +191,7 @@ class PGuardAccessibilityService : AccessibilityService() {
     private var lastUrgeBlockedTimestamp: Long = 0L
 
     private var lastBrowserDeepScanMs: Long = 0L
+    private var lastInAppAdultScanMs: Long = 0L
     private var lastSocialHierarchyScanMs: Long = 0L
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -328,14 +330,12 @@ class PGuardAccessibilityService : AccessibilityService() {
 
         // 6. YouTube Shorts Blocking
         if (isShortsBlockingEnabled && SocialAppGuards.isYouTubePackage(packageName)) {
-            inspectYouTube(event, packageName)
-            return
+            if (inspectYouTube(event, packageName)) return
         }
 
         // 7. WhatsApp Channel Exploration & Following Blocking
         if (isWhatsAppChannelsBlockingEnabled && SocialAppGuards.isWhatsAppPackage(packageName)) {
-            inspectWhatsApp(event, packageName)
-            return
+            if (inspectWhatsApp(event, packageName)) return
         }
 
         // 8. TikTok Full App Blocking
@@ -348,36 +348,136 @@ class PGuardAccessibilityService : AccessibilityService() {
 
         // 9. Instagram Reels Blocking
         if (isInstagramReelsBlockingEnabled && SocialAppGuards.isInstagramPackage(packageName)) {
-            inspectInstagram(event, packageName)
-            return
+            if (inspectInstagram(event, packageName)) return
         }
 
-        // 10. Lightweight in-app WebView defense-in-depth (complements DNS VPN Shield)
+        // 10. Universal in-app adult & custom blocklist guard (Reddit, X, Discord, Telegram, WebViews, etc.)
         if (!isAppWhitelisted &&
-            packageName != applicationContext.packageName &&
+            !InAppAdultGuard.isExcludedFromInAppAdultScan(packageName, applicationContext.packageName) &&
             (isAdultBlockingEnabled || customBlocklist.isNotEmpty()) &&
-            !isScopeSuppressed("webview:$packageName")
+            !isScopeSuppressed("inapp:$packageName")
         ) {
-            inspectEmbeddedWebViewEvent(event, packageName)
+            inspectInAppContent(event, packageName)
         }
     }
 
-    private fun inspectEmbeddedWebViewEvent(event: AccessibilityEvent, packageName: String) {
+    private fun inspectInAppContent(event: AccessibilityEvent, packageName: String) {
+        // Never inspect password inputs
+        if (event.isPassword || event.source?.isPassword == true) return
+
+        // Fast Path A: Editable text input / search bars in any app
+        val source = event.source
+        val isEditableInput = event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED ||
+            (source?.className?.toString()?.contains("EditText", ignoreCase = true) == true)
+        if (isEditableInput) {
+            val inputCandidate = source?.text?.toString()?.takeIf { it.isNotBlank() }
+                ?: extractEventText(event)
+            if (inputCandidate.isNotBlank()) {
+                val match = if (isAdultBlockingEnabled) {
+                    InAppAdultGuard.findAdultInputMatch(
+                        inputText = inputCandidate,
+                        contentFilter = contentFilter,
+                        customBlocklist = customBlocklist,
+                        whitelist = whitelistedKeywords
+                    )
+                } else if (!contentFilter.matchesWhitelist(inputCandidate, whitelistedKeywords) &&
+                    contentFilter.matchesCustomBlocklist(inputCandidate, customBlocklist)
+                ) {
+                    inputCandidate
+                } else {
+                    null
+                }
+                if (match != null) {
+                    Log.w(TAG, "In-app input block in $packageName: $match")
+                    triggerBlock(match, packageName, scopePrefix = "inapp")
+                    return
+                }
+            }
+        }
+
+        // Fast Path B: Clicks on explicit subreddits, NSFW badges, or "Yes, I'm over 18" gates
+        if (isAdultBlockingEnabled && event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+            val clickCandidates = buildList {
+                event.text.forEach { if (!it.isNullOrBlank()) add(it.toString()) }
+                event.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { add(it) }
+                source?.text?.toString()?.takeIf { it.isNotBlank() }?.let { add(it) }
+                source?.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { add(it) }
+            }
+            val clickMatch = InAppAdultGuard.findAdultClickMatch(
+                eventTexts = clickCandidates,
+                isSocialContext = InAppAdultGuard.isSocialOrCommunityApp(packageName),
+                contentFilter = contentFilter,
+                whitelist = whitelistedKeywords
+            )
+            if (clickMatch != null) {
+                Log.w(TAG, "In-app click block in $packageName: $clickMatch")
+                triggerBlock(clickMatch, packageName, scopePrefix = "inapp")
+                return
+            }
+        }
+
+        // Fast Path C: Embedded WebView event text (adult + custom blocklist)
         val eventClass = event.className?.toString().orEmpty()
-        val srcClass = event.source?.className?.toString().orEmpty()
+        val srcClass = source?.className?.toString().orEmpty()
         val isWebView = eventClass.contains("WebView", ignoreCase = true) ||
             srcClass.contains("WebView", ignoreCase = true)
-        if (!isWebView) return
+        if (isWebView) {
+            val eventText = extractEventText(event)
+            if (eventText.isNotBlank() && !contentFilter.matchesWhitelist(eventText, whitelistedKeywords)) {
+                val blockedMatch = contentFilter.matchesCustomBlocklist(eventText, customBlocklist) ||
+                    (isAdultBlockingEnabled && contentFilter.findAdultPageContent(listOf(eventText)) != null)
+                if (blockedMatch) {
+                    Log.w(TAG, "In-app WebView block in $packageName: $eventText")
+                    triggerBlock(eventText, packageName, scopePrefix = "inapp")
+                    return
+                }
+            }
+        }
 
-        val eventText = extractEventText(event)
-        if (eventText.isBlank()) return
-        if (contentFilter.matchesWhitelist(eventText, whitelistedKeywords)) return
+        // Throttled visible hierarchy scan on window transitions, scrolls, and content updates
+        val eventType = event.eventType
+        if (eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+            eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
+            eventType != AccessibilityEvent.TYPE_VIEW_SCROLLED
+        ) {
+            return
+        }
 
-        val blockedMatch = contentFilter.matchesCustomBlocklist(eventText, customBlocklist) ||
-            (isAdultBlockingEnabled && contentFilter.findAdultPageContent(listOf(eventText)) != null)
-        if (blockedMatch) {
-            Log.w(TAG, "In-app WebView block in $packageName: $eventText")
-            triggerBlock(eventText, packageName, scopePrefix = "webview")
+        val now = System.currentTimeMillis()
+        if ((now - lastInAppAdultScanMs) < IN_APP_ADULT_SCAN_THROTTLE_MS) return
+        lastInAppAdultScanMs = now
+
+        val rootNode = findRootNode(event) ?: return
+        val visibleTexts = BrowserInspector.collectVisibleWebTexts(rootNode, maxDepth = 22, maxItems = 120)
+        if (visibleTexts.isEmpty()) return
+
+        if (isAdultBlockingEnabled) {
+            val adultMatch = InAppAdultGuard.findAdultScreenMatch(
+                packageName = packageName,
+                activeUrl = null,
+                visibleTexts = visibleTexts,
+                isBrowser = false,
+                contentFilter = contentFilter,
+                whitelist = whitelistedKeywords
+            )
+            if (adultMatch != null) {
+                Log.w(TAG, "In-app adult screen block in $packageName: $adultMatch")
+                triggerBlock(adultMatch, packageName, scopePrefix = "inapp")
+                return
+            }
+        }
+
+        if (customBlocklist.isNotEmpty()) {
+            for (txt in visibleTexts) {
+                if ((txt.contains('.') || isWebView) &&
+                    !contentFilter.matchesWhitelist(txt, whitelistedKeywords) &&
+                    contentFilter.matchesCustomBlocklist(txt, customBlocklist)
+                ) {
+                    Log.w(TAG, "In-app custom blocklist match in $packageName: $txt")
+                    triggerBlock(txt, packageName, scopePrefix = "inapp")
+                    return
+                }
+            }
         }
     }
 
@@ -440,6 +540,25 @@ class PGuardAccessibilityService : AccessibilityService() {
                     triggerBlock(eventText, packageName)
                     return
                 }
+            } else if (isAdultBlockingEnabled && event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+                val clickCandidates = buildList {
+                    event.text.forEach { if (!it.isNullOrBlank()) add(it.toString()) }
+                    event.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { add(it) }
+                    source?.text?.toString()?.takeIf { it.isNotBlank() }?.let { add(it) }
+                    source?.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { add(it) }
+                }
+                val clickMatch = InAppAdultGuard.findAdultClickMatch(
+                    eventTexts = clickCandidates,
+                    isSocialContext = InAppAdultGuard.isSocialOrCommunityUrl(detectedUrl?.value) ||
+                        detectedUrl == null,
+                    contentFilter = contentFilter,
+                    whitelist = whitelistedKeywords
+                )
+                if (clickMatch != null) {
+                    Log.w(TAG, "Instant block triggered by browser click: $clickMatch")
+                    triggerBlock(clickMatch, packageName)
+                    return
+                }
             } else if (!contentFilter.matchesWhitelist(eventText, whitelistedKeywords) &&
                 shouldBlockPageSnippet(eventText)
             ) {
@@ -493,9 +612,16 @@ class PGuardAccessibilityService : AccessibilityService() {
             } else {
                 pageTexts.filterNot { contentFilter.matchesWhitelist(it, whitelistedKeywords) }
             }
-            val matchedAdult = contentFilter.findAdultPageContent(scannableTexts)
+            val matchedAdult = InAppAdultGuard.findAdultScreenMatch(
+                packageName = packageName,
+                activeUrl = detectedUrl?.value,
+                visibleTexts = scannableTexts,
+                isBrowser = true,
+                contentFilter = contentFilter,
+                whitelist = whitelistedKeywords
+            )
             if (matchedAdult != null) {
-                Log.w(TAG, "Tiered adult page match: $matchedAdult")
+                Log.w(TAG, "Tiered/social adult page match: $matchedAdult")
                 triggerBlock(matchedAdult, packageName)
             }
         }
@@ -559,7 +685,14 @@ class PGuardAccessibilityService : AccessibilityService() {
         if (contentFilter.matchesWhitelist(input, whitelistedKeywords)) {
             return false
         }
-        if (isAdultBlockingEnabled && contentFilter.isAdultContent(input)) {
+        if (isAdultBlockingEnabled &&
+            InAppAdultGuard.findAdultInputMatch(
+                inputText = input,
+                contentFilter = contentFilter,
+                customBlocklist = emptyList(),
+                whitelist = whitelistedKeywords
+            ) != null
+        ) {
             return true
         }
         return shouldBlockCustomOrSocialUrl(input)
@@ -634,18 +767,37 @@ class PGuardAccessibilityService : AccessibilityService() {
                     performGlobalAction(GLOBAL_ACTION_HOME)
                 } else {
                     mainHandler.postDelayed({
-                        val currentPkg = rootInActiveWindow?.packageName?.toString()
-                        if (currentPkg != null && BrowserInspector.isBrowser(currentPkg, applicationContext)) {
+                        val activeRoot = rootInActiveWindow
+                        val currentPkg = activeRoot?.packageName?.toString() ?: return@postDelayed
+                        if (BrowserInspector.isBrowser(currentPkg, applicationContext)) {
                             val url = BrowserInspector.extractUrlInfo(
-                                rootInActiveWindow,
+                                activeRoot,
                                 null,
                                 allowFallbackTraversal = false
                             )?.value
                             if (url != null && shouldBlockUrlOrQuery(url)) {
                                 performGlobalAction(GLOBAL_ACTION_HOME)
                             }
+                        } else if (scopePrefix == "inapp" && currentPkg == packageName && isAdultBlockingEnabled) {
+                            val visibleTexts = BrowserInspector.collectVisibleWebTexts(
+                                activeRoot,
+                                maxDepth = 18,
+                                maxItems = 80
+                            )
+                            if (visibleTexts.isNotEmpty() &&
+                                InAppAdultGuard.findAdultScreenMatch(
+                                    packageName = currentPkg,
+                                    activeUrl = null,
+                                    visibleTexts = visibleTexts,
+                                    isBrowser = false,
+                                    contentFilter = contentFilter,
+                                    whitelist = whitelistedKeywords
+                                ) != null
+                            ) {
+                                performGlobalAction(GLOBAL_ACTION_HOME)
+                            }
                         }
-                    }, 400L)
+                    }, 420L)
                 }
             }
         )
@@ -657,21 +809,23 @@ class PGuardAccessibilityService : AccessibilityService() {
         return true
     }
 
-    private fun inspectYouTube(event: AccessibilityEvent, packageName: String) {
-        if (!isShortsBlockingEnabled || isScopeSuppressed("shorts:$packageName")) return
+    private fun inspectYouTube(event: AccessibilityEvent, packageName: String): Boolean {
+        if (!isShortsBlockingEnabled || isScopeSuppressed("shorts:$packageName")) return false
         val now = System.currentTimeMillis()
-        if (now - lastShortsBlockedTimestamp < SHORTS_COOLDOWN_MS) return
+        if (now - lastShortsBlockedTimestamp < SHORTS_COOLDOWN_MS) return false
 
         if (SocialAppGuards.isYouTubeShortsEventMatch(event)) {
             triggerShortsBlock(packageName)
-            return
+            return true
         }
 
-        if (!canRunSocialHierarchyScan(now)) return
-        val rootNode = findRootNode(event) ?: rootInActiveWindow ?: event.source ?: return
+        if (!canRunSocialHierarchyScan(now)) return false
+        val rootNode = findRootNode(event) ?: rootInActiveWindow ?: event.source ?: return false
         if (SocialAppGuards.isShortsActiveInHierarchy(rootNode)) {
             triggerShortsBlock(packageName)
+            return true
         }
+        return false
     }
 
     private fun triggerShortsBlock(packageName: String) {
@@ -697,21 +851,23 @@ class PGuardAccessibilityService : AccessibilityService() {
         )
     }
 
-    private fun inspectWhatsApp(event: AccessibilityEvent, packageName: String) {
-        if (!isWhatsAppChannelsBlockingEnabled || isScopeSuppressed("whatsapp:$packageName")) return
+    private fun inspectWhatsApp(event: AccessibilityEvent, packageName: String): Boolean {
+        if (!isWhatsAppChannelsBlockingEnabled || isScopeSuppressed("whatsapp:$packageName")) return false
         val now = System.currentTimeMillis()
-        if (now - lastWhatsAppBlockedTimestamp < WHATSAPP_COOLDOWN_MS) return
+        if (now - lastWhatsAppBlockedTimestamp < WHATSAPP_COOLDOWN_MS) return false
 
         val rootNode = findRootNode(event) ?: rootInActiveWindow ?: event.source
         if (SocialAppGuards.isWhatsAppChannelClickMatch(event, rootNode)) {
             triggerWhatsAppBlock(packageName, "Exploring or following new WhatsApp channels is blocked.")
-            return
+            return true
         }
 
-        if (rootNode == null || !canRunSocialHierarchyScan(now)) return
+        if (rootNode == null || !canRunSocialHierarchyScan(now)) return false
         if (SocialAppGuards.isWhatsAppChannelDirectoryActive(rootNode)) {
             triggerWhatsAppBlock(packageName, "Exploring new WhatsApp channels is blocked.")
+            return true
         }
+        return false
     }
 
     private fun triggerWhatsAppBlock(packageName: String, reason: String) {
@@ -758,21 +914,23 @@ class PGuardAccessibilityService : AccessibilityService() {
         )
     }
 
-    private fun inspectInstagram(event: AccessibilityEvent, packageName: String) {
-        if (!isInstagramReelsBlockingEnabled || isScopeSuppressed("instagram:$packageName")) return
+    private fun inspectInstagram(event: AccessibilityEvent, packageName: String): Boolean {
+        if (!isInstagramReelsBlockingEnabled || isScopeSuppressed("instagram:$packageName")) return false
         val now = System.currentTimeMillis()
-        if (now - lastInstagramBlockedTimestamp < INSTAGRAM_COOLDOWN_MS) return
+        if (now - lastInstagramBlockedTimestamp < INSTAGRAM_COOLDOWN_MS) return false
 
         if (SocialAppGuards.isInstagramReelsEventMatch(event)) {
             triggerInstagramReelsBlock(packageName)
-            return
+            return true
         }
 
-        if (!canRunSocialHierarchyScan(now)) return
-        val rootNode = findRootNode(event) ?: rootInActiveWindow ?: event.source ?: return
+        if (!canRunSocialHierarchyScan(now)) return false
+        val rootNode = findRootNode(event) ?: rootInActiveWindow ?: event.source ?: return false
         if (SocialAppGuards.isInstagramReelsActiveInHierarchy(rootNode)) {
             triggerInstagramReelsBlock(packageName)
+            return true
         }
+        return false
     }
 
     private fun triggerInstagramReelsBlock(packageName: String) {
