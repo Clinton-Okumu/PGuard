@@ -183,4 +183,179 @@ class InAppAdultGuardTest {
             )
         )
     }
+
+    @Test
+    fun `blocks mid-string nsfw 18 plus blurred media and mature content warnings outright`() {
+        assertNotNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "com.reddit.frontpage",
+                activeUrl = null,
+                visibleTexts = listOf("r/sub • 2h • NSFW • Photo")
+            )
+        )
+        assertNotNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "com.reddit.frontpage",
+                activeUrl = null,
+                visibleTexts = listOf("r/sub • 18+ • 50k members")
+            )
+        )
+        assertNotNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "com.reddit.frontpage",
+                activeUrl = null,
+                visibleTexts = listOf("This post contains mature content")
+            )
+        )
+        assertNotNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "com.reddit.frontpage",
+                activeUrl = null,
+                visibleTexts = listOf("Blurred because it may contain mature content", "Tap to unblur")
+            )
+        )
+        assertNotNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "com.some.social.app",
+                activeUrl = null,
+                visibleTexts = listOf("Content warning: Nudity", "This photo may contain sensitive content")
+            )
+        )
+        assertNotNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "com.discord",
+                activeUrl = null,
+                visibleTexts = listOf("Age-restricted")
+            )
+        )
+        assertNotNull(InAppAdultGuard.findAdultInputMatch("mature content"))
+        assertNotNull(InAppAdultGuard.findAdultClickMatch(listOf("Tap to unblur"), isSocialContext = false))
+    }
+
+    @Test
+    fun `allows benign uses of mature outside warnings and badges`() {
+        assertNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "com.some.article.app",
+                activeUrl = null,
+                visibleTexts = listOf("Planting a mature oak tree in your garden", "Long-term financial maturity guide")
+            )
+        )
+    }
+
+    @Test
+    fun `blocks icon-only adult badges via viewIds and expanded curated adult subreddits`() {
+        assertTrue(InAppAdultGuard.isAdultViewId("com.reddit.frontpage:id/nsfw_badge"))
+        assertTrue(InAppAdultGuard.isAdultViewId("com.reddit.frontpage:id/over_18_pill"))
+        assertTrue(InAppAdultGuard.isAdultViewId("com.discord:id/age_gate"))
+        assertFalse(InAppAdultGuard.isAdultViewId("com.reddit.frontpage:id/toolbar_title"))
+        assertFalse(InAppAdultGuard.isAdultViewId("com.reddit.frontpage:id/user_avatar"))
+
+        assertNotNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "com.reddit.frontpage",
+                activeUrl = null,
+                visibleTexts = listOf("Media post"),
+                viewIds = listOf("com.reddit.frontpage:id/post_nsfw_tag")
+            )
+        )
+
+        assertNotNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "com.reddit.frontpage",
+                activeUrl = null,
+                visibleTexts = listOf("r/ass", "Join")
+            )
+        )
+        assertNotNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "com.reddit.frontpage",
+                activeUrl = null,
+                visibleTexts = listOf("r/hardcore", "Top posts")
+            )
+        )
+        assertNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "com.reddit.frontpage",
+                activeUrl = null,
+                visibleTexts = listOf("r/assassinscreed", "r/teenagers", "Gaming news")
+            )
+        )
+    }
+
+    @Test
+    fun `blocks reddit web search results with 18NSFW, Safe Search Off, and explicit subreddits in Firefox`() {
+        val screenshotTexts = listOf(
+            "Tsparis",
+            "Posts",
+            "Communities",
+            "Media",
+            "Comments",
+            "Relevance",
+            "All time",
+            "Safe Search Off",
+            "Showing results for Ts Paris",
+            "u/Greedy-Training7808 · 2y ago",
+            "18NSFW",
+            "Ts Paris stroke and poke",
+            "18+",
+            "r/ebonyshemalee · 1y ago",
+            "ts paris sexy ass",
+            "r/ebonyshemalee · 8mo ago",
+            "ts paris looks amazing from the back omg"
+        )
+
+        assertNotNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "org.mozilla.firefox",
+                activeUrl = "reddit.com/search/?q=Tsparis",
+                visibleTexts = screenshotTexts,
+                isBrowser = true
+            )
+        )
+
+        // Even when Compose toolbar URL extraction is null, social context is inferred from Reddit clues
+        assertNotNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "org.mozilla.firefox",
+                activeUrl = null,
+                visibleTexts = screenshotTexts,
+                isBrowser = true
+            )
+        )
+    }
+
+    @Test
+    fun `blocks concatenated 18NSFW badge and Safe Search Off paired with explicit clues without blocking clean searches`() {
+        assertNotNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "org.mozilla.firefox",
+                activeUrl = null,
+                visibleTexts = listOf("u/someone", "(18)NSFW"),
+                isBrowser = true
+            )
+        )
+        assertNotNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "org.mozilla.firefox",
+                activeUrl = "https://www.reddit.com/search/?q=test",
+                visibleTexts = listOf("Safe Search Off", "u/someone", "ts paris sexy ass"),
+                isBrowser = true
+            )
+        )
+        assertNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "org.mozilla.firefox",
+                activeUrl = "https://www.reddit.com/search/?q=kotlin",
+                visibleTexts = listOf("Posts", "Safe Search Off", "Kotlin Coroutines tutorial", "u/kotlin_dev"),
+                isBrowser = true
+            )
+        )
+        assertNotNull(
+            InAppAdultGuard.findAdultClickMatch(
+                eventTexts = listOf("Safe Search Off"),
+                isSocialContext = true
+            )
+        )
+    }
 }

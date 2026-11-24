@@ -47,6 +47,7 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val activeViews = Collections.synchronizedSet(mutableSetOf<View>())
     private var countdownRunnable: Runnable? = null
+    private var pendingExitRunnable: Runnable? = null
 
     @Volatile
     var isFullScreenShowing: Boolean = false
@@ -101,7 +102,13 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
         message: String = "This page is blocked.",
         countdownSeconds: Int = 3,
         redirectUrl: String = "",
+        exitWhileCovered: Boolean = false,
+        primaryButtonLabel: String? = null,
         onBeforeRedirect: () -> Unit = {},
+        onVerifyRedirectSucceeded: ((normalizedRedirect: String) -> Boolean)? = null,
+        onForceExitToHome: (() -> Unit)? = null,
+        isStillInBlockedApp: (() -> Boolean)? = null,
+        onExitComplete: (() -> Unit)? = null,
         onGoBack: () -> Unit = {
             service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
         }
@@ -111,10 +118,101 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                 if (isFullScreenShowing) return@runOnMainThread
                 hideAllImmediate()
 
+                var exitInProgress = false
+                val homeAction = onForceExitToHome ?: {
+                    service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+                    Unit
+                }
+
+                fun forceHomeWhileCovered() {
+                    if (exitInProgress) return
+                    exitInProgress = true
+                    countdownRunnable?.let { mainHandler.removeCallbacks(it) }
+                    countdownRunnable = null
+                    pendingExitRunnable?.let { mainHandler.removeCallbacks(it) }
+                    pendingExitRunnable = null
+
+                    try {
+                        homeAction()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error forcing home exit: ${e.message}")
+                    }
+
+                    val checkRunnable = Runnable {
+                        pendingExitRunnable = null
+                        if (isStillInBlockedApp?.invoke() == true) {
+                            try {
+                                homeAction()
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error retrying home exit: ${e.message}")
+                            }
+                            val finalizeRunnable = Runnable {
+                                pendingExitRunnable = null
+                                hideFullScreenOverlay()
+                                onExitComplete?.invoke()
+                            }
+                            pendingExitRunnable = finalizeRunnable
+                            mainHandler.postDelayed(finalizeRunnable, 260L)
+                        } else {
+                            hideFullScreenOverlay()
+                            onExitComplete?.invoke()
+                        }
+                    }
+                    pendingExitRunnable = checkRunnable
+                    mainHandler.postDelayed(checkRunnable, 280L)
+                }
+
+                fun redirectWhileCovered(targetRedirect: String) {
+                    if (exitInProgress) return
+                    exitInProgress = true
+                    countdownRunnable?.let { mainHandler.removeCallbacks(it) }
+                    countdownRunnable = null
+                    pendingExitRunnable?.let { mainHandler.removeCallbacks(it) }
+                    pendingExitRunnable = null
+
+                    try {
+                        onBeforeRedirect()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error in onBeforeRedirect: ${e.message}")
+                    }
+
+                    if (!handleSafeRedirect(targetRedirect)) {
+                        exitInProgress = false
+                        forceHomeWhileCovered()
+                        return
+                    }
+
+                    val verifyRunnable = Runnable {
+                        pendingExitRunnable = null
+                        val verified = try {
+                            onVerifyRedirectSucceeded?.invoke(targetRedirect) ?: false
+                        } catch (_: Exception) {
+                            false
+                        }
+                        if (verified) {
+                            hideFullScreenOverlay()
+                            onExitComplete?.invoke()
+                        } else {
+                            exitInProgress = false
+                            forceHomeWhileCovered()
+                        }
+                    }
+                    pendingExitRunnable = verifyRunnable
+                    mainHandler.postDelayed(verifyRunnable, 450L)
+                }
+
+                fun triggerPrimaryExit() {
+                    if (exitWhileCovered) {
+                        forceHomeWhileCovered()
+                    } else {
+                        dismissFullScreenAndExecute(onGoBack)
+                    }
+                }
+
                 val root = createOverlayContainer(
-                    bgBlurColor = 0xDD0D0F14.toInt(),
-                    bgSolidColor = 0xFD0D0F14.toInt(),
-                    onBack = { dismissFullScreenAndExecute(onGoBack) }
+                    bgBlurColor = 0xFF0D0F14.toInt(),
+                    bgSolidColor = 0xFF0D0F14.toInt(),
+                    onBack = { triggerPrimaryExit() }
                 )
                 val contentLayout = createOverlayContentColumn()
                 root.addView(
@@ -154,15 +252,21 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                 val displayHost = BlockedScreenConfig.extractDisplayHost(normalizedRedirect)
                 val hasRedirect = normalizedRedirect.isNotBlank() && displayHost.isNotBlank()
                 var currentCountdown = if (countdownSeconds > 0) countdownSeconds else 0
+                val baseLabel = primaryButtonLabel?.takeIf { it.isNotBlank() } ?: "Go Back to Safety"
+                val countdownPrefix = if (exitWhileCovered && !primaryButtonLabel.isNullOrBlank()) {
+                    primaryButtonLabel
+                } else {
+                    "Go Back"
+                }
                 val goBackButton = createPrimaryButton(
                     label = when {
-                        currentCountdown > 0 && !hasRedirect -> "Go Back ($currentCountdown s)"
-                        else -> "Go Back to Safety"
+                        currentCountdown > 0 && !hasRedirect -> "$countdownPrefix ($currentCountdown s)"
+                        else -> baseLabel
                     },
                     widthFraction = 0.82f,
                     bottomMarginDp = 12f
                 ) {
-                    dismissFullScreenAndExecute(onGoBack)
+                    triggerPrimaryExit()
                 }
                 contentLayout.addView(goBackButton.first, goBackButton.second)
 
@@ -187,10 +291,14 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                             setStroke(dpToPx(1f), 0x33FFFFFF.toInt())
                         }
                         setOnClickListener {
-                            dismissFullScreenAndExecute {
-                                onBeforeRedirect()
-                                if (!handleSafeRedirect(normalizedRedirect)) {
-                                    onGoBack()
+                            if (exitWhileCovered) {
+                                redirectWhileCovered(normalizedRedirect)
+                            } else {
+                                dismissFullScreenAndExecute {
+                                    onBeforeRedirect()
+                                    if (!handleSafeRedirect(normalizedRedirect)) {
+                                        onGoBack()
+                                    }
                                 }
                             }
                         }
@@ -208,24 +316,29 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                     val primaryBtn = goBackButton.first
                     countdownRunnable = object : Runnable {
                         override fun run() {
+                            if (exitInProgress) return
                             currentCountdown--
                             if (currentCountdown > 0) {
                                 if (hasRedirect) {
                                     redirectBtn?.text = "Redirecting to $displayHost ($currentCountdown s)"
                                 } else {
-                                    primaryBtn.text = "Go Back ($currentCountdown s)"
+                                    primaryBtn.text = "$countdownPrefix ($currentCountdown s)"
                                 }
                                 mainHandler.postDelayed(this, 1000L)
                             } else {
                                 if (hasRedirect) {
-                                    dismissFullScreenAndExecute {
-                                        onBeforeRedirect()
-                                        if (!handleSafeRedirect(normalizedRedirect)) {
-                                            onGoBack()
+                                    if (exitWhileCovered) {
+                                        redirectWhileCovered(normalizedRedirect)
+                                    } else {
+                                        dismissFullScreenAndExecute {
+                                            onBeforeRedirect()
+                                            if (!handleSafeRedirect(normalizedRedirect)) {
+                                                onGoBack()
+                                            }
                                         }
                                     }
                                 } else {
-                                    dismissFullScreenAndExecute(onGoBack)
+                                    triggerPrimaryExit()
                                 }
                             }
                         }
@@ -576,6 +689,8 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
         runOnMainThread {
             countdownRunnable?.let { mainHandler.removeCallbacks(it) }
             countdownRunnable = null
+            pendingExitRunnable?.let { mainHandler.removeCallbacks(it) }
+            pendingExitRunnable = null
             hideAllImmediate()
             isFullScreenShowing = false
         }
@@ -590,6 +705,8 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
     private fun hideAllImmediate() {
         countdownRunnable?.let { mainHandler.removeCallbacks(it) }
         countdownRunnable = null
+        pendingExitRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingExitRunnable = null
 
         synchronized(activeViews) {
             val iterator = activeViews.iterator()
@@ -637,7 +754,7 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
             if ((scheme != "http" && scheme != "https") || host.isNullOrBlank()) return false
 
             val intent = Intent(Intent.ACTION_VIEW, parsed).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
             }
             service.startActivity(intent)
             true

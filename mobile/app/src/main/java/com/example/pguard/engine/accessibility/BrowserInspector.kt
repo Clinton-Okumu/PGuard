@@ -17,6 +17,11 @@ object BrowserInspector {
         val isTrustedAddressBar: Boolean
     )
 
+    data class CollectedScreenContent(
+        val texts: List<String>,
+        val viewIds: List<String>
+    )
+
     /**
      * Verified supported browsers:
      * 1. Google Chrome
@@ -449,6 +454,8 @@ object BrowserInspector {
             lower.endsWith("url_field") ||
             lower.endsWith("search_box_text") ||
             lower.endsWith("location_bar_edit_text") ||
+            lower.contains("toolbar_url") ||
+            lower.contains("awesomebar") ||
             lower.contains("omnibar")
     }
 
@@ -554,47 +561,108 @@ object BrowserInspector {
         extractUrlInfo(rootNode, event, allowFallbackTraversal = false)?.value
 
     /**
+     * Multi-window BFS collector capturing visible text, content descriptions, state descriptions,
+     * pane titles, tooltips, and view resource IDs across activity windows, dialogs, and shadow DOMs.
+     * Prioritizes visible-to-user text first so hidden navigation drawers do not crowd out page results.
+     */
+    fun collectVisibleWindowContent(
+        roots: List<AccessibilityNodeInfo>,
+        maxDepth: Int = 64,
+        maxItems: Int = 450,
+        maxVisitedNodes: Int = 2500
+    ): CollectedScreenContent {
+        if (roots.isEmpty()) return CollectedScreenContent(emptyList(), emptyList())
+        val visibleTexts = LinkedHashSet<String>()
+        val fallbackTexts = LinkedHashSet<String>()
+        val viewIdsOut = LinkedHashSet<String>()
+        val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
+        var visited = 0
+
+        for (root in roots.distinct()) {
+            queue.addLast(root to 0)
+        }
+
+        while (queue.isNotEmpty() && visited < maxVisitedNodes) {
+            if (visibleTexts.size >= maxItems && viewIdsOut.size >= maxItems) break
+            val (node, depth) = queue.removeFirst()
+            visited++
+
+            val viewId = node.viewIdResourceName?.trim()
+            if (!viewId.isNullOrBlank() && viewIdsOut.size < maxItems) {
+                viewIdsOut.add(viewId)
+            }
+
+            val isVisible = try {
+                node.isVisibleToUser
+            } catch (_: Exception) {
+                true
+            }
+            val textBucket = if (isVisible) visibleTexts else fallbackTexts
+
+            fun recordText(raw: CharSequence?) {
+                val value = raw?.toString()?.trim()
+                if (!value.isNullOrBlank() && !isIgnoredPlaceholder(value) && textBucket.size < maxItems) {
+                    textBucket.add(value)
+                }
+            }
+
+            recordText(node.text)
+            recordText(node.contentDescription)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                recordText(node.stateDescription)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                recordText(node.paneTitle)
+                recordText(node.tooltipText)
+            }
+
+            if (depth < maxDepth) {
+                val count = node.childCount
+                for (i in 0 until count) {
+                    val child = node.getChild(i) ?: continue
+                    queue.addLast(child to (depth + 1))
+                }
+            }
+        }
+
+        val combinedTexts = LinkedHashSet<String>(visibleTexts.size + fallbackTexts.size)
+        for (text in visibleTexts) {
+            if (combinedTexts.size >= maxItems) break
+            combinedTexts.add(text)
+        }
+        if (combinedTexts.size < maxItems) {
+            for (text in fallbackTexts) {
+                if (combinedTexts.size >= maxItems) break
+                combinedTexts.add(text)
+            }
+        }
+        return CollectedScreenContent(combinedTexts.toList(), viewIdsOut.toList())
+    }
+
+    /**
+     * Collects text, content descriptions, and state descriptions from a tapped container
+     * node and its immediate children (e.g., clickable Reddit post or search result rows).
+     */
+    fun collectSubtreeTexts(
+        node: AccessibilityNodeInfo?,
+        maxDepth: Int = 6,
+        maxItems: Int = 25
+    ): List<String> {
+        if (node == null) return emptyList()
+        return collectVisibleWindowContent(listOf(node), maxDepth = maxDepth, maxItems = maxItems).texts
+    }
+
+    /**
      * Single-pass bounded collector of visible browser texts so callers can evaluate
      * blocklists and multi-signal adult scoring without redundant IPC lookups.
      */
     fun collectVisibleWebTexts(
         rootNode: AccessibilityNodeInfo?,
-        maxDepth: Int = 30,
-        maxItems: Int = 200
+        maxDepth: Int = 64,
+        maxItems: Int = 450
     ): List<String> {
         if (rootNode == null) return emptyList()
-        val out = LinkedHashSet<String>()
-        collectTextsRecursive(rootNode, depth = 0, maxDepth = maxDepth, maxItems = maxItems, out = out)
-        return out.toList()
-    }
-
-    private fun collectTextsRecursive(
-        node: AccessibilityNodeInfo?,
-        depth: Int,
-        maxDepth: Int,
-        maxItems: Int,
-        out: MutableSet<String>
-    ) {
-        if (node == null || depth > maxDepth || out.size >= maxItems) return
-
-        val text = node.text?.toString()?.trim()
-        if (!text.isNullOrBlank() && !isIgnoredPlaceholder(text)) {
-            out.add(text)
-        }
-        if (out.size >= maxItems) return
-
-        val desc = node.contentDescription?.toString()?.trim()
-        if (!desc.isNullOrBlank() && !isIgnoredPlaceholder(desc)) {
-            out.add(desc)
-        }
-        if (out.size >= maxItems) return
-
-        val count = node.childCount
-        for (i in 0 until count) {
-            val child = node.getChild(i) ?: continue
-            collectTextsRecursive(child, depth + 1, maxDepth, maxItems, out)
-            if (out.size >= maxItems) break
-        }
+        return collectVisibleWindowContent(listOf(rootNode), maxDepth = maxDepth, maxItems = maxItems).texts
     }
 
     /**

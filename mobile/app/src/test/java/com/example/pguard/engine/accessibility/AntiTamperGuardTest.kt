@@ -254,4 +254,66 @@ class AntiTamperGuardTest {
             )
         )
     }
+
+    @Test
+    fun `blocks MIUI App Info screen even when Autostart and App permissions rows are visible and bottom bar is separate`() {
+        val miuiAppInfoTexts = listOf(
+            "App info",
+            "PGuard",
+            "Version 1.0",
+            "Storage",
+            "Data usage",
+            "Battery saver",
+            "Autostart",
+            "Notifications",
+            "App permissions",
+            "Other permissions"
+        )
+
+        assertTrue(
+            AntiTamperGuard.shouldBlockScreenTexts(
+                pkg = "com.miui.securitycenter",
+                appPackageName = "com.example.pguard",
+                visibleTexts = miuiAppInfoTexts,
+                isAccessibilityServiceRunning = true
+            )
+        )
+    }
+
+    @Test
+    fun `blocks launcher uninstall dialog targeting PGuard while allowing home screen and other app uninstalls`() {
+        assertTrue(
+            AntiTamperGuard.shouldBlockLauncherUninstall(
+                appPackageName = "com.example.pguard",
+                visibleTexts = listOf("Uninstall PGuard?", "App info", "Uninstall", "Cancel")
+            )
+        )
+        assertFalse(
+            AntiTamperGuard.shouldBlockLauncherUninstall(
+                appPackageName = "com.example.pguard",
+                visibleTexts = listOf("Uninstall Spotify?", "Uninstall", "Cancel")
+            )
+        )
+        assertFalse(
+            AntiTamperGuard.shouldBlockLauncherUninstall(
+                appPackageName = "com.example.pguard",
+                visibleTexts = listOf(
+                    "Phone", "Messages", "Camera", "Gallery", "Settings", "Chrome",
+                    "YouTube", "WhatsApp", "PGuard", "Play Store", "Gmail", "Maps", "Uninstall"
+                )
+            )
+        )
+    }
+
+    @Test
+    fun `recognizes OEM tamper and launcher packages`() {
+        assertTrue(AntiTamperGuard.isTamperPackage("com.miui.securitycenter"))
+        assertTrue(AntiTamperGuard.isTamperPackage("com.oplus.appdetail"))
+        assertTrue(AntiTamperGuard.isTamperPackage("com.coloros.safecenter"))
+        assertTrue(AntiTamperGuard.isTamperPackage("com.huawei.systemmanager"))
+        assertTrue(AntiTamperGuard.isTamperPackage("com.samsung.android.lool"))
+        assertTrue(AntiTamperGuard.isLauncherPackage("com.miui.home"))
+        assertTrue(AntiTamperGuard.isLauncherPackage("com.mi.android.globallauncher"))
+        assertFalse(AntiTamperGuard.isLauncherPackage("com.android.chrome"))
+    }
 }

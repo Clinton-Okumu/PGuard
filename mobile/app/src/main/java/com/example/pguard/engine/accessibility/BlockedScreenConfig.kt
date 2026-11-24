@@ -130,6 +130,34 @@ object BlockedScreenConfig {
         }
     }
 
+    fun hasNavigatedToSafeRedirect(currentUrl: String?, expectedRedirectUrl: String): Boolean {
+        val expectedHost = extractDisplayHost(expectedRedirectUrl)
+            .trim()
+            .trimEnd('.')
+            .lowercase(Locale.ROOT)
+        if (expectedHost.isEmpty() || !expectedHost.contains('.')) return false
+
+        val rawCurrent = currentUrl?.trim().orEmpty()
+        if (rawCurrent.isEmpty()) return false
+        val withoutScheme = when {
+            rawCurrent.startsWith("http://", ignoreCase = true) -> rawCurrent.substringAfter("://")
+            rawCurrent.startsWith("https://", ignoreCase = true) -> rawCurrent.substringAfter("://")
+            else -> rawCurrent
+        }
+        val currentHost = withoutScheme
+            .substringBefore('/')
+            .substringBefore('?')
+            .substringBefore('#')
+            .substringBefore(':')
+            .trim()
+            .trimEnd('.')
+            .lowercase(Locale.ROOT)
+            .removePrefix("www.")
+        if (currentHost.isEmpty() || currentHost.any(Char::isWhitespace)) return false
+
+        return currentHost == expectedHost || currentHost.endsWith(".$expectedHost")
+    }
+
     fun resolveOverlayMessage(customMessage: String, defaultFallback: String): String {
         val trimmed = customMessage.trim()
         return if (trimmed.isNotEmpty() && !trimmed.equals(DEFAULT_MESSAGE, ignoreCase = true)) {

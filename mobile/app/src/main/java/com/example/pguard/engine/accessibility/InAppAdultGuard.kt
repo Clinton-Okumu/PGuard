@@ -154,10 +154,93 @@ object InAppAdultGuard {
         "yiff",
         "ahegao",
         "slut",
-        "whore"
+        "whore",
+        "shemale",
+        "ladyboy",
+        "tranny",
+        "transporn",
+        "sissy",
+        "femboy",
+        "bukkake",
+        "creampie",
+        "deepthroat",
+        "gangbang",
+        "threesome",
+        "orgasm",
+        "masturbat",
+        "dildo",
+        "vibrator",
+        "bondage",
+        "femdom",
+        "findom",
+        "footfetish",
+        "upskirt",
+        "voyeur",
+        "exhibitionist",
+        "incest",
+        "barelylegal",
+        "horny",
+        "erotic",
+        "xxx",
+        "sext",
+        "dickpic",
+        "titdrop",
+        "boobjob",
+        "paizuri",
+        "futanari",
+        "doujin",
+        "nhentai",
+        "pornhub",
+        "xvideos",
+        "chaturbate",
+        "fansly",
+        "manyvids",
+        "bongacams",
+        "stripchat",
+        "bbw",
+        "pawg",
+        "gilf",
+        "dilf",
+        "pegging",
+        "fisting",
+        "squirt",
+        "titfuck",
+        "facefuck",
+        "buttplug",
+        "rimjob",
+        "strapon",
+        "gloryhole",
+        "cumshot",
+        "gooning",
+        "gooncave"
     )
 
     private val CURATED_NSFW_SUBREDDITS = setOf(
+        "ass",
+        "bigasses",
+        "booty",
+        "sexy",
+        "sex",
+        "naked",
+        "breasts",
+        "bigtits",
+        "smallboobs",
+        "busty",
+        "curvy",
+        "amateur",
+        "homemadexxx",
+        "girlsfinishingthejob",
+        "grool",
+        "hardcore",
+        "lesbians",
+        "gaybrosgonewild",
+        "femboys",
+        "jav",
+        "gooning",
+        "gooncaves",
+        "barelylegal",
+        "gonewild",
+        "gw",
         "realgirls",
         "gwcouples",
         "bustypetite",
@@ -184,60 +267,107 @@ object InAppAdultGuard {
         "celebnsfw"
     )
 
+    private val ADULT_VIEW_ID_TOKENS = setOf(
+        "nsfw",
+        "over_18",
+        "over18",
+        "mature_content",
+        "mature_badge",
+        "mature_tag",
+        "age_gate",
+        "sensitive_media",
+        "sensitive_content",
+        "adult_content"
+    )
+
     internal val SUBREDDIT_REGEX = Regex(
         """(?<![\p{L}\p{N}_])/?r/([a-z0-9_]{2,})""",
         RegexOption.IGNORE_CASE
     )
+    private val REDDIT_USER_REGEX = Regex(
+        """(?<![\p{L}\p{N}_])/?u/[a-z0-9_\-]{2,}""",
+        RegexOption.IGNORE_CASE
+    )
     private val MULTI_SPACE_REGEX = Regex("""\s{2,}""")
-    internal val NSFW_WORD_REGEX = Regex("""\bnsfw\b""", RegexOption.IGNORE_CASE)
+    internal val NSFW_WORD_REGEX = Regex("""(?<![\p{L}])nsfw(?![\p{L}])""", RegexOption.IGNORE_CASE)
 
-    private val STANDALONE_NSFW_REGEX = Regex(
-        """^(?:nsfw(?:\s*[•·|\-].*)?|.*[•·|\-]\s*nsfw)$""",
+    private val TOKEN_18_PLUS_REGEX = Regex(
+        """(?<![\p{L}\p{N}])18\+(?![\p{L}\p{N}])"""
+    )
+
+    private val SOCIAL_MATURE_TAG_REGEX = Regex(
+        """^(?:mature(?:\s*[•·|\-].*)?|.*[•·|\-]\s*mature|content\s+warning)$|\bover\s+18\b""",
         RegexOption.IGNORE_CASE
     )
 
-    private val STANDALONE_18_PLUS_REGEX = Regex(
-        """^(?:18\+(?:\s*[•·|\-].*)?|.*[•·|\-]\s*18\+)$""",
+    private val SAFE_SEARCH_OFF_REGEX = Regex(
+        """\bsafe\s*search\s*:?\s*off\b""",
         RegexOption.IGNORE_CASE
     )
 
-    private val SOCIAL_MATURE_BADGE_REGEX = Regex(
-        """^(?:mature\s+content|mature\s*\(18\+\)|sensitive\s+content|over\s+18)$""",
+    private val SOCIAL_EXPLICIT_PHRASE_REGEX = Regex(
+        """\bsexy\s+(?:ass|asses|boobs?|tits?|pussy|cock|dick|nudes?|naked|girls?|babes?|videos?|pics?)\b|\bstroke\s+and\s+poke\b""",
         RegexOption.IGNORE_CASE
+    )
+
+    private val INPUT_MATURE_PATTERNS = listOf(
+        NSFW_WORD_REGEX,
+        Regex("""\b(?:mature|adult|18\+)\s+content\b""", RegexOption.IGNORE_CASE)
+    )
+
+    private val PASSIVE_SETTINGS_TOGGLE_PREFIXES = listOf(
+        "show mature content",
+        "blur mature",
+        "display media that may contain sensitive content",
+        "mark media you post as containing material that may be sensitive",
+        "allow access to age-restricted"
     )
 
     private val CLICK_NSFW_GATE_PATTERNS = listOf(
+        NSFW_WORD_REGEX,
         Regex("""\byes,\s*i['’]?m\s+over\s+18\b""", RegexOption.IGNORE_CASE),
         Regex("""\byes,\s*i\s+am\s+over\s+18\b""", RegexOption.IGNORE_CASE),
         Regex("""\bi\s+am\s+18\s+or\s+older\b""", RegexOption.IGNORE_CASE),
         Regex("""\bi['’]?m\s+over\s+18\b""", RegexOption.IGNORE_CASE),
         Regex("""\bconfirm\s+(?:you\s+are\s+)?over\s+18\b""", RegexOption.IGNORE_CASE),
         Regex("""\byes,\s*view\s+profile\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:view|see|show|continue\s+to|include)\s+nsfw\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:tap|click|press)\s+to\s+unblur\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bunblur\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:view|see|show|continue\s+to|include)\s+(?:nsfw|mature|sensitive)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bblur\s+mature\b""", RegexOption.IGNORE_CASE),
         Regex("""\bshow\s+mature\s+content\b""", RegexOption.IGNORE_CASE),
         Regex("""\binclude\s+nsfw\s+results\b""", RegexOption.IGNORE_CASE),
-        Regex("""\ballow\s+access\s+to\s+age-restricted\b""", RegexOption.IGNORE_CASE),
+        Regex("""\ballow\s+access\s+to\s+age[\s\-]?restricted\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bage[\s\-]?restricted\b""", RegexOption.IGNORE_CASE),
         Regex("""\bdisplay\s+media\s+that\s+may\s+contain\s+sensitive\s+content\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:view|show)\s+sensitive\s+content\b""", RegexOption.IGNORE_CASE)
+        Regex("""\b(?:potentially\s+)?sensitive\s+(?:content|media|material)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:view|show)\s+sensitive\s+content\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:turn\s+off|disable)\s+safe\s*search\b|\bsafe\s*search\s*:?\s*off\b""", RegexOption.IGNORE_CASE)
     )
 
     private val UNIVERSAL_NSFW_SCREEN_PATTERNS = listOf(
-        STANDALONE_NSFW_REGEX,
+        NSFW_WORD_REGEX,
         Regex("""\bmarked\s+as\s+nsfw\b""", RegexOption.IGNORE_CASE),
-        Regex("""\bnsfw\s+(?:community|channel|post|content|results|server|feed|profile|18\+)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bmature\s+(?:content|media|posts?|communit(?:y|ies)|profile|account|audience|themes?|material|warning|filter|results|channel|feed|videos?|images?|photos?)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:marked|flagged|labeled|tagged)\s+as\s+(?:mature|adult|explicit|sensitive|nsfw|18\+)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:contains?|includes?|features?)\s+(?:mature|adult|explicit|nsfw|18\+|sexually\s+explicit)\s+(?:content|media|material|themes?|imagery)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:tap|click|press)\s+to\s+(?:unblur|(?:view|see|reveal|show)\s+(?:mature|nsfw|sensitive|adult|18\+|explicit))\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:blurred|hidden)\s+(?:because|due\s+to|for)\b.*\b(?:mature|nsfw|sensitive|adult|18\+|explicit)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bcontent\s+warning\b.*\b(?:adult|nudity|sexual|mature|nsfw|sensitive|18\+|explicit)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:potentially\s+)?sensitive\s+(?:content|media|material)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:adult|explicit)\s+(?:content|media|material|only|warning|profile|community|channel)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\bage[\s\-]?restricted\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:you\s+must\s+be\s+(?:at\s+least\s+)?18(?:\+|(?:\s+or\s+older))?|confirm\s+(?:you\s+are\s+)?over\s+18|are\s+you\s+(?:18\s+or\s+older|over\s+18)|yes,?\s*i['’]?(?:m|\s+am)\s+(?:over\s+18|18\s+or\s+older)|i\s+am\s+18\s+or\s+older|must\s+be\s+18\+)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b18\+\s*(?:only|content|community|channel|nsfw|mature|adult|media|post|profile|warning|restricted)\b""", RegexOption.IGNORE_CASE),
+        Regex("""\b(?:mature|adult|nsfw|explicit)\s*\(?18\+\)?\b""", RegexOption.IGNORE_CASE),
         Regex("""\bthis\s+community\s+is\s+marked\s+as\s+mature\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:you\s+must\s+be\s+(?:at\s+least\s+)?18(?:\+|(?:\s+or\s+older))?(?:\s+to\s+view)?)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b(?:confirm\s+you\s+are\s+over\s+18|are\s+you\s+18\s+or\s+older)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\byes,\s*i['’]?m\s+over\s+18\b""", RegexOption.IGNORE_CASE),
-        Regex("""\byes,\s*i\s+am\s+over\s+18\b""", RegexOption.IGNORE_CASE),
-        Regex("""\bi\s+am\s+18\s+or\s+older\b""", RegexOption.IGNORE_CASE),
-        Regex("""\bage-restricted\s+(?:channel|content|community|server|profile)\b""", RegexOption.IGNORE_CASE),
-        Regex("""\bpotentially\s+sensitive\s+content\b""", RegexOption.IGNORE_CASE),
-        Regex("""\bmay\s+contain\s+sensitive\s+material\b""", RegexOption.IGNORE_CASE),
-        Regex("""\bused\s+to\s+spread\s+pornographic\b""", RegexOption.IGNORE_CASE),
-        Regex("""\badult\s+content\s+warning\b""", RegexOption.IGNORE_CASE),
-        Regex("""\b18\+\s*(?:only|content|community|channel|nsfw)\b""", RegexOption.IGNORE_CASE)
+        Regex("""\bused\s+to\s+spread\s+pornographic\b""", RegexOption.IGNORE_CASE)
     )
+
+    private fun isPassiveSettingsToggleLabel(text: String): Boolean {
+        val lower = text.trim().lowercase(Locale.ROOT)
+        return PASSIVE_SETTINGS_TOGGLE_PREFIXES.any { lower.startsWith(it) || lower.contains(it) }
+    }
 
     fun isExcludedFromInAppAdultScan(packageName: String, ownPackageName: String): Boolean {
         val pkg = packageName.trim().lowercase(Locale.ROOT)
@@ -333,7 +463,7 @@ object InAppAdultGuard {
 
         val cleaned = stripSfwRedditSubreddits(trimmed)
         if (cleaned.isBlank()) return null
-        if (NSFW_WORD_REGEX.containsMatchIn(cleaned)) return trimmed
+        if (INPUT_MATURE_PATTERNS.any { it.containsMatchIn(cleaned) }) return trimmed
         if (contentFilter.isAdultContent(cleaned)) return trimmed
         if (customBlocklist.isNotEmpty() && contentFilter.matchesCustomBlocklist(cleaned, customBlocklist)) {
             return trimmed
@@ -354,24 +484,57 @@ object InAppAdultGuard {
             if (isSfwRedditPornSubreddit(trimmed, contentFilter)) continue
 
             if (matchesExplicitSubreddit(trimmed)) return trimmed
-            if (STANDALONE_NSFW_REGEX.matches(trimmed)) return trimmed
             if (CLICK_NSFW_GATE_PATTERNS.any { it.containsMatchIn(trimmed) }) return trimmed
-            if (isSocialContext && STANDALONE_18_PLUS_REGEX.matches(trimmed)) return trimmed
+            if (isSocialContext && (TOKEN_18_PLUS_REGEX.containsMatchIn(trimmed) || SOCIAL_MATURE_TAG_REGEX.containsMatchIn(trimmed))) {
+                return trimmed
+            }
             if (contentFilter.isAdultContent(trimmed)) return trimmed
         }
         return null
+    }
+
+    fun isAdultViewId(viewId: String?): Boolean {
+        if (viewId.isNullOrBlank()) return false
+        val lower = viewId.trim().lowercase(Locale.ROOT)
+        val suffix = lower.substringAfter(":id/", lower)
+        if (suffix in ADULT_VIEW_ID_TOKENS) return true
+        return ADULT_VIEW_ID_TOKENS.any { token ->
+            suffix.contains("_$token") || suffix.contains("${token}_")
+        }
     }
 
     fun findAdultScreenMatch(
         packageName: String,
         activeUrl: String?,
         visibleTexts: Collection<String>,
+        viewIds: Collection<String> = emptyList(),
         isBrowser: Boolean = false,
         contentFilter: ContentFilter = ContentFilter.Default,
         whitelist: Collection<String> = emptyList()
     ): String? {
+        for (viewId in viewIds) {
+            if (isAdultViewId(viewId) && !contentFilter.matchesWhitelist(viewId, whitelist)) {
+                return "NSFW badge"
+            }
+        }
         if (visibleTexts.isEmpty()) return null
-        val isSocialContext = isSocialOrCommunityApp(packageName) || (isBrowser && isSocialOrCommunityUrl(activeUrl))
+        val inferredSocialContext = isSocialOrCommunityApp(packageName) ||
+            (isBrowser && isSocialOrCommunityUrl(activeUrl)) ||
+            (isBrowser && visibleTexts.any { raw ->
+                val t = raw.trim()
+                t.isNotEmpty() && (
+                    isSocialOrCommunityUrl(t) ||
+                        t.contains("reddit.com/", ignoreCase = true) ||
+                        t.contains("x.com/", ignoreCase = true) ||
+                        t.contains("twitter.com/", ignoreCase = true) ||
+                        t.contains("discord.com/", ignoreCase = true) ||
+                        SUBREDDIT_REGEX.containsMatchIn(t) ||
+                        REDDIT_USER_REGEX.containsMatchIn(t)
+                    )
+            })
+
+        var hasSafeSearchOff = false
+        var socialAdultClueMatch: String? = null
 
         val scannable = ArrayList<String>(visibleTexts.size)
         for (raw in visibleTexts) {
@@ -379,15 +542,30 @@ object InAppAdultGuard {
             if (trimmed.isEmpty()) continue
             if (contentFilter.matchesWhitelist(trimmed, whitelist)) continue
             if (isSfwRedditPornSubreddit(trimmed, contentFilter)) continue
+            if (isPassiveSettingsToggleLabel(trimmed)) continue
 
             if (matchesExplicitSubreddit(trimmed)) return trimmed
             if (UNIVERSAL_NSFW_SCREEN_PATTERNS.any { it.containsMatchIn(trimmed) }) return trimmed
-            if (isSocialContext) {
-                if (STANDALONE_18_PLUS_REGEX.matches(trimmed) || SOCIAL_MATURE_BADGE_REGEX.matches(trimmed)) {
+            if (inferredSocialContext) {
+                if (TOKEN_18_PLUS_REGEX.containsMatchIn(trimmed) || SOCIAL_MATURE_TAG_REGEX.containsMatchIn(trimmed)) {
                     return trimmed
+                }
+                if (SAFE_SEARCH_OFF_REGEX.containsMatchIn(trimmed)) {
+                    hasSafeSearchOff = true
+                }
+                if (socialAdultClueMatch == null && (
+                        SOCIAL_EXPLICIT_PHRASE_REGEX.containsMatchIn(trimmed) ||
+                            ContentFilter.CONTEXTUAL_ADULT_PATTERNS.any { it.containsMatchIn(trimmed) }
+                        )
+                ) {
+                    socialAdultClueMatch = trimmed
                 }
             }
             scannable.add(trimmed)
+        }
+
+        if (inferredSocialContext && hasSafeSearchOff && socialAdultClueMatch != null) {
+            return socialAdultClueMatch
         }
 
         if (scannable.isEmpty()) return null

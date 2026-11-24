@@ -403,6 +403,7 @@ class ContentFilter(
             Regex("""\borgasms?\b"""),
             Regex("""\bthree\s?somes?\b"""),
             Regex("""\b(?:nude|nudes|nudity|naked)\b"""),
+            Regex("""\bsexy\s+(?:ass|asses|boobs?|tits?|pussy|cock|dick|nudes?|naked)\b""", RegexOption.IGNORE_CASE),
         )
 
         private val DEFAULT_ADULT_PATTERNS = STRONG_ADULT_PATTERNS + CONTEXTUAL_ADULT_PATTERNS

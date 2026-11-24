@@ -35,7 +35,12 @@ class PGuardAccessibilityService : AccessibilityService() {
         private const val INSTAGRAM_COOLDOWN_MS = 1200L
         private const val TIKTOK_COOLDOWN_MS = 1500L
         private const val DEEP_SCAN_THROTTLE_MS = 250L
-        private const val IN_APP_ADULT_SCAN_THROTTLE_MS = 400L
+        private const val IN_APP_ADULT_SCAN_THROTTLE_MS = 350L
+        private const val IN_APP_SETTLE_DELAY_MS = 850L
+        private const val BROWSER_SETTLE_DELAY_FAST_MS = 900L
+        private const val BROWSER_SETTLE_DELAY_SLOW_MS = 2000L
+        private const val ANTI_TAMPER_COOLDOWN_MS = 400L
+        private const val ANTI_TAMPER_TOAST_COOLDOWN_MS = 2500L
         private const val VPN_WATCHDOG_INTERVAL_MS = 60_000L
         private const val MAX_INSTALL_TIME_CACHE_SIZE = 512
         private val installTimeCache = ConcurrentHashMap<String, Long>()
@@ -186,17 +191,24 @@ class PGuardAccessibilityService : AccessibilityService() {
     private var lastInstagramBlockedTimestamp: Long = 0L
     private var lastTikTokBlockedTimestamp: Long = 0L
     private var lastAntiTamperBlockedTimestamp: Long = 0L
+    private var lastAntiTamperToastTimestamp: Long = 0L
     private var lastUnsupportedBrowserBlockedTimestamp: Long = 0L
     private var lastAppBlockedTimestamp: Long = 0L
     private var lastFocusBlockedTimestamp: Long = 0L
     private var lastUrgeBlockedTimestamp: Long = 0L
 
     private var lastBrowserDeepScanMs: Long = 0L
+    private var lastBrowserUrl: String? = null
     private var lastInAppAdultScanMs: Long = 0L
     private var lastVpnWatchdogCheckMs: Long = 0L
     private var lastSocialHierarchyScanMs: Long = 0L
 
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var pendingInAppScanRunnable: Runnable? = null
+    private var pendingInAppSettleRunnable: Runnable? = null
+    private var pendingBrowserScanRunnable: Runnable? = null
+    private var pendingBrowserSettleFastRunnable: Runnable? = null
+    private var pendingBrowserSettleSlowRunnable: Runnable? = null
     val overlayManager by lazy { AccessibilityOverlayManager(this) }
     private val dynamicInstallReceiver = com.example.pguard.engine.receiver.NewAppInstallReceiver()
 
@@ -223,10 +235,10 @@ class PGuardAccessibilityService : AccessibilityService() {
         FocusModeManager.init(this)
 
         val info = serviceInfo ?: android.accessibilityservice.AccessibilityServiceInfo()
-        info.flags = (info.flags and
-            android.accessibilityservice.AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS.inv() and
-            android.accessibilityservice.AccessibilityServiceInfo.FLAG_REQUEST_ENHANCED_WEB_ACCESSIBILITY.inv()) or
+        info.flags = info.flags or
+            android.accessibilityservice.AccessibilityServiceInfo.FLAG_REQUEST_ENHANCED_WEB_ACCESSIBILITY or
             android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS or
+            android.accessibilityservice.AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
             android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
         serviceInfo = info
 
@@ -276,7 +288,9 @@ class PGuardAccessibilityService : AccessibilityService() {
         }
 
         // 1. Anti-Tamper / Uninstall Protection (never suppressed, highest non-lockdown priority)
-        if (isUninstallProtectionEnabled && AntiTamperGuard.isTamperPackage(packageName)) {
+        if (isUninstallProtectionEnabled &&
+            (AntiTamperGuard.isTamperPackage(packageName) || AntiTamperGuard.isLauncherPackage(packageName))
+        ) {
             if (inspectTamperAndUninstall(event)) {
                 return
             }
@@ -369,14 +383,17 @@ class PGuardAccessibilityService : AccessibilityService() {
         // Never inspect password inputs
         if (event.isPassword || event.source?.isPassword == true) return
 
-        // Fast Path A: Editable text input / search bars in any app
+        // Fast Path A: Editable text input / search bars in any app (check all text sources, not only placeholder)
         val source = event.source
         val isEditableInput = event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED ||
             (source?.className?.toString()?.contains("EditText", ignoreCase = true) == true)
         if (isEditableInput) {
-            val inputCandidate = source?.text?.toString()?.takeIf { it.isNotBlank() }
-                ?: extractEventText(event)
-            if (inputCandidate.isNotBlank()) {
+            val inputCandidates = buildList {
+                source?.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { add(it) }
+                event.text.joinToString(" ").trim().takeIf { it.isNotEmpty() }?.let { add(it) }
+                extractEventText(event).trim().takeIf { it.isNotEmpty() }?.let { add(it) }
+            }.distinct()
+            for (inputCandidate in inputCandidates) {
                 val match = if (isAdultBlockingEnabled) {
                     InAppAdultGuard.findAdultInputMatch(
                         inputText = inputCandidate,
@@ -399,14 +416,15 @@ class PGuardAccessibilityService : AccessibilityService() {
             }
         }
 
-        // Fast Path B: Clicks on explicit subreddits, NSFW badges, or "Yes, I'm over 18" gates
+        // Fast Path B: Clicks on explicit subreddits, NSFW badges, search result rows, or "Yes, I'm over 18" gates
         if (isAdultBlockingEnabled && event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
             val clickCandidates = buildList {
                 event.text.forEach { if (!it.isNullOrBlank()) add(it.toString()) }
                 event.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { add(it) }
                 source?.text?.toString()?.takeIf { it.isNotBlank() }?.let { add(it) }
                 source?.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { add(it) }
-            }
+                addAll(BrowserInspector.collectSubtreeTexts(source, maxDepth = 6, maxItems = 25))
+            }.distinct()
             val clickMatch = InAppAdultGuard.findAdultClickMatch(
                 eventTexts = clickCandidates,
                 isSocialContext = InAppAdultGuard.isSocialOrCommunityApp(packageName),
@@ -438,7 +456,7 @@ class PGuardAccessibilityService : AccessibilityService() {
             }
         }
 
-        // Throttled visible hierarchy scan on window transitions, scrolls, and content updates
+        // Leading + trailing debounce hierarchy scan on window transitions, scrolls, and content updates
         val eventType = event.eventType
         if (eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
             eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
@@ -448,18 +466,43 @@ class PGuardAccessibilityService : AccessibilityService() {
         }
 
         val now = System.currentTimeMillis()
-        if ((now - lastInAppAdultScanMs) < IN_APP_ADULT_SCAN_THROTTLE_MS) return
-        lastInAppAdultScanMs = now
+        val elapsed = now - lastInAppAdultScanMs
+        if (elapsed < IN_APP_ADULT_SCAN_THROTTLE_MS) {
+            scheduleTrailingInAppScan(
+                packageName = packageName,
+                isWebView = isWebView,
+                delayMs = (IN_APP_ADULT_SCAN_THROTTLE_MS - elapsed).coerceAtLeast(60L)
+            )
+        } else {
+            pendingInAppScanRunnable?.let { mainHandler.removeCallbacks(it) }
+            pendingInAppScanRunnable = null
+            lastInAppAdultScanMs = now
+            if (runInAppHierarchyScan(packageName = packageName, event = event, isWebView = isWebView)) {
+                return
+            }
+        }
 
-        val rootNode = findRootNode(event) ?: return
-        val visibleTexts = BrowserInspector.collectVisibleWebTexts(rootNode, maxDepth = 18, maxItems = 90)
-        if (visibleTexts.isEmpty()) return
+        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            scheduleSettleInAppScan(packageName = packageName, isWebView = isWebView)
+        }
+    }
+
+    private fun runInAppHierarchyScan(
+        packageName: String,
+        event: AccessibilityEvent? = null,
+        isWebView: Boolean = false
+    ): Boolean {
+        val roots = findAllAppRootNodes(event, packageName)
+        if (roots.isEmpty()) return false
+        val collected = BrowserInspector.collectVisibleWindowContent(roots, maxDepth = 36, maxItems = 220)
+        if (collected.texts.isEmpty() && collected.viewIds.isEmpty()) return false
 
         if (isAdultBlockingEnabled) {
             val adultMatch = InAppAdultGuard.findAdultScreenMatch(
                 packageName = packageName,
                 activeUrl = null,
-                visibleTexts = visibleTexts,
+                visibleTexts = collected.texts,
+                viewIds = collected.viewIds,
                 isBrowser = false,
                 contentFilter = contentFilter,
                 whitelist = whitelistedKeywords
@@ -467,22 +510,53 @@ class PGuardAccessibilityService : AccessibilityService() {
             if (adultMatch != null) {
                 Log.w(TAG, "In-app adult screen block in $packageName: $adultMatch")
                 triggerBlock(adultMatch, packageName, scopePrefix = "inapp")
-                return
+                return true
             }
         }
 
         if (customBlocklist.isNotEmpty()) {
-            for (txt in visibleTexts) {
+            for (txt in collected.texts) {
                 if ((txt.contains('.') || isWebView) &&
                     !contentFilter.matchesWhitelist(txt, whitelistedKeywords) &&
                     contentFilter.matchesCustomBlocklist(txt, customBlocklist)
                 ) {
                     Log.w(TAG, "In-app custom blocklist match in $packageName: $txt")
                     triggerBlock(txt, packageName, scopePrefix = "inapp")
-                    return
+                    return true
                 }
             }
         }
+        return false
+    }
+
+    private fun scheduleTrailingInAppScan(packageName: String, isWebView: Boolean, delayMs: Long) {
+        pendingInAppScanRunnable?.let { mainHandler.removeCallbacks(it) }
+        val runnable = Runnable {
+            pendingInAppScanRunnable = null
+            if (overlayManager.isOverlayCurrentlyAttached()) return@Runnable
+            if (isScopeSuppressed("inapp:$packageName")) return@Runnable
+            val activePkg = rootInActiveWindow?.packageName?.toString()
+            if (activePkg != null && !activePkg.equals(packageName, ignoreCase = true)) return@Runnable
+            lastInAppAdultScanMs = System.currentTimeMillis()
+            runInAppHierarchyScan(packageName = packageName, event = null, isWebView = isWebView)
+        }
+        pendingInAppScanRunnable = runnable
+        mainHandler.postDelayed(runnable, delayMs)
+    }
+
+    private fun scheduleSettleInAppScan(packageName: String, isWebView: Boolean) {
+        pendingInAppSettleRunnable?.let { mainHandler.removeCallbacks(it) }
+        val runnable = Runnable {
+            pendingInAppSettleRunnable = null
+            if (overlayManager.isOverlayCurrentlyAttached()) return@Runnable
+            if (isScopeSuppressed("inapp:$packageName")) return@Runnable
+            val activePkg = rootInActiveWindow?.packageName?.toString()
+            if (activePkg != null && !activePkg.equals(packageName, ignoreCase = true)) return@Runnable
+            lastInAppAdultScanMs = System.currentTimeMillis()
+            runInAppHierarchyScan(packageName = packageName, event = null, isWebView = isWebView)
+        }
+        pendingInAppSettleRunnable = runnable
+        mainHandler.postDelayed(runnable, IN_APP_SETTLE_DELAY_MS)
     }
 
     private fun getCachedFirstInstallTime(packageName: String): Long {
@@ -550,7 +624,8 @@ class PGuardAccessibilityService : AccessibilityService() {
                     event.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { add(it) }
                     source?.text?.toString()?.takeIf { it.isNotBlank() }?.let { add(it) }
                     source?.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { add(it) }
-                }
+                    addAll(BrowserInspector.collectSubtreeTexts(source, maxDepth = 6, maxItems = 25))
+                }.distinct()
                 val clickMatch = InAppAdultGuard.findAdultClickMatch(
                     eventTexts = clickCandidates,
                     isSocialContext = InAppAdultGuard.isSocialOrCommunityUrl(detectedUrl?.value) ||
@@ -572,17 +647,58 @@ class PGuardAccessibilityService : AccessibilityService() {
             }
         }
 
-        // Throttle expensive deep hierarchy scans during rapid content updates
+        // Throttle + trailing-edge debounce deep hierarchy scans during rapid browser content updates
+        val currentUrl = detectedUrl?.value
+        val urlChanged = !currentUrl.isNullOrBlank() && !currentUrl.equals(lastBrowserUrl, ignoreCase = true)
+        if (!currentUrl.isNullOrBlank()) {
+            lastBrowserUrl = currentUrl
+        }
+        val eventType = event.eventType
+        if (urlChanged ||
+            eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+            eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+            eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED
+        ) {
+            scheduleSettleBrowserScan(packageName = packageName, detectedUrlValue = currentUrl)
+        }
+
         val now = System.currentTimeMillis()
-        if (rootNode == null || (now - lastBrowserDeepScanMs) < DEEP_SCAN_THROTTLE_MS) {
+        val elapsed = now - lastBrowserDeepScanMs
+        if (elapsed < DEEP_SCAN_THROTTLE_MS) {
+            scheduleTrailingBrowserScan(
+                packageName = packageName,
+                detectedUrlValue = currentUrl,
+                delayMs = (DEEP_SCAN_THROTTLE_MS - elapsed).coerceAtLeast(50L)
+            )
             return
         }
+        pendingBrowserScanRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingBrowserScanRunnable = null
         lastBrowserDeepScanMs = now
 
+        runBrowserDeepScan(
+            packageName = packageName,
+            event = event,
+            initialDetectedUrl = detectedUrl,
+            rootNode = rootNode
+        )
+    }
+
+    private fun runBrowserDeepScan(
+        packageName: String,
+        event: AccessibilityEvent?,
+        initialDetectedUrl: BrowserInspector.ExtractedUrl?,
+        rootNode: AccessibilityNodeInfo?
+    ) {
+        val resolvedRoot = rootNode ?: findRootNode(event)
+        var detectedUrl = initialDetectedUrl
+
         // Fallback address-bar scan if direct IDs missed
-        if (detectedUrl == null) {
-            val fallbackUrl = BrowserInspector.extractUrlInfo(rootNode, event, allowFallbackTraversal = true)
+        if (detectedUrl == null && resolvedRoot != null) {
+            val fallbackUrl = BrowserInspector.extractUrlInfo(resolvedRoot, event, allowFallbackTraversal = true)
             if (fallbackUrl != null) {
+                detectedUrl = fallbackUrl
+                lastBrowserUrl = fallbackUrl.value
                 if (fallbackUrl.isTrustedAddressBar &&
                     contentFilter.matchesWhitelist(fallbackUrl.value, whitelistedKeywords)
                 ) {
@@ -596,11 +712,12 @@ class PGuardAccessibilityService : AccessibilityService() {
             }
         }
 
-        // Single-pass bounded collection for custom blocklist + tiered adult page scoring
-        val pageTexts = BrowserInspector.collectVisibleWebTexts(rootNode)
-        if (pageTexts.isEmpty()) return
+        val roots = findAllAppRootNodes(event, packageName)
+        if (roots.isEmpty()) return
+        val collected = BrowserInspector.collectVisibleWindowContent(roots, maxDepth = 64, maxItems = 450)
+        if (collected.texts.isEmpty() && collected.viewIds.isEmpty()) return
 
-        for (txt in pageTexts) {
+        for (txt in collected.texts) {
             if (!contentFilter.matchesWhitelist(txt, whitelistedKeywords) &&
                 shouldBlockCustomOrSocialUrl(txt)
             ) {
@@ -612,14 +729,15 @@ class PGuardAccessibilityService : AccessibilityService() {
 
         if (isAdultBlockingEnabled) {
             val scannableTexts = if (whitelistedKeywords.isEmpty()) {
-                pageTexts
+                collected.texts
             } else {
-                pageTexts.filterNot { contentFilter.matchesWhitelist(it, whitelistedKeywords) }
+                collected.texts.filterNot { contentFilter.matchesWhitelist(it, whitelistedKeywords) }
             }
             val matchedAdult = InAppAdultGuard.findAdultScreenMatch(
                 packageName = packageName,
                 activeUrl = detectedUrl?.value,
                 visibleTexts = scannableTexts,
+                viewIds = collected.viewIds,
                 isBrowser = true,
                 contentFilter = contentFilter,
                 whitelist = whitelistedKeywords
@@ -629,6 +747,98 @@ class PGuardAccessibilityService : AccessibilityService() {
                 triggerBlock(matchedAdult, packageName)
             }
         }
+    }
+
+    private fun scheduleSettleBrowserScan(
+        packageName: String,
+        detectedUrlValue: String?
+    ) {
+        pendingBrowserSettleFastRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingBrowserSettleSlowRunnable?.let { mainHandler.removeCallbacks(it) }
+
+        fun buildSettleRunnable(clearFast: Boolean): Runnable = Runnable {
+            if (clearFast) pendingBrowserSettleFastRunnable = null else pendingBrowserSettleSlowRunnable = null
+            if (overlayManager.isOverlayCurrentlyAttached()) return@Runnable
+            if (isScopeSuppressed("browser:$packageName")) return@Runnable
+            val activePkg = rootInActiveWindow?.packageName?.toString()
+            if (activePkg != null && !activePkg.equals(packageName, ignoreCase = true)) return@Runnable
+            lastBrowserDeepScanMs = System.currentTimeMillis()
+            val initialUrl = detectedUrlValue?.let { BrowserInspector.ExtractedUrl(it, isTrustedAddressBar = true) }
+            runBrowserDeepScan(
+                packageName = packageName,
+                event = null,
+                initialDetectedUrl = initialUrl,
+                rootNode = rootInActiveWindow
+            )
+        }
+
+        val fastRunnable = buildSettleRunnable(clearFast = true)
+        val slowRunnable = buildSettleRunnable(clearFast = false)
+        pendingBrowserSettleFastRunnable = fastRunnable
+        pendingBrowserSettleSlowRunnable = slowRunnable
+        mainHandler.postDelayed(fastRunnable, BROWSER_SETTLE_DELAY_FAST_MS)
+        mainHandler.postDelayed(slowRunnable, BROWSER_SETTLE_DELAY_SLOW_MS)
+    }
+
+    private fun scheduleTrailingBrowserScan(
+        packageName: String,
+        detectedUrlValue: String?,
+        delayMs: Long
+    ) {
+        pendingBrowserScanRunnable?.let { mainHandler.removeCallbacks(it) }
+        val runnable = Runnable {
+            pendingBrowserScanRunnable = null
+            if (overlayManager.isOverlayCurrentlyAttached()) return@Runnable
+            if (isScopeSuppressed("browser:$packageName")) return@Runnable
+            val activePkg = rootInActiveWindow?.packageName?.toString()
+            if (activePkg != null && !activePkg.equals(packageName, ignoreCase = true)) return@Runnable
+            lastBrowserDeepScanMs = System.currentTimeMillis()
+            val initialUrl = detectedUrlValue?.let { BrowserInspector.ExtractedUrl(it, isTrustedAddressBar = true) }
+            runBrowserDeepScan(
+                packageName = packageName,
+                event = null,
+                initialDetectedUrl = initialUrl,
+                rootNode = rootInActiveWindow
+            )
+        }
+        pendingBrowserScanRunnable = runnable
+        mainHandler.postDelayed(runnable, delayMs)
+    }
+
+    private fun findAllAppRootNodes(
+        event: AccessibilityEvent?,
+        packageName: String
+    ): List<AccessibilityNodeInfo> {
+        val roots = LinkedHashSet<AccessibilityNodeInfo>()
+        rootInActiveWindow?.let { active ->
+            val activePkg = active.packageName?.toString()
+            if (activePkg == null || activePkg.equals(packageName, ignoreCase = true)) {
+                roots.add(active)
+            }
+        }
+        var current = event?.source
+        var steps = 0
+        while (current != null && steps++ < 48) {
+            val parent = current.parent
+            if (parent == null) {
+                val srcPkg = current.packageName?.toString()
+                if (srcPkg == null || srcPkg.equals(packageName, ignoreCase = true)) {
+                    roots.add(current)
+                }
+                break
+            }
+            current = parent
+        }
+        try {
+            for (window in windows) {
+                val wRoot = window.root ?: continue
+                val wPkg = wRoot.packageName?.toString()
+                if (wPkg == null || wPkg.equals(packageName, ignoreCase = true)) {
+                    roots.add(wRoot)
+                }
+            }
+        } catch (_: Exception) {}
+        return roots.toList()
     }
 
     private fun findRootNode(event: AccessibilityEvent?): AccessibilityNodeInfo? {
@@ -766,6 +976,7 @@ class PGuardAccessibilityService : AccessibilityService() {
 
         lastBlockedUrl = target
         lastBlockedTimestamp = now
+        cancelPendingScans()
         HabitsManager.recordBlockInterception(applicationContext)
 
         val scopeKey = "$scopePrefix:$packageName"
@@ -776,50 +987,52 @@ class PGuardAccessibilityService : AccessibilityService() {
             message = BlockedScreenConfig.resolveOverlayMessage(blockedScreenMessage, BlockedScreenConfig.DEFAULT_MESSAGE),
             countdownSeconds = blockedScreenCountdown,
             redirectUrl = resolveSafeRedirectUrl(),
+            exitWhileCovered = true,
+            primaryButtonLabel = "Return to Home",
             onBeforeRedirect = {
-                suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS)
+                suppressScope(scopeKey, 700L)
+            },
+            onVerifyRedirectSucceeded = { expectedRedirect ->
+                verifyRedirectLeftBlockedTarget(packageName, expectedRedirect)
+            },
+            onForceExitToHome = {
+                performGlobalAction(GLOBAL_ACTION_HOME)
+            },
+            isStillInBlockedApp = {
+                rootInActiveWindow?.packageName?.toString()?.equals(packageName, ignoreCase = true) == true
+            },
+            onExitComplete = {
+                lastBlockedUrl = null
+                lastBlockedTimestamp = 0L
             },
             onGoBack = {
-                suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS)
-                val backHandled = performGlobalAction(GLOBAL_ACTION_BACK)
-                if (!backHandled) {
-                    performGlobalAction(GLOBAL_ACTION_HOME)
-                } else {
-                    mainHandler.postDelayed({
-                        val activeRoot = rootInActiveWindow
-                        val currentPkg = activeRoot?.packageName?.toString() ?: return@postDelayed
-                        if (BrowserInspector.isBrowser(currentPkg, applicationContext)) {
-                            val url = BrowserInspector.extractUrlInfo(
-                                activeRoot,
-                                null,
-                                allowFallbackTraversal = false
-                            )?.value
-                            if (url != null && shouldBlockUrlOrQuery(url)) {
-                                performGlobalAction(GLOBAL_ACTION_HOME)
-                            }
-                        } else if (scopePrefix == "inapp" && currentPkg == packageName && isAdultBlockingEnabled) {
-                            val visibleTexts = BrowserInspector.collectVisibleWebTexts(
-                                activeRoot,
-                                maxDepth = 18,
-                                maxItems = 80
-                            )
-                            if (visibleTexts.isNotEmpty() &&
-                                InAppAdultGuard.findAdultScreenMatch(
-                                    packageName = currentPkg,
-                                    activeUrl = null,
-                                    visibleTexts = visibleTexts,
-                                    isBrowser = false,
-                                    contentFilter = contentFilter,
-                                    whitelist = whitelistedKeywords
-                                ) != null
-                            ) {
-                                performGlobalAction(GLOBAL_ACTION_HOME)
-                            }
-                        }
-                    }, 420L)
-                }
+                performGlobalAction(GLOBAL_ACTION_HOME)
             }
         )
+    }
+
+    private fun verifyRedirectLeftBlockedTarget(
+        blockedPackageName: String,
+        expectedRedirectUrl: String
+    ): Boolean {
+        val activeRoot = rootInActiveWindow ?: return false
+        val activePkg = activeRoot.packageName?.toString() ?: return false
+        if (AntiTamperGuard.isTamperPackage(activePkg)) return false
+
+        val isBrowser = BrowserInspector.isBrowser(activePkg, applicationContext)
+        if (!activePkg.equals(blockedPackageName, ignoreCase = true)) {
+            if (!isBrowser) return true
+            val url = BrowserInspector.extractUrlInfo(activeRoot, null, allowFallbackTraversal = true)?.value
+                ?: return false
+            return !shouldBlockUrlOrQuery(url) &&
+                BlockedScreenConfig.hasNavigatedToSafeRedirect(url, expectedRedirectUrl)
+        }
+
+        if (!isBrowser) return false
+        val currentUrl = BrowserInspector.extractUrlInfo(activeRoot, null, allowFallbackTraversal = true)?.value
+            ?: return false
+        return !shouldBlockUrlOrQuery(currentUrl) &&
+            BlockedScreenConfig.hasNavigatedToSafeRedirect(currentUrl, expectedRedirectUrl)
     }
 
     private fun canRunSocialHierarchyScan(now: Long): Boolean {
@@ -925,9 +1138,17 @@ class PGuardAccessibilityService : AccessibilityService() {
             message = BlockedScreenConfig.resolveOverlayMessage(blockedScreenMessage, "TikTok is completely blocked."),
             countdownSeconds = blockedScreenCountdown,
             redirectUrl = resolveSafeRedirectUrl(),
-            onBeforeRedirect = { suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS) },
+            exitWhileCovered = true,
+            primaryButtonLabel = "Return to Home",
+            onBeforeRedirect = { suppressScope(scopeKey, 700L) },
+            onVerifyRedirectSucceeded = { expectedRedirect ->
+                verifyRedirectLeftBlockedTarget(packageName, expectedRedirect)
+            },
+            onForceExitToHome = { performGlobalAction(GLOBAL_ACTION_HOME) },
+            isStillInBlockedApp = {
+                rootInActiveWindow?.packageName?.toString()?.equals(packageName, ignoreCase = true) == true
+            },
             onGoBack = {
-                suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS)
                 performGlobalAction(GLOBAL_ACTION_HOME)
             }
         )
@@ -1024,9 +1245,17 @@ class PGuardAccessibilityService : AccessibilityService() {
             message = BlockedScreenConfig.resolveOverlayMessage(blockedScreenMessage, "This app is in your Blocklist."),
             countdownSeconds = blockedScreenCountdown,
             redirectUrl = resolveSafeRedirectUrl(),
-            onBeforeRedirect = { suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS) },
+            exitWhileCovered = true,
+            primaryButtonLabel = "Return to Home",
+            onBeforeRedirect = { suppressScope(scopeKey, 700L) },
+            onVerifyRedirectSucceeded = { expectedRedirect ->
+                verifyRedirectLeftBlockedTarget(packageName, expectedRedirect)
+            },
+            onForceExitToHome = { performGlobalAction(GLOBAL_ACTION_HOME) },
+            isStillInBlockedApp = {
+                rootInActiveWindow?.packageName?.toString()?.equals(packageName, ignoreCase = true) == true
+            },
             onGoBack = {
-                suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS)
                 performGlobalAction(GLOBAL_ACTION_HOME)
             }
         )
@@ -1039,7 +1268,6 @@ class PGuardAccessibilityService : AccessibilityService() {
         HabitsManager.recordBlockInterception(applicationContext)
 
         val browserName = BrowserInspector.getBrowserDisplayName(packageName, applicationContext)
-        val scopeKey = "unsupported_browser:$packageName"
         Log.w(TAG, "BLOCKED: Unsupported browser detected: $browserName ($packageName)")
 
         overlayManager.showFullScreenOverlay(
@@ -1047,9 +1275,13 @@ class PGuardAccessibilityService : AccessibilityService() {
             message = "This browser isn't supported by PGuard. Switch to Chrome, Samsung Internet, Edge, Firefox, Brave, or another supported browser.",
             countdownSeconds = blockedScreenCountdown,
             redirectUrl = "",
-            onBeforeRedirect = { suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS) },
+            exitWhileCovered = true,
+            primaryButtonLabel = "Return to Home",
+            onForceExitToHome = { performGlobalAction(GLOBAL_ACTION_HOME) },
+            isStillInBlockedApp = {
+                rootInActiveWindow?.packageName?.toString()?.equals(packageName, ignoreCase = true) == true
+            },
             onGoBack = {
-                suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS)
                 performGlobalAction(GLOBAL_ACTION_HOME)
             }
         )
@@ -1058,13 +1290,45 @@ class PGuardAccessibilityService : AccessibilityService() {
     private fun inspectTamperAndUninstall(event: AccessibilityEvent): Boolean {
         if (!isUninstallProtectionEnabled) return false
         val pkg = event.packageName?.toString() ?: return false
-        val rootNode = findRootNode(event) ?: return false
+        val source = event.source
+        val eventTexts = buildList {
+            event.text.forEach { if (!it.isNullOrBlank()) add(it.toString()) }
+            event.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { add(it) }
+            source?.text?.toString()?.takeIf { it.isNotBlank() }?.let { add(it) }
+            source?.contentDescription?.toString()?.takeIf { it.isNotBlank() }?.let { add(it) }
+            if (event.eventType == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+                addAll(BrowserInspector.collectSubtreeTexts(source, maxDepth = 6, maxItems = 25))
+            }
+        }.distinct()
 
+        val roots = findAllAppRootNodes(event, pkg)
+
+        if (AntiTamperGuard.isLauncherPackage(pkg)) {
+            if (AntiTamperGuard.shouldBlockLauncherUninstall(applicationContext.packageName, eventTexts)) {
+                triggerUninstallBlock()
+                return true
+            }
+            for (winRoot in roots) {
+                val winTexts = BrowserInspector.collectVisibleWindowContent(
+                    roots = listOf(winRoot),
+                    maxDepth = 16,
+                    maxItems = 30
+                ).texts
+                if (AntiTamperGuard.shouldBlockLauncherUninstall(applicationContext.packageName, winTexts)) {
+                    triggerUninstallBlock()
+                    return true
+                }
+            }
+            return false
+        }
+
+        if (roots.isEmpty() && eventTexts.isEmpty()) return false
         if (AntiTamperGuard.shouldBlockTamper(
                 pkg = pkg,
-                root = rootNode,
+                roots = roots,
                 appPackageName = applicationContext.packageName,
-                isAccessibilityServiceRunning = true
+                isAccessibilityServiceRunning = true,
+                extraTexts = eventTexts
             )
         ) {
             triggerUninstallBlock()
@@ -1075,7 +1339,7 @@ class PGuardAccessibilityService : AccessibilityService() {
 
     private fun triggerUninstallBlock() {
         val now = System.currentTimeMillis()
-        if (now - lastAntiTamperBlockedTimestamp < 1500L) return
+        if (now - lastAntiTamperBlockedTimestamp < ANTI_TAMPER_COOLDOWN_MS) return
         lastAntiTamperBlockedTimestamp = now
 
         Log.w(TAG, "Anti-tamper: Detected attempt to uninstall or tamper with PGuard. Blocking and returning to Home.")
@@ -1084,24 +1348,60 @@ class PGuardAccessibilityService : AccessibilityService() {
             "uninstall_attempt",
             "An attempt to uninstall, force-stop, or disable PGuard protection was intercepted."
         )
+        performGlobalAction(GLOBAL_ACTION_BACK)
         performGlobalAction(GLOBAL_ACTION_HOME)
 
-        mainHandler.post {
-            Toast.makeText(
-                applicationContext,
-                "Uninstall Protection is active. Pass your accountability check inside PGuard to disable.",
-                Toast.LENGTH_LONG
-            ).show()
+        mainHandler.postDelayed({
+            val activeRoot = rootInActiveWindow ?: return@postDelayed
+            val currentPkg = activeRoot.packageName?.toString() ?: return@postDelayed
+            if (AntiTamperGuard.isTamperPackage(currentPkg)) {
+                val roots = findAllAppRootNodes(null, currentPkg)
+                if (AntiTamperGuard.shouldBlockTamper(
+                        pkg = currentPkg,
+                        roots = roots,
+                        appPackageName = applicationContext.packageName,
+                        isAccessibilityServiceRunning = true
+                    )
+                ) {
+                    performGlobalAction(GLOBAL_ACTION_HOME)
+                }
+            }
+        }, 320L)
+
+        if (now - lastAntiTamperToastTimestamp >= ANTI_TAMPER_TOAST_COOLDOWN_MS) {
+            lastAntiTamperToastTimestamp = now
+            mainHandler.post {
+                Toast.makeText(
+                    applicationContext,
+                    "Uninstall Protection is active. Pass your accountability check inside PGuard to disable.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
         }
+    }
+
+    private fun cancelPendingScans() {
+        pendingInAppScanRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingInAppScanRunnable = null
+        pendingInAppSettleRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingInAppSettleRunnable = null
+        pendingBrowserScanRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingBrowserScanRunnable = null
+        pendingBrowserSettleFastRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingBrowserSettleFastRunnable = null
+        pendingBrowserSettleSlowRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingBrowserSettleSlowRunnable = null
     }
 
     override fun onInterrupt() {
         Log.w(TAG, "PGuard Accessibility Service interrupted")
+        cancelPendingScans()
         overlayManager.hideAll()
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
         _isRunning.value = false
+        cancelPendingScans()
         overlayManager.hideAll()
         if (isUninstallProtectionEnabled) {
             SecurityAlertReporter.reportIfPartnerLinked(
@@ -1116,6 +1416,7 @@ class PGuardAccessibilityService : AccessibilityService() {
     override fun onDestroy() {
         super.onDestroy()
         _isRunning.value = false
+        cancelPendingScans()
         overlayManager.hideAll()
         try {
             unregisterReceiver(dynamicInstallReceiver)

@@ -1,6 +1,7 @@
 package com.example.pguard.engine.accessibility
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -95,6 +96,46 @@ class BlockedScreenConfigTest {
         assertEquals(
             "Protect your peace.",
             BlockedScreenConfig.resolveOverlayMessage("  Protect your peace.  ", "This app is in your Blocklist.")
+        )
+    }
+
+    @Test
+    fun `hasNavigatedToSafeRedirect validates host and subdomain while rejecting blocked or lookalike urls`() {
+        assertTrue(
+            BlockedScreenConfig.hasNavigatedToSafeRedirect(
+                currentUrl = "https://www.google.com/",
+                expectedRedirectUrl = "https://google.com"
+            )
+        )
+        assertTrue(
+            BlockedScreenConfig.hasNavigatedToSafeRedirect(
+                currentUrl = "m.wikipedia.org/wiki/Focus",
+                expectedRedirectUrl = "https://wikipedia.org"
+            )
+        )
+        assertFalse(
+            BlockedScreenConfig.hasNavigatedToSafeRedirect(
+                currentUrl = "reddit.com/search/?q=Tsparis",
+                expectedRedirectUrl = "https://google.com"
+            )
+        )
+        assertFalse(
+            BlockedScreenConfig.hasNavigatedToSafeRedirect(
+                currentUrl = null,
+                expectedRedirectUrl = "https://google.com"
+            )
+        )
+        assertFalse(
+            BlockedScreenConfig.hasNavigatedToSafeRedirect(
+                currentUrl = "   ",
+                expectedRedirectUrl = "https://google.com"
+            )
+        )
+        assertFalse(
+            BlockedScreenConfig.hasNavigatedToSafeRedirect(
+                currentUrl = "https://evilgoogle.com/",
+                expectedRedirectUrl = "https://google.com"
+            )
         )
     }
 }
