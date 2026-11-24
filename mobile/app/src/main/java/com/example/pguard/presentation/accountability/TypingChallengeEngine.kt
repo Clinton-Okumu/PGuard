@@ -27,7 +27,9 @@ object TypingChallengeEngine {
 
     private const val CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
     private const val CODE_LENGTH = 4
-    private const val MAX_SINGLE_EDIT_INSERTION = 2
+    private const val MAX_SINGLE_WORD_INSERTION = 16
+    private const val BULK_REPLACE_MIN_REMOVED = 4
+    private const val BULK_REPLACE_MIN_INSERTED = 6
 
     data class TypingInputResult(
         val acceptedText: String,
@@ -51,8 +53,9 @@ object TypingChallengeEngine {
     }
 
     /**
-     * Allows normal character-by-character typing and deletions while rejecting clipboard paste
-     * or autofill bursts (> 2 inserted characters in a single change event).
+     * Allows normal typing, fast keystroke batching, IME composing/autocorrect, single-word
+     * glide/suggestion commits, and deletions while rejecting multi-word clipboard pastes
+     * and bulk replacement bursts.
      */
     fun sanitizeTypedInput(previous: String, candidate: String): TypingInputResult {
         if (candidate == previous) {
@@ -74,8 +77,13 @@ object TypingChallengeEngine {
             suffix++
         }
 
-        val insertedLen = candidate.length - prefix - suffix
-        if (insertedLen > MAX_SINGLE_EDIT_INSERTION) {
+        val inserted = candidate.substring(prefix, candidate.length - suffix)
+        val removedLen = previous.length - prefix - suffix
+        val hasInternalWhitespace = inserted.trim().any { it.isWhitespace() }
+        val isBulkReplacement = removedLen >= BULK_REPLACE_MIN_REMOVED &&
+            inserted.length >= BULK_REPLACE_MIN_INSERTED
+
+        if (hasInternalWhitespace || inserted.length > MAX_SINGLE_WORD_INSERTION || isBulkReplacement) {
             return TypingInputResult(acceptedText = previous, pasteBlocked = true)
         }
         return TypingInputResult(acceptedText = candidate, pasteBlocked = false)

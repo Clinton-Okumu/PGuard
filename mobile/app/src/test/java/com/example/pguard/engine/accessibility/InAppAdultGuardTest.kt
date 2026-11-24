@@ -18,6 +18,10 @@ class InAppAdultGuardTest {
         assertTrue(InAppAdultGuard.isExcludedFromInAppAdultScan("com.touchtype.swiftkey", "com.example.pguard"))
         assertTrue(InAppAdultGuard.isExcludedFromInAppAdultScan("com.sec.android.app.launcher", "com.example.pguard"))
         assertTrue(InAppAdultGuard.isExcludedFromInAppAdultScan("com.google.android.dialer", "com.example.pguard"))
+        assertTrue(InAppAdultGuard.isExcludedFromInAppAdultScan("com.safaricom.mpesa.lifestyle", "com.example.pguard"))
+        assertTrue(InAppAdultGuard.isExcludedFromInAppAdultScan("com.equitybank.mobile", "com.example.pguard"))
+        assertTrue(InAppAdultGuard.isExcludedFromInAppAdultScan("com.kcb.mobilebanking", "com.example.pguard"))
+        assertTrue(InAppAdultGuard.isExcludedFromInAppAdultScan("com.x8bit.bitwarden", "com.example.pguard"))
 
         assertFalse(InAppAdultGuard.isExcludedFromInAppAdultScan("com.reddit.frontpage", "com.example.pguard"))
         assertFalse(InAppAdultGuard.isExcludedFromInAppAdultScan("com.twitter.android", "com.example.pguard"))

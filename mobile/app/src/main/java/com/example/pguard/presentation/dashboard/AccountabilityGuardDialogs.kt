@@ -38,6 +38,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -47,13 +48,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalTextToolbar
+import androidx.compose.ui.platform.TextToolbar
+import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -211,6 +217,18 @@ fun AccountabilityModeSelectionDialog(
     }
 }
 
+private object NoOpTextToolbar : TextToolbar {
+    override val status: TextToolbarStatus = TextToolbarStatus.Hidden
+    override fun hide() = Unit
+    override fun showMenu(
+        rect: Rect,
+        onCopyRequested: (() -> Unit)?,
+        onPasteRequested: (() -> Unit)?,
+        onCutRequested: (() -> Unit)?,
+        onSelectAllRequested: (() -> Unit)?
+    ) = Unit
+}
+
 @Composable
 fun TypingChallengeDialog(
     targetFeatureTitle: String,
@@ -218,7 +236,7 @@ fun TypingChallengeDialog(
     onDismiss: () -> Unit
 ) {
     var targetText by remember { mutableStateOf(TypingChallengeEngine.generateChallenge()) }
-    var inputText by remember { mutableStateOf("") }
+    var inputValue by remember { mutableStateOf(TextFieldValue("")) }
     var pasteBlockedWarning by remember { mutableStateOf(false) }
     var secondsLeft by remember { mutableIntStateOf(60) }
     var isExpired by remember { mutableStateOf(false) }
@@ -234,7 +252,10 @@ fun TypingChallengeDialog(
         isExpired = true
     }
 
-    val matchState = TypingChallengeEngine.evaluatePrefix(targetText, inputText)
+    val inputText = inputValue.text
+    val matchState = remember(targetText, inputText) {
+        TypingChallengeEngine.evaluatePrefix(targetText, inputText)
+    }
     val isMatch = matchState.isComplete
     val primary = MaterialTheme.colorScheme.primary
     val successColor = MaterialTheme.pguardColors.success
@@ -346,40 +367,47 @@ fun TypingChallengeDialog(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-                OutlinedTextField(
-                    value = inputText,
-                    onValueChange = { candidate ->
-                        if (!isExpired) {
-                            val result = TypingChallengeEngine.sanitizeTypedInput(inputText, candidate)
-                            inputText = result.acceptedText
-                            pasteBlockedWarning = result.pasteBlocked
-                        }
-                    },
-                    placeholder = {
-                        Text(
-                            "Type phrase + [CODE] manually...",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    },
-                    keyboardOptions = KeyboardOptions(
-                        autoCorrectEnabled = false,
-                        keyboardType = KeyboardType.Ascii
-                    ),
-                    isError = matchState.firstMismatchIndex != null || pasteBlockedWarning,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = MaterialTheme.shapes.small,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = if (isMatch) successColor else primary,
-                        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
-                        errorBorderColor = errorColor,
-                        focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                        unfocusedTextColor = MaterialTheme.colorScheme.onSurface
-                    ),
-                    singleLine = false,
-                    maxLines = 4,
-                    enabled = !isExpired
-                )
+                CompositionLocalProvider(LocalTextToolbar provides NoOpTextToolbar) {
+                    OutlinedTextField(
+                        value = inputValue,
+                        onValueChange = { candidate ->
+                            if (!isExpired) {
+                                val result = TypingChallengeEngine.sanitizeTypedInput(inputValue.text, candidate.text)
+                                if (result.pasteBlocked) {
+                                    inputValue = inputValue.copy(composition = null)
+                                    pasteBlockedWarning = true
+                                } else {
+                                    inputValue = candidate
+                                    pasteBlockedWarning = false
+                                }
+                            }
+                        },
+                        placeholder = {
+                            Text(
+                                "Type phrase + [CODE] manually...",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        keyboardOptions = KeyboardOptions(
+                            autoCorrectEnabled = false,
+                            keyboardType = KeyboardType.Text
+                        ),
+                        isError = matchState.firstMismatchIndex != null || pasteBlockedWarning,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = MaterialTheme.shapes.small,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = if (isMatch) successColor else primary,
+                            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                            errorBorderColor = errorColor,
+                            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                            unfocusedTextColor = MaterialTheme.colorScheme.onSurface
+                        ),
+                        singleLine = false,
+                        maxLines = 4,
+                        enabled = !isExpired
+                    )
+                }
 
                 if (pasteBlockedWarning) {
                     Spacer(modifier = Modifier.height(6.dp))
@@ -414,7 +442,7 @@ fun TypingChallengeDialog(
                         )
                         TextButton(onClick = {
                             targetText = TypingChallengeEngine.generateChallenge()
-                            inputText = ""
+                            inputValue = TextFieldValue("")
                             pasteBlockedWarning = false
                             attemptNonce++
                         }) {

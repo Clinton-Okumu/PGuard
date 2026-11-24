@@ -70,6 +70,7 @@ object AntiTamperGuard {
         // English
         "uninstall",
         "deactivate and uninstall",
+        "deactivate & uninstall",
         "delete app",
         "remove app",
         "force stop",
@@ -153,6 +154,7 @@ object AntiTamperGuard {
     private val APP_INFO_DESTRUCTIVE_MARKERS = listOf(
         "uninstall",
         "deactivate and uninstall",
+        "deactivate & uninstall",
         "delete app",
         "remove app",
         "force stop",
@@ -191,7 +193,9 @@ object AntiTamperGuard {
     private val ACCESSIBILITY_CONTROL_PHRASES = listOf(
         "use pguard",
         "use service",
+        "pguard protection service",
         "downloaded services",
+        "downloaded apps",
         "installed services",
         "installed apps",
         "accessibility",

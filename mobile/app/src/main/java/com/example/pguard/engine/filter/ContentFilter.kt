@@ -27,6 +27,7 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class ContentFilter(
     private val adultDomainSignatures: Set<String> = DEFAULT_ADULT_DOMAIN_SIGNATURES,
+    private val plainTextDomainSignatures: Set<String> = adultDomainSignatures - DOMAIN_ONLY_ADULT_SIGNATURES,
     private val adultPatterns: List<Regex> = DEFAULT_ADULT_PATTERNS,
     private val strongPagePatterns: List<Regex> = STRONG_ADULT_PATTERNS,
     private val contextualPagePatterns: List<Regex> = CONTEXTUAL_ADULT_PATTERNS,
@@ -43,7 +44,7 @@ class ContentFilter(
         if (target.hostTokens.any { it in adultDomainSignatures }) return true
         if (adultPatterns.any { it.containsMatchIn(target.searchableText) }) return true
         if (!target.isPlainText && ADULT_URL_PATTERNS.any { it.containsMatchIn(target.searchableText) }) return true
-        if (target.isPlainText && target.textTokens.any { it in adultDomainSignatures }) return true
+        if (target.isPlainText && target.textTokens.any { it in plainTextDomainSignatures }) return true
         return false
     }
 
@@ -80,7 +81,7 @@ class ContentFilter(
             if (target.hostLabels.any { it in adultDomainSignatures }) return rawText
             if (target.hostTokens.any { it in adultDomainSignatures }) return rawText
             if (!target.isPlainText && ADULT_URL_PATTERNS.any { it.containsMatchIn(target.searchableText) }) return rawText
-            if (target.isPlainText && target.textTokens.any { it in adultDomainSignatures }) return rawText
+            if (target.isPlainText && target.textTokens.any { it in plainTextDomainSignatures }) return rawText
             if (strongPagePatterns.any { it.containsMatchIn(target.searchableText) }) return rawText
 
             contextualPagePatterns.forEachIndexed { idx, pattern ->
@@ -342,7 +343,7 @@ class ContentFilter(
             "hentaihaven", "hanime", "fakku", "tsumino", "hitomi", "e-hentai", "exhentai",
             "gelbooru", "danbooru", "e621", "cam4", "camsoda", "myfreecams", "imlive",
             "flirt4free", "streamate", "xcams", "camster", "dirtyroulette", "jerkmate",
-            "fapello", "faphouse", "hqporner", "motherless", "heavy-r", "bonga",
+            "fapello", "faphouse", "hqporner", "motherless", "heavy-r",
             "bongacams", "daftsex", "txxx", "thumbzilla", "nuvid", "pornhat",
             "pornktube", "pornone", "porndoe", "porn300", "porntube", "porn00",
             "porndish", "pornbox", "gotporn", "gotgayporn", "manporn", "boyfriendtv",
@@ -355,6 +356,17 @@ class ContentFilter(
             "hclips", "upornia", "vjav", "javhd", "javmost", "javdoe", "missav", "jable",
             "supjav", "empflix", "drtuber", "alohatube", "sunporno", "4tube", "tubegalore",
             "ixxx", "bdsmstreak"
+        )
+
+        /**
+         * Signatures that match adult domains/URLs (e.g. motherless.com, hitomi.la) but are
+         * ordinary words, names, or short ambiguous tokens in plain text and must not block
+         * everyday sentences or banking/chat screens.
+         */
+        private val DOMAIN_ONLY_ADULT_SIGNATURES = setOf(
+            "motherless", "hitomi", "kemono", "beeg", "jable", "admireme",
+            "fuq", "coomer", "cam4", "e621", "tube8", "4tube", "mofos",
+            "twistys", "erome", "missav", "vjav", "javhd", "javmost", "javdoe", "supjav"
         )
 
         private val ADULT_URL_PATTERNS = listOf(
@@ -370,11 +382,11 @@ class ContentFilter(
             Regex("""\br\/[a-z0-9_]*porn[a-z0-9_]*\b""", RegexOption.IGNORE_CASE),
             Regex("""\br\/[a-z0-9_]*nsfw[a-z0-9_]*\b""", RegexOption.IGNORE_CASE),
             Regex("""\b18\s*\+?\s*nsfw\b|\bnsfw\s*\+?\s*18\b""", RegexOption.IGNORE_CASE),
-            Regex("""\bxxx+\b"""),
+            Regex("""\bxxx\b"""),
             Regex("""\bnsfw\s*(?:content|porn|xxx|nude|sex|video|pic|media|post|channel)\b""", RegexOption.IGNORE_CASE),
             Regex("""\bblow\s?jobs?\b"""),
             Regex("""\bhand\s?jobs?\b"""),
-            Regex("""\bcum\s?(?:shots?|ming)?\b"""),
+            Regex("""\bcum\s?(?:shots?|ming|slut\w*)\b"""),
             Regex("""\bdeep\s?throats?\b"""),
             Regex("""\bmilfs?\b"""),
             Regex("""\bshemales?\b"""),
@@ -396,6 +408,7 @@ class ContentFilter(
             Regex("""\b(?:fuck|fucking|fucked|fucks)\b""", RegexOption.IGNORE_CASE),
             Regex("""\b(?:cock|cocks|dick|dicks|pussy|pussies|penis|penises|vagina|vaginas)\b""", RegexOption.IGNORE_CASE),
             Regex("""\b(?:anal|anally|dildo|dildos)\b""", RegexOption.IGNORE_CASE),
+            Regex("""\bcum\b(?!\s+laude\b)"""),
             Regex("""\berotic\w*"""),
             Regex("""\bboobs?\b"""),
             Regex("""\btits\b"""),

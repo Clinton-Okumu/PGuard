@@ -215,4 +215,23 @@ class ContentFilterTest {
         assertTrue(filter.isAdultContent("https://www.reddit.com/r/myporn00/comments/123"))
         assertTrue(filter.isAdultContent("https://pornhub.com/r/FoodPorn"))
     }
+
+    @Test
+    fun `does not false block banking terms masked account numbers or ambiguous words in plain text`() {
+        assertFalse(filter.isAdultContent("Bonga Points"))
+        assertFalse(filter.isAdultContent("Redeem your Bonga Points balance"))
+        assertFalse(filter.isAdultDomain("bonga.safaricom.co.ke"))
+        assertFalse(filter.isAdultContent("Account Number XXXX 1234"))
+        assertFalse(filter.isAdultContent("Graduated magna cum laude"))
+        assertFalse(filter.isAdultContent("A motherless child"))
+        assertFalse(filter.isAdultContent("Hitomi Nakamura"))
+        assertTrue(filter.findAdultPageContent(listOf("Bonga Points", "Card XXXX 5678", "Balance KES 1,200")) == null)
+
+        // Real adult domains for those signatures are still blocked in URLs & DNS
+        assertTrue(filter.isAdultContent("https://bongacams.com/live"))
+        assertTrue(filter.isAdultDomain("bongacams.com"))
+        assertTrue(filter.isAdultContent("https://motherless.com/video/1"))
+        assertTrue(filter.isAdultDomain("motherless.com"))
+        assertTrue(filter.isAdultContent("https://hitomi.la/galleries/1"))
+    }
 }

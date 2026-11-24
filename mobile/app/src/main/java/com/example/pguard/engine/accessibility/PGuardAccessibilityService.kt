@@ -13,6 +13,7 @@ import android.text.TextUtils
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.Toast
 import com.example.pguard.engine.accountability.SecurityAlertReporter
 import com.example.pguard.engine.filter.ContentFilter
@@ -34,9 +35,12 @@ class PGuardAccessibilityService : AccessibilityService() {
         private const val WHATSAPP_COOLDOWN_MS = 1200L
         private const val INSTAGRAM_COOLDOWN_MS = 1200L
         private const val TIKTOK_COOLDOWN_MS = 1500L
-        private const val DEEP_SCAN_THROTTLE_MS = 250L
-        private const val IN_APP_ADULT_SCAN_THROTTLE_MS = 350L
-        private const val IN_APP_SETTLE_DELAY_MS = 850L
+        private const val DEEP_SCAN_THROTTLE_MS = 700L
+        private const val IN_APP_ADULT_SCAN_THROTTLE_MS = 750L
+        private const val SOCIAL_SCAN_THROTTLE_MS = 500L
+        private const val IN_APP_SETTLE_DELAY_MS = 900L
+        private const val SOCIAL_SETTLE_DELAY_MS = 550L
+        private const val TAMPER_SETTLE_DELAY_MS = 250L
         private const val BROWSER_SETTLE_DELAY_FAST_MS = 900L
         private const val BROWSER_SETTLE_DELAY_SLOW_MS = 2000L
         private const val ANTI_TAMPER_COOLDOWN_MS = 400L
@@ -209,6 +213,9 @@ class PGuardAccessibilityService : AccessibilityService() {
     private var pendingBrowserScanRunnable: Runnable? = null
     private var pendingBrowserSettleFastRunnable: Runnable? = null
     private var pendingBrowserSettleSlowRunnable: Runnable? = null
+    private var pendingSocialScanRunnable: Runnable? = null
+    private var pendingSocialSettleRunnable: Runnable? = null
+    private var pendingTamperSettleRunnable: Runnable? = null
     val overlayManager by lazy { AccessibilityOverlayManager(this) }
     private val dynamicInstallReceiver = com.example.pguard.engine.receiver.NewAppInstallReceiver()
 
@@ -340,8 +347,13 @@ class PGuardAccessibilityService : AccessibilityService() {
             return
         }
 
-        // 5. Browser URL and Content Scanning
-        if (BrowserInspector.isBrowser(packageName, applicationContext)) {
+        // 5. Browser URL and Content Scanning (skip dedicated social/video apps so modded APKs are not swallowed)
+        if (BrowserInspector.isBrowser(packageName, applicationContext) &&
+            !SocialAppGuards.isYouTubePackage(packageName) &&
+            !SocialAppGuards.isWhatsAppPackage(packageName) &&
+            !SocialAppGuards.isTikTokPackage(packageName) &&
+            !SocialAppGuards.isInstagramPackage(packageName)
+        ) {
             inspectBrowserActivity(event, packageName)
             return
         }
@@ -456,9 +468,17 @@ class PGuardAccessibilityService : AccessibilityService() {
             }
         }
 
-        // Leading + trailing debounce hierarchy scan on window transitions, scrolls, and content updates
+        // Leading + trailing debounce hierarchy scan:
+        // Social/community apps & WebViews scan on window, content, and scroll updates;
+        // ordinary third-party apps only scan hierarchy on window transitions (saving major battery
+        // while keeping search-input & click fast paths instant everywhere).
         val eventType = event.eventType
-        if (eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
+        val isHighRiskInApp = isWebView || InAppAdultGuard.isSocialOrCommunityApp(packageName)
+        if (!isHighRiskInApp) {
+            if (eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                return
+            }
+        } else if (eventType != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED &&
             eventType != AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED &&
             eventType != AccessibilityEvent.TYPE_VIEW_SCROLLED
         ) {
@@ -494,7 +514,12 @@ class PGuardAccessibilityService : AccessibilityService() {
     ): Boolean {
         val roots = findAllAppRootNodes(event, packageName)
         if (roots.isEmpty()) return false
-        val collected = BrowserInspector.collectVisibleWindowContent(roots, maxDepth = 36, maxItems = 220)
+        val collected = BrowserInspector.collectVisibleWindowContent(
+            roots = roots,
+            maxDepth = 28,
+            maxItems = 140,
+            maxVisitedNodes = 800
+        )
         if (collected.texts.isEmpty() && collected.viewIds.isEmpty()) return false
 
         if (isAdultBlockingEnabled) {
@@ -656,8 +681,7 @@ class PGuardAccessibilityService : AccessibilityService() {
         val eventType = event.eventType
         if (urlChanged ||
             eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
-            eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
-            eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED
+            eventType == AccessibilityEvent.TYPE_VIEW_CLICKED
         ) {
             scheduleSettleBrowserScan(packageName = packageName, detectedUrlValue = currentUrl)
         }
@@ -714,7 +738,12 @@ class PGuardAccessibilityService : AccessibilityService() {
 
         val roots = findAllAppRootNodes(event, packageName)
         if (roots.isEmpty()) return
-        val collected = BrowserInspector.collectVisibleWindowContent(roots, maxDepth = 64, maxItems = 450)
+        val collected = BrowserInspector.collectVisibleWindowContent(
+            roots = roots,
+            maxDepth = 40,
+            maxItems = 200,
+            maxVisitedNodes = 900
+        )
         if (collected.texts.isEmpty() && collected.viewIds.isEmpty()) return
 
         for (txt in collected.texts) {
@@ -816,21 +845,24 @@ class PGuardAccessibilityService : AccessibilityService() {
                 roots.add(active)
             }
         }
-        var current = event?.source
-        var steps = 0
-        while (current != null && steps++ < 48) {
-            val parent = current.parent
-            if (parent == null) {
-                val srcPkg = current.packageName?.toString()
-                if (srcPkg == null || srcPkg.equals(packageName, ignoreCase = true)) {
-                    roots.add(current)
+        if (roots.isEmpty()) {
+            var current = event?.source
+            var steps = 0
+            while (current != null && steps++ < 32) {
+                val parent = current.parent
+                if (parent == null) {
+                    val srcPkg = current.packageName?.toString()
+                    if (srcPkg == null || srcPkg.equals(packageName, ignoreCase = true)) {
+                        roots.add(current)
+                    }
+                    break
                 }
-                break
+                current = parent
             }
-            current = parent
         }
         try {
             for (window in windows) {
+                if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION) continue
                 val wRoot = window.root ?: continue
                 val wPkg = wRoot.packageName?.toString()
                 if (wPkg == null || wPkg.equals(packageName, ignoreCase = true)) {
@@ -921,19 +953,28 @@ class PGuardAccessibilityService : AccessibilityService() {
         val lower = input.lowercase(Locale.ROOT).trim()
         return lower.contains("youtube.com/shorts") ||
             lower.contains("m.youtube.com/shorts") ||
-            lower.contains("youtu.be/shorts")
+            lower.contains("youtu.be/shorts") ||
+            lower.contains("youtube-nocookie.com/shorts")
     }
 
-    private fun isWhatsAppChannelUrl(input: String): Boolean =
-        input.lowercase(Locale.ROOT).trim().contains("whatsapp.com/channel")
+    private fun isWhatsAppChannelUrl(input: String): Boolean {
+        val lower = input.lowercase(Locale.ROOT).trim()
+        return lower.contains("whatsapp.com/channel") || lower.contains("wa.me/channel")
+    }
 
     private fun isInstagramReelsUrl(input: String): Boolean {
         val lower = input.lowercase(Locale.ROOT).trim()
-        return lower.contains("instagram.com/reel") || lower.contains("instagram.com/reels")
+        return lower.contains("instagram.com/reel") ||
+            lower.contains("instagram.com/reels") ||
+            lower.contains("instagr.am/reel")
     }
 
-    private fun isTikTokUrl(input: String): Boolean =
-        input.lowercase(Locale.ROOT).trim().contains("tiktok.com")
+    private fun isTikTokUrl(input: String): Boolean {
+        val lower = input.lowercase(Locale.ROOT).trim()
+        return lower.contains("tiktok.com") ||
+            lower.contains("tiktokv.com") ||
+            lower.contains("musical.ly")
+    }
 
     private fun resolveSafeRedirectUrl(): String {
         val result = BlockedScreenConfig.validateRedirectUrl(
@@ -982,6 +1023,9 @@ class PGuardAccessibilityService : AccessibilityService() {
         val scopeKey = "$scopePrefix:$packageName"
         Log.w(TAG, "BLOCKED restricted content detected: $target")
 
+        // Immediately leave the blocked app/tab so video/audio stops before the overlay even counts down
+        performGlobalAction(GLOBAL_ACTION_HOME)
+
         overlayManager.showFullScreenOverlay(
             target = target,
             message = BlockedScreenConfig.resolveOverlayMessage(blockedScreenMessage, BlockedScreenConfig.DEFAULT_MESSAGE),
@@ -999,7 +1043,7 @@ class PGuardAccessibilityService : AccessibilityService() {
                 performGlobalAction(GLOBAL_ACTION_HOME)
             },
             isStillInBlockedApp = {
-                rootInActiveWindow?.packageName?.toString()?.equals(packageName, ignoreCase = true) == true
+                isPackageForegroundUnderOverlay(packageName)
             },
             onExitComplete = {
                 lastBlockedUrl = null
@@ -1011,13 +1055,50 @@ class PGuardAccessibilityService : AccessibilityService() {
         )
     }
 
+    private fun findUnderlyingAppWindowRoot(): AccessibilityNodeInfo? {
+        val ownPkg = applicationContext.packageName
+        try {
+            var bestRoot: AccessibilityNodeInfo? = null
+            var bestLayer = Int.MIN_VALUE
+            for (window in windows) {
+                if (window.type != AccessibilityWindowInfo.TYPE_APPLICATION) continue
+                val root = window.root ?: continue
+                val pkg = root.packageName?.toString() ?: continue
+                if (pkg.equals(ownPkg, ignoreCase = true) || pkg == "com.android.systemui") continue
+                if (window.layer >= bestLayer) {
+                    bestLayer = window.layer
+                    bestRoot = root
+                }
+            }
+            if (bestRoot != null) return bestRoot
+        } catch (_: Exception) {}
+
+        val activeRoot = rootInActiveWindow
+        val activePkg = activeRoot?.packageName?.toString()
+        if (activeRoot != null && activePkg != null && !activePkg.equals(ownPkg, ignoreCase = true)) {
+            return activeRoot
+        }
+        return null
+    }
+
+    private fun isPackageForegroundUnderOverlay(packageName: String): Boolean {
+        val underlyingPkg = findUnderlyingAppWindowRoot()?.packageName?.toString()
+        return BlockedScreenConfig.isUnderlyingAppStillBlocked(
+            underlyingPackage = underlyingPkg,
+            blockedPackage = packageName,
+            ownPackage = applicationContext.packageName
+        )
+    }
+
     private fun verifyRedirectLeftBlockedTarget(
         blockedPackageName: String,
         expectedRedirectUrl: String
     ): Boolean {
-        val activeRoot = rootInActiveWindow ?: return false
+        val activeRoot = findUnderlyingAppWindowRoot() ?: return false
         val activePkg = activeRoot.packageName?.toString() ?: return false
+        if (activePkg.equals(applicationContext.packageName, ignoreCase = true)) return false
         if (AntiTamperGuard.isTamperPackage(activePkg)) return false
+        if (AntiTamperGuard.isLauncherPackage(activePkg)) return false
 
         val isBrowser = BrowserInspector.isBrowser(activePkg, applicationContext)
         if (!activePkg.equals(blockedPackageName, ignoreCase = true)) {
@@ -1035,10 +1116,75 @@ class PGuardAccessibilityService : AccessibilityService() {
             BlockedScreenConfig.hasNavigatedToSafeRedirect(currentUrl, expectedRedirectUrl)
     }
 
-    private fun canRunSocialHierarchyScan(now: Long): Boolean {
-        if ((now - lastSocialHierarchyScanMs) < DEEP_SCAN_THROTTLE_MS) return false
-        lastSocialHierarchyScanMs = now
-        return true
+    private fun socialScanRemainingDelayMs(now: Long): Long {
+        val elapsed = now - lastSocialHierarchyScanMs
+        return if (elapsed < SOCIAL_SCAN_THROTTLE_MS) {
+            (SOCIAL_SCAN_THROTTLE_MS - elapsed).coerceAtLeast(50L)
+        } else {
+            0L
+        }
+    }
+
+    private fun scheduleTrailingSocialScan(packageName: String, delayMs: Long) {
+        pendingSocialScanRunnable?.let { mainHandler.removeCallbacks(it) }
+        val runnable = Runnable {
+            pendingSocialScanRunnable = null
+            runSocialGuardHierarchyScan(packageName, event = null)
+        }
+        pendingSocialScanRunnable = runnable
+        mainHandler.postDelayed(runnable, delayMs)
+    }
+
+    private fun scheduleSettleSocialScan(packageName: String) {
+        pendingSocialSettleRunnable?.let { mainHandler.removeCallbacks(it) }
+        val runnable = Runnable {
+            pendingSocialSettleRunnable = null
+            runSocialGuardHierarchyScan(packageName, event = null)
+        }
+        pendingSocialSettleRunnable = runnable
+        mainHandler.postDelayed(runnable, SOCIAL_SETTLE_DELAY_MS)
+    }
+
+    private fun runSocialGuardHierarchyScan(packageName: String, event: AccessibilityEvent?): Boolean {
+        if (overlayManager.isOverlayCurrentlyAttached()) return false
+        val activePkg = rootInActiveWindow?.packageName?.toString()
+        if (activePkg != null && !activePkg.equals(packageName, ignoreCase = true)) return false
+
+        lastSocialHierarchyScanMs = System.currentTimeMillis()
+        val roots = findAllAppRootNodes(event, packageName)
+        if (roots.isEmpty()) return false
+
+        if (isShortsBlockingEnabled &&
+            SocialAppGuards.isYouTubePackage(packageName) &&
+            !isScopeSuppressed("shorts:$packageName") &&
+            (System.currentTimeMillis() - lastShortsBlockedTimestamp) >= SHORTS_COOLDOWN_MS &&
+            SocialAppGuards.isShortsActiveInHierarchy(roots)
+        ) {
+            triggerShortsBlock(packageName)
+            return true
+        }
+
+        if (isWhatsAppChannelsBlockingEnabled &&
+            SocialAppGuards.isWhatsAppPackage(packageName) &&
+            !isScopeSuppressed("whatsapp:$packageName") &&
+            (System.currentTimeMillis() - lastWhatsAppBlockedTimestamp) >= WHATSAPP_COOLDOWN_MS &&
+            SocialAppGuards.isWhatsAppChannelDirectoryActive(roots)
+        ) {
+            triggerWhatsAppBlock(packageName, "Exploring new WhatsApp channels is blocked.")
+            return true
+        }
+
+        if (isInstagramReelsBlockingEnabled &&
+            SocialAppGuards.isInstagramPackage(packageName) &&
+            !isScopeSuppressed("instagram:$packageName") &&
+            (System.currentTimeMillis() - lastInstagramBlockedTimestamp) >= INSTAGRAM_COOLDOWN_MS &&
+            SocialAppGuards.isInstagramReelsActiveInHierarchy(roots)
+        ) {
+            triggerInstagramReelsBlock(packageName)
+            return true
+        }
+
+        return false
     }
 
     private fun inspectYouTube(event: AccessibilityEvent, packageName: String): Boolean {
@@ -1051,31 +1197,78 @@ class PGuardAccessibilityService : AccessibilityService() {
             return true
         }
 
-        if (!canRunSocialHierarchyScan(now)) return false
-        val rootNode = findRootNode(event) ?: rootInActiveWindow ?: event.source ?: return false
-        if (SocialAppGuards.isShortsActiveInHierarchy(rootNode)) {
-            triggerShortsBlock(packageName)
-            return true
+        val eventType = event.eventType
+        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+            eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+            eventType == AccessibilityEvent.TYPE_VIEW_SELECTED ||
+            eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED
+        ) {
+            scheduleSettleSocialScan(packageName)
         }
-        return false
+
+        val waitMs = socialScanRemainingDelayMs(now)
+        if (waitMs > 0L) {
+            scheduleTrailingSocialScan(packageName, waitMs)
+            return false
+        }
+        pendingSocialScanRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingSocialScanRunnable = null
+        return runSocialGuardHierarchyScan(packageName, event)
     }
 
     private fun triggerShortsBlock(packageName: String) {
         val now = System.currentTimeMillis()
         if (now - lastShortsBlockedTimestamp < SHORTS_COOLDOWN_MS) return
         lastShortsBlockedTimestamp = now
+        cancelPendingScans()
         HabitsManager.recordBlockInterception(applicationContext)
 
         val scopeKey = "shorts:$packageName"
         Log.w(TAG, "BLOCKED: YouTube Shorts detected, showing full-screen overlay")
+
+        // Immediately exit Shorts before attaching the focusable overlay so Shorts audio stops right away
+        if (!performGlobalAction(GLOBAL_ACTION_BACK)) {
+            performGlobalAction(GLOBAL_ACTION_HOME)
+        }
+        mainHandler.postDelayed({
+            val roots = findAllAppRootNodes(null, packageName)
+            if (isPackageForegroundUnderOverlay(packageName) &&
+                roots.isNotEmpty() &&
+                SocialAppGuards.isShortsActiveInHierarchy(roots)
+            ) {
+                performGlobalAction(GLOBAL_ACTION_HOME)
+            }
+        }, 250L)
+
         overlayManager.showFullScreenOverlay(
             target = "YouTube Shorts",
             message = BlockedScreenConfig.resolveOverlayMessage(blockedScreenMessage, "YouTube Shorts is blocked."),
             countdownSeconds = blockedScreenCountdown,
             redirectUrl = resolveSafeRedirectUrl(),
-            onBeforeRedirect = { suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS) },
+            exitWhileCovered = true,
+            tryBackBeforeHomeWhileCovered = true,
+            primaryButtonLabel = "Go Back to Safety",
+            onBeforeRedirect = { suppressScope(scopeKey, 700L) },
+            onVerifyRedirectSucceeded = { expectedRedirect ->
+                verifyRedirectLeftBlockedTarget(packageName, expectedRedirect)
+            },
+            onForceExitToHome = { performGlobalAction(GLOBAL_ACTION_HOME) },
+            isStillInBlockedApp = {
+                isPackageForegroundUnderOverlay(packageName)
+            },
+            isStillOnBlockedSurface = {
+                if (!isPackageForegroundUnderOverlay(packageName)) {
+                    false
+                } else {
+                    val roots = findAllAppRootNodes(null, packageName)
+                    roots.isEmpty() || SocialAppGuards.isShortsActiveInHierarchy(roots)
+                }
+            },
+            onExitComplete = {
+                lastShortsBlockedTimestamp = 0L
+                suppressScope(scopeKey, 450L)
+            },
             onGoBack = {
-                suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS)
                 if (!performGlobalAction(GLOBAL_ACTION_BACK)) {
                     performGlobalAction(GLOBAL_ACTION_HOME)
                 }
@@ -1088,36 +1281,83 @@ class PGuardAccessibilityService : AccessibilityService() {
         val now = System.currentTimeMillis()
         if (now - lastWhatsAppBlockedTimestamp < WHATSAPP_COOLDOWN_MS) return false
 
-        val rootNode = findRootNode(event) ?: rootInActiveWindow ?: event.source
-        if (SocialAppGuards.isWhatsAppChannelClickMatch(event, rootNode)) {
+        val roots = findAllAppRootNodes(event, packageName)
+        if (SocialAppGuards.isWhatsAppChannelClickMatch(event, roots)) {
             triggerWhatsAppBlock(packageName, "Exploring or following new WhatsApp channels is blocked.")
             return true
         }
 
-        if (rootNode == null || !canRunSocialHierarchyScan(now)) return false
-        if (SocialAppGuards.isWhatsAppChannelDirectoryActive(rootNode)) {
-            triggerWhatsAppBlock(packageName, "Exploring new WhatsApp channels is blocked.")
-            return true
+        val eventType = event.eventType
+        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+            eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+            eventType == AccessibilityEvent.TYPE_VIEW_SELECTED ||
+            eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED
+        ) {
+            scheduleSettleSocialScan(packageName)
         }
-        return false
+
+        val waitMs = socialScanRemainingDelayMs(now)
+        if (waitMs > 0L) {
+            scheduleTrailingSocialScan(packageName, waitMs)
+            return false
+        }
+        pendingSocialScanRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingSocialScanRunnable = null
+        return runSocialGuardHierarchyScan(packageName, event)
     }
 
     private fun triggerWhatsAppBlock(packageName: String, reason: String) {
         val now = System.currentTimeMillis()
         if (now - lastWhatsAppBlockedTimestamp < WHATSAPP_COOLDOWN_MS) return
         lastWhatsAppBlockedTimestamp = now
+        cancelPendingScans()
         HabitsManager.recordBlockInterception(applicationContext)
 
         val scopeKey = "whatsapp:$packageName"
         Log.w(TAG, "BLOCKED: $reason, showing full-screen overlay")
+
+        if (!performGlobalAction(GLOBAL_ACTION_BACK)) {
+            performGlobalAction(GLOBAL_ACTION_HOME)
+        }
+        mainHandler.postDelayed({
+            val roots = findAllAppRootNodes(null, packageName)
+            if (isPackageForegroundUnderOverlay(packageName) &&
+                roots.isNotEmpty() &&
+                SocialAppGuards.isWhatsAppChannelDirectoryActive(roots)
+            ) {
+                performGlobalAction(GLOBAL_ACTION_HOME)
+            }
+        }, 250L)
+
         overlayManager.showFullScreenOverlay(
             target = "WhatsApp Channels",
             message = BlockedScreenConfig.resolveOverlayMessage(blockedScreenMessage, reason),
             countdownSeconds = blockedScreenCountdown,
             redirectUrl = resolveSafeRedirectUrl(),
-            onBeforeRedirect = { suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS) },
+            exitWhileCovered = true,
+            tryBackBeforeHomeWhileCovered = true,
+            primaryButtonLabel = "Go Back to Safety",
+            onBeforeRedirect = { suppressScope(scopeKey, 700L) },
+            onVerifyRedirectSucceeded = { expectedRedirect ->
+                verifyRedirectLeftBlockedTarget(packageName, expectedRedirect)
+            },
+            onForceExitToHome = { performGlobalAction(GLOBAL_ACTION_HOME) },
+            isStillInBlockedApp = {
+                isPackageForegroundUnderOverlay(packageName)
+            },
+            isStillOnBlockedSurface = {
+                if (!isPackageForegroundUnderOverlay(packageName)) {
+                    false
+                } else {
+                    val roots = findAllAppRootNodes(null, packageName)
+                    roots.isEmpty() || SocialAppGuards.isWhatsAppChannelDirectoryActive(roots)
+                }
+            },
+            onExitComplete = {
+                lastWhatsAppBlockedTimestamp = 0L
+                suppressScope(scopeKey, 450L)
+            },
             onGoBack = {
-                suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS)
                 if (!performGlobalAction(GLOBAL_ACTION_BACK)) {
                     performGlobalAction(GLOBAL_ACTION_HOME)
                 }
@@ -1129,10 +1369,14 @@ class PGuardAccessibilityService : AccessibilityService() {
         val now = System.currentTimeMillis()
         if (now - lastTikTokBlockedTimestamp < TIKTOK_COOLDOWN_MS) return
         lastTikTokBlockedTimestamp = now
+        cancelPendingScans()
         HabitsManager.recordBlockInterception(applicationContext)
 
         val scopeKey = "tiktok:$packageName"
         Log.w(TAG, "BLOCKED: TikTok application opened, showing full-screen overlay")
+
+        performGlobalAction(GLOBAL_ACTION_HOME)
+
         overlayManager.showFullScreenOverlay(
             target = "TikTok",
             message = BlockedScreenConfig.resolveOverlayMessage(blockedScreenMessage, "TikTok is completely blocked."),
@@ -1146,7 +1390,10 @@ class PGuardAccessibilityService : AccessibilityService() {
             },
             onForceExitToHome = { performGlobalAction(GLOBAL_ACTION_HOME) },
             isStillInBlockedApp = {
-                rootInActiveWindow?.packageName?.toString()?.equals(packageName, ignoreCase = true) == true
+                isPackageForegroundUnderOverlay(packageName)
+            },
+            onExitComplete = {
+                lastTikTokBlockedTimestamp = 0L
             },
             onGoBack = {
                 performGlobalAction(GLOBAL_ACTION_HOME)
@@ -1164,31 +1411,77 @@ class PGuardAccessibilityService : AccessibilityService() {
             return true
         }
 
-        if (!canRunSocialHierarchyScan(now)) return false
-        val rootNode = findRootNode(event) ?: rootInActiveWindow ?: event.source ?: return false
-        if (SocialAppGuards.isInstagramReelsActiveInHierarchy(rootNode)) {
-            triggerInstagramReelsBlock(packageName)
-            return true
+        val eventType = event.eventType
+        if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+            eventType == AccessibilityEvent.TYPE_VIEW_CLICKED ||
+            eventType == AccessibilityEvent.TYPE_VIEW_SELECTED ||
+            eventType == AccessibilityEvent.TYPE_VIEW_SCROLLED
+        ) {
+            scheduleSettleSocialScan(packageName)
         }
-        return false
+
+        val waitMs = socialScanRemainingDelayMs(now)
+        if (waitMs > 0L) {
+            scheduleTrailingSocialScan(packageName, waitMs)
+            return false
+        }
+        pendingSocialScanRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingSocialScanRunnable = null
+        return runSocialGuardHierarchyScan(packageName, event)
     }
 
     private fun triggerInstagramReelsBlock(packageName: String) {
         val now = System.currentTimeMillis()
         if (now - lastInstagramBlockedTimestamp < INSTAGRAM_COOLDOWN_MS) return
         lastInstagramBlockedTimestamp = now
+        cancelPendingScans()
         HabitsManager.recordBlockInterception(applicationContext)
 
         val scopeKey = "instagram:$packageName"
         Log.w(TAG, "BLOCKED: Instagram Reels detected, showing full-screen overlay")
+
+        if (!performGlobalAction(GLOBAL_ACTION_BACK)) {
+            performGlobalAction(GLOBAL_ACTION_HOME)
+        }
+        mainHandler.postDelayed({
+            val roots = findAllAppRootNodes(null, packageName)
+            if (isPackageForegroundUnderOverlay(packageName) &&
+                roots.isNotEmpty() &&
+                SocialAppGuards.isInstagramReelsActiveInHierarchy(roots)
+            ) {
+                performGlobalAction(GLOBAL_ACTION_HOME)
+            }
+        }, 250L)
+
         overlayManager.showFullScreenOverlay(
             target = "Instagram Reels",
             message = BlockedScreenConfig.resolveOverlayMessage(blockedScreenMessage, "Instagram Reels are blocked."),
             countdownSeconds = blockedScreenCountdown,
             redirectUrl = resolveSafeRedirectUrl(),
-            onBeforeRedirect = { suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS) },
+            exitWhileCovered = true,
+            tryBackBeforeHomeWhileCovered = true,
+            primaryButtonLabel = "Go Back to Safety",
+            onBeforeRedirect = { suppressScope(scopeKey, 700L) },
+            onVerifyRedirectSucceeded = { expectedRedirect ->
+                verifyRedirectLeftBlockedTarget(packageName, expectedRedirect)
+            },
+            onForceExitToHome = { performGlobalAction(GLOBAL_ACTION_HOME) },
+            isStillInBlockedApp = {
+                isPackageForegroundUnderOverlay(packageName)
+            },
+            isStillOnBlockedSurface = {
+                if (!isPackageForegroundUnderOverlay(packageName)) {
+                    false
+                } else {
+                    val roots = findAllAppRootNodes(null, packageName)
+                    roots.isEmpty() || SocialAppGuards.isInstagramReelsActiveInHierarchy(roots)
+                }
+            },
+            onExitComplete = {
+                lastInstagramBlockedTimestamp = 0L
+                suppressScope(scopeKey, 450L)
+            },
             onGoBack = {
-                suppressScope(scopeKey, SCOPED_DISMISS_COOLDOWN_MS)
                 if (!performGlobalAction(GLOBAL_ACTION_BACK)) {
                     performGlobalAction(GLOBAL_ACTION_HOME)
                 }
@@ -1235,11 +1528,15 @@ class PGuardAccessibilityService : AccessibilityService() {
         val now = System.currentTimeMillis()
         if (now - lastAppBlockedTimestamp < 1500L) return
         lastAppBlockedTimestamp = now
+        cancelPendingScans()
         HabitsManager.recordBlockInterception(applicationContext)
 
         val appName = getAppLabelSafe(packageName)
         val scopeKey = "app:$packageName"
         Log.w(TAG, "BLOCKED: Blocked application accessed: $appName ($packageName)")
+
+        performGlobalAction(GLOBAL_ACTION_HOME)
+
         overlayManager.showFullScreenOverlay(
             target = appName,
             message = BlockedScreenConfig.resolveOverlayMessage(blockedScreenMessage, "This app is in your Blocklist."),
@@ -1253,7 +1550,10 @@ class PGuardAccessibilityService : AccessibilityService() {
             },
             onForceExitToHome = { performGlobalAction(GLOBAL_ACTION_HOME) },
             isStillInBlockedApp = {
-                rootInActiveWindow?.packageName?.toString()?.equals(packageName, ignoreCase = true) == true
+                isPackageForegroundUnderOverlay(packageName)
+            },
+            onExitComplete = {
+                lastAppBlockedTimestamp = 0L
             },
             onGoBack = {
                 performGlobalAction(GLOBAL_ACTION_HOME)
@@ -1265,10 +1565,13 @@ class PGuardAccessibilityService : AccessibilityService() {
         val now = System.currentTimeMillis()
         if (now - lastUnsupportedBrowserBlockedTimestamp < 1500L) return
         lastUnsupportedBrowserBlockedTimestamp = now
+        cancelPendingScans()
         HabitsManager.recordBlockInterception(applicationContext)
 
         val browserName = BrowserInspector.getBrowserDisplayName(packageName, applicationContext)
         Log.w(TAG, "BLOCKED: Unsupported browser detected: $browserName ($packageName)")
+
+        performGlobalAction(GLOBAL_ACTION_HOME)
 
         overlayManager.showFullScreenOverlay(
             target = browserName,
@@ -1279,12 +1582,39 @@ class PGuardAccessibilityService : AccessibilityService() {
             primaryButtonLabel = "Return to Home",
             onForceExitToHome = { performGlobalAction(GLOBAL_ACTION_HOME) },
             isStillInBlockedApp = {
-                rootInActiveWindow?.packageName?.toString()?.equals(packageName, ignoreCase = true) == true
+                isPackageForegroundUnderOverlay(packageName)
+            },
+            onExitComplete = {
+                lastUnsupportedBrowserBlockedTimestamp = 0L
             },
             onGoBack = {
                 performGlobalAction(GLOBAL_ACTION_HOME)
             }
         )
+    }
+
+    private fun scheduleTamperSettleCheck(packageName: String) {
+        pendingTamperSettleRunnable?.let { mainHandler.removeCallbacks(it) }
+        val runnable = Runnable {
+            pendingTamperSettleRunnable = null
+            if (!isUninstallProtectionEnabled) return@Runnable
+            val activeRoot = rootInActiveWindow ?: return@Runnable
+            val activePkg = activeRoot.packageName?.toString() ?: return@Runnable
+            if (!activePkg.equals(packageName, ignoreCase = true)) return@Runnable
+            if (!AntiTamperGuard.isTamperPackage(activePkg)) return@Runnable
+            val roots = findAllAppRootNodes(null, activePkg)
+            if (AntiTamperGuard.shouldBlockTamper(
+                    pkg = activePkg,
+                    roots = roots,
+                    appPackageName = applicationContext.packageName,
+                    isAccessibilityServiceRunning = true
+                )
+            ) {
+                triggerUninstallBlock()
+            }
+        }
+        pendingTamperSettleRunnable = runnable
+        mainHandler.postDelayed(runnable, TAMPER_SETTLE_DELAY_MS)
     }
 
     private fun inspectTamperAndUninstall(event: AccessibilityEvent): Boolean {
@@ -1322,8 +1652,8 @@ class PGuardAccessibilityService : AccessibilityService() {
             return false
         }
 
-        if (roots.isEmpty() && eventTexts.isEmpty()) return false
-        if (AntiTamperGuard.shouldBlockTamper(
+        if ((roots.isNotEmpty() || eventTexts.isNotEmpty()) &&
+            AntiTamperGuard.shouldBlockTamper(
                 pkg = pkg,
                 roots = roots,
                 appPackageName = applicationContext.packageName,
@@ -1334,6 +1664,10 @@ class PGuardAccessibilityService : AccessibilityService() {
             triggerUninstallBlock()
             return true
         }
+
+        if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            scheduleTamperSettleCheck(pkg)
+        }
         return false
     }
 
@@ -1341,6 +1675,7 @@ class PGuardAccessibilityService : AccessibilityService() {
         val now = System.currentTimeMillis()
         if (now - lastAntiTamperBlockedTimestamp < ANTI_TAMPER_COOLDOWN_MS) return
         lastAntiTamperBlockedTimestamp = now
+        cancelPendingScans()
 
         Log.w(TAG, "Anti-tamper: Detected attempt to uninstall or tamper with PGuard. Blocking and returning to Home.")
         SecurityAlertReporter.reportIfPartnerLinked(
@@ -1391,6 +1726,12 @@ class PGuardAccessibilityService : AccessibilityService() {
         pendingBrowserSettleFastRunnable = null
         pendingBrowserSettleSlowRunnable?.let { mainHandler.removeCallbacks(it) }
         pendingBrowserSettleSlowRunnable = null
+        pendingSocialScanRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingSocialScanRunnable = null
+        pendingSocialSettleRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingSocialSettleRunnable = null
+        pendingTamperSettleRunnable?.let { mainHandler.removeCallbacks(it) }
+        pendingTamperSettleRunnable = null
     }
 
     override fun onInterrupt() {

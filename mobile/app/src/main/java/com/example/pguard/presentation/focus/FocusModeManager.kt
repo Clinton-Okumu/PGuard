@@ -78,6 +78,9 @@ object FocusModeManager {
     @Volatile
     private var cachedSystemPackages: SystemPackagesSnapshot? = null
 
+    @Volatile
+    private var cachedBootCount: Int? = null
+
     @Synchronized
     fun init(context: Context) {
         if (!isInitialized) {
@@ -176,11 +179,16 @@ object FocusModeManager {
     }
 
     private fun getBootCount(context: Context): Int {
-        return try {
+        cachedBootCount?.let { return it }
+        val count = try {
             Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT, -1)
         } catch (_: Exception) {
             -1
         }
+        if (count >= 0) {
+            cachedBootCount = count
+        }
+        return count
     }
 
     private fun readMonotonicRemainingSeconds(
@@ -194,10 +202,14 @@ object FocusModeManager {
         val appContext = context.applicationContext
         ensureInitialized(appContext)
         val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val elapsedEndMs = prefs.getLong(elapsedKey, 0L)
+        val wallEndMs = prefs.getLong(wallKey, 0L)
+        if (elapsedEndMs <= 0L && wallEndMs <= 0L) return 0
+
         val remainingMs = computeMonotonicRemainingMs(
-            elapsedEndMs = prefs.getLong(elapsedKey, 0L),
+            elapsedEndMs = elapsedEndMs,
             nowElapsedMs = SystemClock.elapsedRealtime(),
-            wallEndMs = prefs.getLong(wallKey, 0L),
+            wallEndMs = wallEndMs,
             nowWallMs = System.currentTimeMillis(),
             savedBootCount = prefs.getInt(bootKey, -1),
             currentBootCount = getBootCount(appContext),
@@ -443,6 +455,13 @@ object FocusModeManager {
         return schedule.allowedApps.any { it.equals(packageName, ignoreCase = true) }
     }
 
+    private fun hasAnyEnabledSchedules(context: Context): Boolean {
+        ensureInitialized(context)
+        return synchronized(cachedSchedules) {
+            cachedSchedules.any { it.isEnabled }
+        }
+    }
+
     /**
      * Evaluates Quick Focus and all overlapping active Focus Schedules together.
      * Returns null when allowed, or a concise description of the blocking session.
@@ -450,11 +469,14 @@ object FocusModeManager {
     fun getBlockingFocusReason(
         context: Context,
         packageName: String,
-        cal: Calendar = Calendar.getInstance()
+        cal: Calendar? = null
     ): String? {
+        val quickRemaining = getQuickFocusRemainingSeconds(context)
+        val hasEnabledSchedules = hasAnyEnabledSchedules(context)
+        if (quickRemaining <= 0 && !hasEnabledSchedules) return null
+
         if (isEssentialFocusPackage(context, packageName)) return null
 
-        val quickRemaining = getQuickFocusRemainingSeconds(context)
         if (quickRemaining > 0) {
             val quickAllowed = getQuickFocusAllowedApps(context)
             if (quickAllowed.none { it.equals(packageName, ignoreCase = true) }) {
@@ -464,14 +486,16 @@ object FocusModeManager {
             }
         }
 
-        val active = getActiveSchedules(context, cal)
-        if (active.isNotEmpty() &&
-            !FocusSchedule.isAllowedAcrossSchedules(packageName, active, isEssentialSystemPackage = false)
-        ) {
-            val blocking = active.first { schedule ->
-                schedule.allowedApps.none { it.equals(packageName, ignoreCase = true) }
+        if (hasEnabledSchedules) {
+            val active = getActiveSchedules(context, cal ?: Calendar.getInstance())
+            if (active.isNotEmpty() &&
+                !FocusSchedule.isAllowedAcrossSchedules(packageName, active, isEssentialSystemPackage = false)
+            ) {
+                val blocking = active.first { schedule ->
+                    schedule.allowedApps.none { it.equals(packageName, ignoreCase = true) }
+                }
+                return "${blocking.displayName} (${blocking.formattedWindowOnly})"
             }
-            return "${blocking.displayName} (${blocking.formattedWindowOnly})"
         }
 
         return null

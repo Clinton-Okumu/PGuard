@@ -316,4 +316,24 @@ class AntiTamperGuardTest {
         assertTrue(AntiTamperGuard.isLauncherPackage("com.mi.android.globallauncher"))
         assertFalse(AntiTamperGuard.isLauncherPackage("com.android.chrome"))
     }
+
+    @Test
+    fun `blocks MIUI Downloaded apps accessibility screen and ampersand Deactivate and uninstall dialog`() {
+        assertTrue(
+            AntiTamperGuard.shouldBlockScreenTexts(
+                pkg = "com.android.settings",
+                appPackageName = "com.example.pguard",
+                visibleTexts = listOf("Downloaded apps", "PGuard Protection Service"),
+                isAccessibilityServiceRunning = true
+            )
+        )
+        assertTrue(
+            AntiTamperGuard.shouldBlockScreenTexts(
+                pkg = "com.android.settings",
+                appPackageName = "com.example.pguard",
+                visibleTexts = listOf("PGuard", "Deactivate & uninstall", "Cancel"),
+                isAccessibilityServiceRunning = true
+            )
+        )
+    }
 }

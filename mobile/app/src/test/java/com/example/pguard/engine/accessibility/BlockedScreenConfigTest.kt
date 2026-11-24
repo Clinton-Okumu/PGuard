@@ -138,4 +138,36 @@ class BlockedScreenConfigTest {
             )
         )
     }
+
+    @Test
+    fun `isUnderlyingAppStillBlocked fails closed on self-overlay or null and allows launcher`() {
+        assertTrue(
+            BlockedScreenConfig.isUnderlyingAppStillBlocked(
+                underlyingPackage = "com.example.pguard",
+                blockedPackage = "org.mozilla.firefox",
+                ownPackage = "com.example.pguard"
+            )
+        )
+        assertTrue(
+            BlockedScreenConfig.isUnderlyingAppStillBlocked(
+                underlyingPackage = null,
+                blockedPackage = "org.mozilla.firefox",
+                ownPackage = "com.example.pguard"
+            )
+        )
+        assertTrue(
+            BlockedScreenConfig.isUnderlyingAppStillBlocked(
+                underlyingPackage = "org.mozilla.firefox",
+                blockedPackage = "org.mozilla.firefox",
+                ownPackage = "com.example.pguard"
+            )
+        )
+        assertFalse(
+            BlockedScreenConfig.isUnderlyingAppStillBlocked(
+                underlyingPackage = "com.miui.home",
+                blockedPackage = "org.mozilla.firefox",
+                ownPackage = "com.example.pguard"
+            )
+        )
+    }
 }

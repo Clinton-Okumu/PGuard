@@ -113,4 +113,24 @@ class BrowserInspectorTest {
         assertFalse(BrowserInspector.isLikelyAddressBarViewId("com.android.chrome:id/tab_switcher_button"))
         assertFalse(BrowserInspector.isLikelyAddressBarViewId("com.android.chrome:id/share_url_button"))
     }
+
+    @Test
+    fun `blocks privacy and chromium fork unsupported browsers without browser in package name and keeps utility viewers out`() {
+        val unsupportedForks = listOf(
+            "org.bromite.bromite",
+            "org.cromite.cromite",
+            "net.waterfox.android.release",
+            "io.github.forkmaintainers.iceraven",
+            "com.naver.whale",
+            "com.tencent.mtt",
+            "com.oh.bro"
+        )
+        for (pkg in unsupportedForks) {
+            assertTrue("Expected $pkg to be unsupported", BrowserInspector.isUnsupportedBrowser(pkg, null))
+            assertTrue("Expected $pkg to be recognized as browser", BrowserInspector.isBrowser(pkg, null))
+        }
+
+        assertFalse(BrowserInspector.isBrowser("com.estrongs.android.filebrowser", null))
+        assertFalse(BrowserInspector.isUnsupportedBrowser("com.estrongs.android.filebrowser", null))
+    }
 }

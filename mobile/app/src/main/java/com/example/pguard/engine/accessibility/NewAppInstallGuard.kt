@@ -32,7 +32,14 @@ object NewAppInstallGuard {
         "com.google.android.gsf",
         "com.android.providers.downloads",
         "com.android.packageinstaller",
-        "com.google.android.packageinstaller"
+        "com.google.android.packageinstaller",
+        "com.miui.home",
+        "com.mi.android.globallauncher",
+        "com.miui.securitycenter",
+        "com.android.dialer",
+        "com.google.android.dialer",
+        "com.android.phone",
+        "com.android.emergency"
     )
 
     fun isCoreOrSystemPackageName(pkg: String, selfPackageName: String): Boolean {
@@ -48,7 +55,14 @@ object NewAppInstallGuard {
             normalized.contains("quickstep") ||
             normalized.contains("packageinstaller") ||
             normalized.contains("permissioncontroller") ||
-            normalized.contains("inputmethod")
+            normalized.contains("inputmethod") ||
+            normalized.contains("gboard") ||
+            normalized.contains("swiftkey") ||
+            normalized.contains("honeyboard") ||
+            normalized.contains("keyboard") ||
+            normalized.contains("dialer") ||
+            normalized.contains("incallui") ||
+            normalized.contains("securitycenter")
     }
 
     fun shouldAutoBlockNewApp(

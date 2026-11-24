@@ -37,7 +37,21 @@ class TypingChallengeEngineTest {
         assertTrue(pasted.pasteBlocked)
         assertEquals("I ", pasted.acceptedText)
 
-        // Selection-replacement paste burst (same length, different content > 2 chars) is also rejected
+        // Single-word IME completion / glide typing / fast keystroke batching is allowed
+        val swipedWord = TypingChallengeEngine.sanitizeTypedInput("I ", "I choose ")
+        assertFalse(swipedWord.pasteBlocked)
+        assertEquals("I choose ", swipedWord.acceptedText)
+
+        val imeAutocorrect = TypingChallengeEngine.sanitizeTypedInput("I und", "I understand ")
+        assertFalse(imeAutocorrect.pasteBlocked)
+        assertEquals("I understand ", imeAutocorrect.acceptedText)
+
+        // Multi-word paste is rejected
+        val pastedTwoWords = TypingChallengeEngine.sanitizeTypedInput("", "I choose")
+        assertTrue(pastedTwoWords.pasteBlocked)
+        assertEquals("", pastedTwoWords.acceptedText)
+
+        // Selection-replacement paste burst is also rejected
         val replaced = TypingChallengeEngine.sanitizeTypedInput(
             "abcdefghij",
             "xyzzzzzzzz"

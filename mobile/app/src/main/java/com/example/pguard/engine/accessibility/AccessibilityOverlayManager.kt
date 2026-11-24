@@ -103,11 +103,13 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
         countdownSeconds: Int = 3,
         redirectUrl: String = "",
         exitWhileCovered: Boolean = false,
+        tryBackBeforeHomeWhileCovered: Boolean = false,
         primaryButtonLabel: String? = null,
         onBeforeRedirect: () -> Unit = {},
         onVerifyRedirectSucceeded: ((normalizedRedirect: String) -> Boolean)? = null,
         onForceExitToHome: (() -> Unit)? = null,
         isStillInBlockedApp: (() -> Boolean)? = null,
+        isStillOnBlockedSurface: (() -> Boolean)? = null,
         onExitComplete: (() -> Unit)? = null,
         onGoBack: () -> Unit = {
             service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
@@ -119,9 +121,39 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                 hideAllImmediate()
 
                 var exitInProgress = false
+                var overlayRootView: FrameLayout? = null
+                var attachedLayoutParams: WindowManager.LayoutParams? = null
+                var primaryActionButton: Button? = null
+                val baseLabel = primaryButtonLabel?.takeIf { it.isNotBlank() } ?: "Go Back to Safety"
                 val homeAction = onForceExitToHome ?: {
                     service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
                     Unit
+                }
+
+                fun setOverlayFocusable(focusable: Boolean): Boolean {
+                    val currentRoot = overlayRootView ?: return false
+                    val currentParams = attachedLayoutParams ?: return false
+                    return try {
+                        currentParams.flags = if (focusable) {
+                            currentParams.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+                        } else {
+                            currentParams.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        }
+                        windowManager.updateViewLayout(currentRoot, currentParams)
+                        true
+                    } catch (_: Exception) {
+                        false
+                    }
+                }
+
+                fun launchHomeIntentFallback() {
+                    try {
+                        val homeIntent = Intent(Intent.ACTION_MAIN).apply {
+                            addCategory(Intent.CATEGORY_HOME)
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        service.startActivity(homeIntent)
+                    } catch (_: Exception) {}
                 }
 
                 fun forceHomeWhileCovered() {
@@ -131,6 +163,10 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                     countdownRunnable = null
                     pendingExitRunnable?.let { mainHandler.removeCallbacks(it) }
                     pendingExitRunnable = null
+
+                    // Release window focus (still solid & touch-blocking) so GLOBAL_ACTION_HOME
+                    // routes cleanly to the OS on OEMs like MIUI/HyperOS.
+                    setOverlayFocusable(false)
 
                     try {
                         homeAction()
@@ -146,6 +182,7 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                             } catch (e: Exception) {
                                 Log.e(TAG, "Error retrying home exit: ${e.message}")
                             }
+                            launchHomeIntentFallback()
                             val finalizeRunnable = Runnable {
                                 pendingExitRunnable = null
                                 hideFullScreenOverlay()
@@ -159,7 +196,62 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                         }
                     }
                     pendingExitRunnable = checkRunnable
-                    mainHandler.postDelayed(checkRunnable, 280L)
+                    mainHandler.postDelayed(checkRunnable, 240L)
+                }
+
+                fun backOrHomeWhileCovered() {
+                    if (exitInProgress) return
+                    exitInProgress = true
+                    countdownRunnable?.let { mainHandler.removeCallbacks(it) }
+                    countdownRunnable = null
+                    pendingExitRunnable?.let { mainHandler.removeCallbacks(it) }
+                    pendingExitRunnable = null
+
+                    val stillBlockedNow = try {
+                        isStillOnBlockedSurface?.invoke() ?: false
+                    } catch (_: Exception) {
+                        false
+                    }
+                    if (!stillBlockedNow) {
+                        // Already exited the blocked surface at trigger time; dismiss cleanly
+                        hideFullScreenOverlay()
+                        onExitComplete?.invoke()
+                        return
+                    }
+
+                    val canPassBack = setOverlayFocusable(false)
+
+                    if (!canPassBack || !service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)) {
+                        exitInProgress = false
+                        forceHomeWhileCovered()
+                        return
+                    }
+
+                    val verifyBackRunnable = Runnable {
+                        pendingExitRunnable = null
+                        val stillBlocked = try {
+                            isStillOnBlockedSurface?.invoke() ?: false
+                        } catch (_: Exception) {
+                            false
+                        }
+                        if (stillBlocked) {
+                            exitInProgress = false
+                            forceHomeWhileCovered()
+                        } else {
+                            hideFullScreenOverlay()
+                            onExitComplete?.invoke()
+                        }
+                    }
+                    pendingExitRunnable = verifyBackRunnable
+                    mainHandler.postDelayed(verifyBackRunnable, 300L)
+                }
+
+                fun fallbackCoveredExit() {
+                    if (tryBackBeforeHomeWhileCovered) {
+                        backOrHomeWhileCovered()
+                    } else {
+                        forceHomeWhileCovered()
+                    }
                 }
 
                 fun redirectWhileCovered(targetRedirect: String) {
@@ -178,7 +270,7 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
 
                     if (!handleSafeRedirect(targetRedirect)) {
                         exitInProgress = false
-                        forceHomeWhileCovered()
+                        fallbackCoveredExit()
                         return
                     }
 
@@ -194,7 +286,7 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                             onExitComplete?.invoke()
                         } else {
                             exitInProgress = false
-                            forceHomeWhileCovered()
+                            fallbackCoveredExit()
                         }
                     }
                     pendingExitRunnable = verifyRunnable
@@ -203,7 +295,7 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
 
                 fun triggerPrimaryExit() {
                     if (exitWhileCovered) {
-                        forceHomeWhileCovered()
+                        fallbackCoveredExit()
                     } else {
                         dismissFullScreenAndExecute(onGoBack)
                     }
@@ -214,6 +306,7 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                     bgSolidColor = 0xFF0D0F14.toInt(),
                     onBack = { triggerPrimaryExit() }
                 )
+                overlayRootView = root
                 val contentLayout = createOverlayContentColumn()
                 root.addView(
                     contentLayout,
@@ -252,7 +345,6 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                 val displayHost = BlockedScreenConfig.extractDisplayHost(normalizedRedirect)
                 val hasRedirect = normalizedRedirect.isNotBlank() && displayHost.isNotBlank()
                 var currentCountdown = if (countdownSeconds > 0) countdownSeconds else 0
-                val baseLabel = primaryButtonLabel?.takeIf { it.isNotBlank() } ?: "Go Back to Safety"
                 val countdownPrefix = if (exitWhileCovered && !primaryButtonLabel.isNullOrBlank()) {
                     primaryButtonLabel
                 } else {
@@ -268,6 +360,7 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                 ) {
                     triggerPrimaryExit()
                 }
+                primaryActionButton = goBackButton.first
                 contentLayout.addView(goBackButton.first, goBackButton.second)
 
                 var redirectBtn: Button? = null
@@ -346,7 +439,7 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
                     mainHandler.postDelayed(countdownRunnable!!, 1000L)
                 }
 
-                attachFullScreenView(root)
+                attachedLayoutParams = attachFullScreenView(root)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to display full-screen accessibility overlay: ${e.message}", e)
             }
@@ -652,7 +745,7 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
         return button to params
     }
 
-    private fun attachFullScreenView(root: View) {
+    private fun attachFullScreenView(root: View): WindowManager.LayoutParams {
         val layoutParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
@@ -681,8 +774,11 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
         })
         lastOverlayAttachRequestMs = SystemClock.elapsedRealtime()
         windowManager.addView(root, layoutParams)
-        activeViews.add(root)
-        isFullScreenShowing = true
+        synchronized(activeViews) {
+            activeViews.add(root)
+            isFullScreenShowing = true
+        }
+        return layoutParams
     }
 
     fun hideFullScreenOverlay() {
@@ -708,15 +804,15 @@ class AccessibilityOverlayManager(private val service: AccessibilityService) {
         pendingExitRunnable?.let { mainHandler.removeCallbacks(it) }
         pendingExitRunnable = null
 
-        synchronized(activeViews) {
-            val iterator = activeViews.iterator()
-            while (iterator.hasNext()) {
-                val view = iterator.next()
-                removeViewSafe(view)
-                iterator.remove()
-            }
+        val viewsToRemove = synchronized(activeViews) {
+            val snapshot = activeViews.toList()
+            activeViews.clear()
+            isFullScreenShowing = false
+            snapshot
         }
-        isFullScreenShowing = false
+        for (view in viewsToRemove) {
+            removeViewSafe(view)
+        }
     }
 
     private fun removeViewSafe(view: View) {

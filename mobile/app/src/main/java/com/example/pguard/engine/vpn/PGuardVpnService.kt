@@ -199,14 +199,16 @@ class PGuardVpnService : VpnService() {
         tunInterface = pfd
         tunOutput = FileOutputStream(pfd.fileDescriptor)
         workerPool = ThreadPoolExecutor(
-            4,
-            24,
-            30L,
+            2,
+            16,
+            20L,
             TimeUnit.SECONDS,
             ArrayBlockingQueue(128),
             { runnable -> Thread(runnable, "pguard-dns-worker").apply { isDaemon = true } },
             ThreadPoolExecutor.DiscardOldestPolicy()
-        )
+        ).apply {
+            allowCoreThreadTimeOut(true)
+        }
         running = true
         _isRunning.value = true
         registerNetworkCallback()

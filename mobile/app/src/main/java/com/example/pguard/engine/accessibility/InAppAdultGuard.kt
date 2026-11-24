@@ -369,25 +369,35 @@ object InAppAdultGuard {
         return PASSIVE_SETTINGS_TOGGLE_PREFIXES.any { lower.startsWith(it) || lower.contains(it) }
     }
 
+    private val EXCLUDED_PACKAGE_KEYWORDS = listOf(
+        // System, telephony, launchers, keyboards
+        "dialer", "incallui", "launcher", "trebuchet", "quickstep",
+        "inputmethod", "gboard", "swiftkey", "honeyboard", "fleksy",
+        "gingerkeyboard", "keyboard", "pixelboard", "miui.securitycenter",
+        "wellbeing",
+        // Banking, mobile money, wallets, and finance apps
+        "bank", "mpesa", "safaricom", "equity", "kcb", "coop", "absa", "ncba",
+        "stanbic", "stanchart", "dtb", "imbank", "familybank", "sacco",
+        "pesalink", "airtelmoney", "paypal", "wise", "revolut", "cashapp",
+        "venmo", "wallet", "finance", "fintech", "payment", "paystack",
+        "flutterwave", "chipper", "kuda", "opay", "palmpay", "moniepoint",
+        "chase", "wellsfargo", "citibank", "hsbc", "barclays", "monzo",
+        "starling", "nubank", "binance", "coinbase",
+        // Password managers & authenticators
+        "bitwarden", "1password", "lastpass", "keepass", "dashlane",
+        "authenticator", "authy",
+        // Safe system/productivity utilities
+        "calculator", "deskclock", "calendar", "contacts", "camera",
+        "gallery", "photos", "documentsui", "maps", "spotify", "weather"
+    )
+
     fun isExcludedFromInAppAdultScan(packageName: String, ownPackageName: String): Boolean {
         val pkg = packageName.trim().lowercase(Locale.ROOT)
         val own = ownPackageName.trim().lowercase(Locale.ROOT)
         if (pkg.isBlank() || pkg == own) return true
         if (pkg in EXCLUDED_EXACT_PACKAGES || pkg.startsWith("com.android.systemui.")) return true
-
-        return pkg.contains("dialer") ||
-            pkg.contains("incallui") ||
-            pkg.contains("launcher") ||
-            pkg.contains("trebuchet") ||
-            pkg.contains("inputmethod") ||
-            pkg.contains("gboard") ||
-            pkg.contains("swiftkey") ||
-            pkg.contains("honeyboard") ||
-            pkg.contains("fleksy") ||
-            pkg.contains("gingerkeyboard") ||
-            pkg.endsWith(".ime") ||
-            pkg.contains(".ime.") ||
-            pkg.contains("keyboard")
+        if (pkg.endsWith(".ime") || pkg.contains(".ime.")) return true
+        return EXCLUDED_PACKAGE_KEYWORDS.any { pkg.contains(it) }
     }
 
     fun isSocialOrCommunityApp(packageName: String): Boolean {

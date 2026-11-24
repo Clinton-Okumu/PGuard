@@ -56,4 +56,198 @@ class SocialAppGuardsTest {
         assertTrue(SocialAppGuards.isShortsIdentifier("Shorts tab"))
         assertFalse(SocialAppGuards.isShortsIdentifier("Subscriptions"))
     }
+
+    @Test
+    fun `youtube shorts click targets and active player hierarchy match without false-blocking home feed`() {
+        assertTrue(SocialAppGuards.isShortsClickTarget("Funny cat, 1.2M views - play Short"))
+        assertTrue(SocialAppGuards.isShortsClickTarget("Shorts"))
+        assertTrue(SocialAppGuards.isShortsClickTarget("Cortos"))
+        assertFalse(SocialAppGuards.isShortsClickTarget("Subscriptions"))
+        assertFalse(SocialAppGuards.isShortsClickTarget("Watch later"))
+
+        assertTrue(
+            SocialAppGuards.isShortsNodeActive(
+                viewId = "com.google.android.youtube:id/reel_player_overlay",
+                desc = "",
+                text = ""
+            )
+        )
+        assertTrue(
+            SocialAppGuards.isShortsNodeActive(
+                viewId = "com.google.android.youtube:id/reel_progress_bar",
+                desc = "",
+                text = ""
+            )
+        )
+        assertTrue(
+            SocialAppGuards.isShortsNodeActive(
+                viewId = "",
+                desc = "Remix this Short",
+                text = ""
+            )
+        )
+        assertTrue(
+            SocialAppGuards.isShortsNodeActive(
+                viewId = "com.google.android.youtube:id/pivot_shorts",
+                desc = "Shorts",
+                text = "",
+                stateDesc = "Selected"
+            )
+        )
+        assertTrue(
+            SocialAppGuards.isShortsNodeActive(
+                viewId = "",
+                desc = "Shorts",
+                text = "",
+                parentSelected = true
+            )
+        )
+
+        // Must NOT false-trigger on unselected bottom tab or passive Home feed Shorts shelf cards
+        assertFalse(
+            SocialAppGuards.isShortsNodeActive(
+                viewId = "com.google.android.youtube:id/pivot_shorts",
+                desc = "Shorts",
+                text = "Shorts",
+                isSelected = false,
+                isFocused = false,
+                parentSelected = false
+            )
+        )
+        assertFalse(
+            SocialAppGuards.isShortsNodeActive(
+                viewId = "com.google.android.youtube:id/shorts_shelf",
+                desc = "Funny cat, 1.2M views - play Short",
+                text = ""
+            )
+        )
+    }
+
+    @Test
+    fun `whatsapp channels matches directory and open channel views without false-blocking regular chats`() {
+        assertTrue(
+            SocialAppGuards.isWhatsAppChannelNodeActive(
+                viewId = "com.whatsapp:id/newsletter_info",
+                desc = "",
+                text = ""
+            )
+        )
+        assertTrue(
+            SocialAppGuards.isWhatsAppChannelNodeActive(
+                viewId = "com.whatsapp:id/newsletter_follow",
+                desc = "",
+                text = "Follow"
+            )
+        )
+        assertTrue(
+            SocialAppGuards.isWhatsAppChannelNodeActive(
+                viewId = "",
+                desc = "",
+                text = "This channel has added privacy for your profile and phone number."
+            )
+        )
+        assertFalse(
+            SocialAppGuards.isWhatsAppChannelNodeActive(
+                viewId = "com.whatsapp:id/conversations_row_contact_name",
+                desc = "Alice",
+                text = "Messages"
+            )
+        )
+    }
+
+    @Test
+    fun `instagram reels matches modern viewer ids and parent selection while ignoring stories`() {
+        assertTrue(
+            SocialAppGuards.isInstagramReelsNodeActive(
+                viewId = "com.instagram.android:id/clips_media_component",
+                desc = "",
+                text = "",
+                isSelected = false,
+                isFocused = false
+            )
+        )
+        assertTrue(
+            SocialAppGuards.isInstagramReelsNodeActive(
+                viewId = "",
+                desc = "Remix this reel",
+                text = "",
+                isSelected = false,
+                isFocused = false
+            )
+        )
+        assertTrue(
+            SocialAppGuards.isInstagramReelsNodeActive(
+                viewId = "com.instagram.android:id/reels_tab",
+                desc = "Reels",
+                text = "",
+                isSelected = false,
+                isFocused = false,
+                stateDesc = "Selected"
+            )
+        )
+        assertFalse(
+            SocialAppGuards.isInstagramReelsNodeActive(
+                viewId = "com.instagram.android:id/reel_viewer_root",
+                desc = "Story",
+                text = "",
+                isSelected = false,
+                isFocused = false
+            )
+        )
+    }
+
+    @Test
+    fun `youtube shorts multi-signal screen signature detects obfuscated Shorts player without blocking regular videos`() {
+        val modernShortsPlayerTexts = listOf(
+            "Search",
+            "More options",
+            "like this video along with 45,120 other people",
+            "Dislike this video",
+            "View 312 comments",
+            "Share this video",
+            "Remix",
+            "@creator",
+            "Subscribe"
+        )
+        assertTrue(SocialAppGuards.isShortsScreenSignature(modernShortsPlayerTexts))
+
+        val regularVideoWatchPageTexts = listOf(
+            "Minimize",
+            "Autoplay is on",
+            "Enter fullscreen",
+            "like this video along with 1,200 other people",
+            "Dislike this video",
+            "Share",
+            "Remix",
+            "Save to playlist",
+            "Download video"
+        )
+        assertFalse(SocialAppGuards.isShortsScreenSignature(regularVideoWatchPageTexts))
+
+        val homeFeedTexts = listOf(
+            "Home",
+            "Shorts",
+            "Subscriptions",
+            "You",
+            "Funny cat, 1.2M views - play Short"
+        )
+        assertFalse(SocialAppGuards.isShortsScreenSignature(homeFeedTexts))
+    }
+
+    @Test
+    fun `recognizes official and modded YouTube APK package names`() {
+        val ytPackages = listOf(
+            "com.google.android.youtube",
+            "app.revanced.android.youtube",
+            "app.rvx.android.youtube",
+            "com.vanced.android.youtube",
+            "org.polymorphicshade.tubular",
+            "com.futo.platformplayer",
+            "by.green.tuber"
+        )
+        for (pkg in ytPackages) {
+            assertTrue("Expected $pkg to be recognized as YouTube", SocialAppGuards.isYouTubePackage(pkg))
+        }
+        assertFalse(SocialAppGuards.isYouTubePackage("com.android.chrome"))
+    }
 }

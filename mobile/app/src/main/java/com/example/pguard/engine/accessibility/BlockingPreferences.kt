@@ -108,6 +108,10 @@ object BlockingPreferences {
         isNewlyInstalledAppsBlockingEnabled = prefs.getBoolean(KEY_NEW_INSTALLED_APPS, false)
         isDnsVpnEnabled = prefs.getBoolean(KEY_DNS_VPN_ENABLED, false)
         newAppsEnabledAt = prefs.getLong(KEY_NEW_APPS_ENABLED_AT, 0L)
+        if (isNewlyInstalledAppsBlockingEnabled && newAppsEnabledAt == 0L) {
+            newAppsEnabledAt = System.currentTimeMillis()
+            prefs.edit().putLong(KEY_NEW_APPS_ENABLED_AT, newAppsEnabledAt).apply()
+        }
         blockedScreenMessage = prefs.getString(KEY_MESSAGE, "This page is blocked.") ?: "This page is blocked."
         blockedScreenCountdown = prefs.getInt(KEY_COUNTDOWN, 3)
         redirectUrl = prefs.getString(KEY_REDIRECT_URL, "") ?: ""

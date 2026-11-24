@@ -128,13 +128,16 @@ object BrowserInspector {
      * for instant matching.
      */
     val KNOWN_UNSUPPORTED_BROWSER_PACKAGES = setOf(
-        // Tor Browser (tunnels DNS/traffic through Tor onion circuits)
+        // Tor & Onion proxy browsers
         "org.torproject.torbrowser",
         "org.torproject.torbrowser_alpha",
+        "org.torproject.torbrowser_nightly",
+        "info.guardianproject.orfox",
 
         // Opera Mini (cloud proxy compression bypasses local DNS filtering)
         "com.opera.mini.native",
         "com.opera.mini.native.beta",
+        "com.opera.mini.android",
 
         // UC Browser / UC Mini
         "com.ucmobile.intl",
@@ -144,9 +147,11 @@ object BrowserInspector {
 
         // Kiwi Browser
         "com.kiwibrowser.browser",
+        "com.kiwibrowser.browser.dev",
 
         // Xiaomi / Mint Browser
         "com.mi.globalbrowser",
+        "com.mi.globalbrowser.mini",
         "com.android.browser",
         "com.mint.browser",
 
@@ -168,6 +173,7 @@ object BrowserInspector {
         // Aloha Browser
         "alohabrowser.browser",
         "alohabrowser.browser.lite",
+        "com.alohamobile.browser",
 
         // Yandex Browser
         "com.yandex.browser",
@@ -177,10 +183,29 @@ object BrowserInspector {
         // Huawei Browser
         "com.huawei.browser",
 
+        // Privacy / Chromium / Gecko forks whose package IDs do not contain "browser"
+        "org.bromite.bromite",
+        "org.cromite.cromite",
+        "net.waterfox.android.release",
+        "io.github.forkmaintainers.iceraven",
+        "org.gnu.icecat",
+        "us.spotco.fennec_dos",
+        "net.mullvad.mullvadbrowser",
+        "com.naver.whale",
+        "com.tencent.mtt",
+        "com.oh.bro",
+        "com.oh.brop",
+
         // Other generic & niche browsers
         "mark.via.gp",
         "com.mycompany.app.soulbrowser",
         "com.pure.browser",
+        "com.quark.browser",
+        "com.mx.browser",
+        "com.xbrowser.play",
+        "com.mmbox.xbrowser",
+        "com.fevdev.nakedbrowser",
+        "com.fevdev.nakedbrowserpro",
         "br.marcelo.monumentbrowser",
         "com.ghostery.android.ghostery",
         "com.ksmobile.cb",
@@ -203,20 +228,22 @@ object BrowserInspector {
 
         val browsers = mutableSetOf<String>()
         try {
-            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://example.com")).apply {
-                addCategory(Intent.CATEGORY_BROWSABLE)
-            }
             val pm = context.packageManager
             val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 PackageManager.MATCH_ALL
             } else {
                 PackageManager.MATCH_DEFAULT_ONLY
             }
-            val resolved = pm.queryIntentActivities(intent, flags)
-            for (ri in resolved) {
-                val pkg = ri.activityInfo?.packageName
-                if (!pkg.isNullOrBlank() && pkg != "android" && pkg != context.packageName) {
-                    browsers.add(pkg.lowercase(Locale.ROOT))
+            for (schemeUrl in listOf("https://example.com", "http://example.com")) {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(schemeUrl)).apply {
+                    addCategory(Intent.CATEGORY_BROWSABLE)
+                }
+                val resolved = pm.queryIntentActivities(intent, flags)
+                for (ri in resolved) {
+                    val pkg = ri.activityInfo?.packageName
+                    if (!pkg.isNullOrBlank() && pkg != "android" && pkg != context.packageName) {
+                        browsers.add(pkg.lowercase(Locale.ROOT))
+                    }
                 }
             }
         } catch (e: Exception) {
@@ -307,7 +334,7 @@ object BrowserInspector {
         if (pkg in KNOWN_UNSUPPORTED_BROWSER_PACKAGES) return true
         if (pkg.contains("firefox") || pkg.contains("mozilla") || pkg.contains("fenix") ||
             pkg.contains("focus") || pkg.contains("fennec") || pkg.contains("klar") ||
-            pkg.contains("chrome") || pkg.contains("browser") || pkg.contains("opera") ||
+            pkg.contains("chrome") || isLikelyWebBrowserPackageName(pkg) || pkg.contains("opera") ||
             pkg.contains("brave") || pkg.contains("sbrowser")) {
             return true
         }

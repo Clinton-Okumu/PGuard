@@ -131,7 +131,10 @@ class NewAppInstallGuardTest {
             "com.android.settings",
             "com.google.android.packageinstaller",
             "com.google.android.permissioncontroller",
-            "com.sec.android.app.launcher"
+            "com.sec.android.app.launcher",
+            "com.miui.home",
+            "com.touchtype.swiftkey",
+            "com.google.android.dialer"
         )
         for (pkg in corePackages) {
             assertTrue(NewAppInstallGuard.isCoreOrSystemPackageName(pkg, selfPkg))
@@ -148,5 +151,21 @@ class NewAppInstallGuardTest {
                 )
             )
         }
+    }
+
+    @Test
+    fun `auto-blocks newly installed unsupported browsers and regular apps`() {
+        assertTrue(
+            NewAppInstallGuard.shouldAutoBlockNewApp(
+                packageName = "com.opera.mini.native",
+                selfPackageName = selfPkg,
+                isFeatureEnabled = true,
+                isSystemApp = false,
+                hasLaunchIntent = true,
+                isInputMethod = false,
+                isWhitelisted = false,
+                isApprovedNewApp = false
+            )
+        )
     }
 }

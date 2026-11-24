@@ -158,6 +158,24 @@ object BlockedScreenConfig {
         return currentHost == expectedHost || currentHost.endsWith(".$expectedHost")
     }
 
+    /**
+     * Determines whether the blocked app should still be considered in the foreground underneath
+     * PGuard's own accessibility overlay. Fails closed when the underlying package is unknown or
+     * resolves to PGuard itself so the overlay never dismisses onto blocked content.
+     */
+    fun isUnderlyingAppStillBlocked(
+        underlyingPackage: String?,
+        blockedPackage: String,
+        ownPackage: String
+    ): Boolean {
+        val underlying = underlyingPackage?.trim().orEmpty()
+        if (underlying.isEmpty()) return true
+        if (ownPackage.isNotBlank() && underlying.equals(ownPackage.trim(), ignoreCase = true)) {
+            return true
+        }
+        return blockedPackage.isNotBlank() && underlying.equals(blockedPackage.trim(), ignoreCase = true)
+    }
+
     fun resolveOverlayMessage(customMessage: String, defaultFallback: String): String {
         val trimmed = customMessage.trim()
         return if (trimmed.isNotEmpty() && !trimmed.equals(DEFAULT_MESSAGE, ignoreCase = true)) {
