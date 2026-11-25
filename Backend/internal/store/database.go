@@ -24,6 +24,13 @@ func Open() (*gorm.DB, error) {
 
 	dsn := cleanEnvValue(os.Getenv("DATABASE_URL"))
 	if dsn == "" {
+		var envKeys []string
+		for _, e := range os.Environ() {
+			if k, _, ok := strings.Cut(e, "="); ok {
+				envKeys = append(envKeys, k)
+			}
+		}
+		log.Printf("WARN: DATABASE_URL is empty! Available env keys: %v", envKeys)
 		dsn = defaultDSN()
 	}
 
