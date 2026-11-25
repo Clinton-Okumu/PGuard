@@ -64,13 +64,19 @@ class ContentFilter(
      * Tiered page-body scanner for rendered browser text.
      *
      * Immediate block when any node matches:
-     *  - an adult TLD, adult domain signature, explicit URL pattern, or a strong adult pattern.
-     * Contextual terms (isolated profanity or medical anatomy terms) accumulate score (+1 per
-     * distinct contextual rule hit across the visible page) and only block at threshold >= 3.
+     *  - an adult TLD, adult domain signature in a URL/embedded domain, or explicit URL pattern.
+     *  - a short/focused explicit label or title (< 8 words) with a strong adult pattern or brand.
+     * Long editorial/news headlines (>= 8 words) that contain only a single plain-text brand or
+     * keyword mention (e.g. a gaming news article mentioning "Pornhub traffic") contribute +2
+     * instead of immediately blocking, requiring at least one corroborating adult/contextual
+     * signal on the visible screen (score >= 3).
+     * Contextual terms (isolated profanity or medical anatomy terms) accumulate +1 per distinct
+     * contextual rule hit across the visible page and block at threshold >= 3.
      */
     fun findAdultPageContent(pageTexts: Collection<String>): String? {
         if (pageTexts.isEmpty()) return null
         val matchedContextualRules = HashSet<Int>()
+        var pageScore = 0
 
         for (rawText in pageTexts) {
             val cleaned = InAppAdultGuard.stripSfwRedditSubreddits(rawText)
@@ -81,19 +87,59 @@ class ContentFilter(
             if (target.hostLabels.any { it in adultDomainSignatures }) return rawText
             if (target.hostTokens.any { it in adultDomainSignatures }) return rawText
             if (!target.isPlainText && ADULT_URL_PATTERNS.any { it.containsMatchIn(target.searchableText) }) return rawText
-            if (target.isPlainText && target.textTokens.any { it in plainTextDomainSignatures }) return rawText
-            if (strongPagePatterns.any { it.containsMatchIn(target.searchableText) }) return rawText
+            if (target.isPlainText && containsEmbeddedAdultDomain(target.searchableText)) return rawText
+
+            val distinctStrongMatches = HashSet<String>()
+            if (target.isPlainText) {
+                for (tok in target.textTokens) {
+                    if (tok in plainTextDomainSignatures) {
+                        distinctStrongMatches.add(tok)
+                    }
+                }
+            }
+            for (pattern in strongPagePatterns) {
+                for (match in pattern.findAll(target.searchableText)) {
+                    distinctStrongMatches.add(match.value.trim().lowercase(Locale.ROOT))
+                }
+            }
+
+            if (distinctStrongMatches.isNotEmpty()) {
+                val isLongEditorialText = target.isPlainText && target.textTokens.size >= EDITORIAL_HEADLINE_MIN_WORDS
+                if (!isLongEditorialText || distinctStrongMatches.size >= 2) {
+                    return rawText
+                }
+                pageScore += 2
+                if (pageScore >= PAGE_ADULT_SCORE_THRESHOLD) {
+                    return rawText
+                }
+            }
 
             contextualPagePatterns.forEachIndexed { idx, pattern ->
                 if (pattern.containsMatchIn(target.searchableText)) {
-                    matchedContextualRules.add(idx)
+                    if (matchedContextualRules.add(idx)) {
+                        pageScore += 1
+                    }
                 }
             }
-            if (matchedContextualRules.size >= PAGE_ADULT_SCORE_THRESHOLD) {
+            if (pageScore >= PAGE_ADULT_SCORE_THRESHOLD) {
                 return rawText
             }
         }
         return null
+    }
+
+    /**
+     * Checks whether plain text contains an explicit embedded adult domain/URL (e.g. "onlyfans.com/creator"),
+     * distinguishing actual links from editorial mentions of a brand name.
+     */
+    fun containsEmbeddedAdultDomain(text: String): Boolean {
+        if (!text.contains('.')) return false
+        for (match in EMBEDDED_DOMAIN_CANDIDATE_REGEX.findAll(text)) {
+            if (isAdultDomain(match.value)) {
+                return true
+            }
+        }
+        return false
     }
 
     fun matchesCustomBlocklist(rawInput: String, blocklist: Collection<String>): Boolean {
@@ -302,6 +348,11 @@ class ContentFilter(
     companion object {
         private const val MAX_REGEX_CACHE_SIZE = 512
         private const val PAGE_ADULT_SCORE_THRESHOLD = 3
+        private const val EDITORIAL_HEADLINE_MIN_WORDS = 8
+        private val EMBEDDED_DOMAIN_CANDIDATE_REGEX = Regex(
+            """(?<![\p{L}\p{N}-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,10}(?![\p{L}\p{N}-])""",
+            RegexOption.IGNORE_CASE
+        )
         private val ZERO_WIDTH_CHARS = Regex("[\\u200B-\\u200D\\uFEFF]")
         private val WHITESPACE = Regex("\\s+")
         private val domainRegexCache = ConcurrentHashMap<String, Regex>()

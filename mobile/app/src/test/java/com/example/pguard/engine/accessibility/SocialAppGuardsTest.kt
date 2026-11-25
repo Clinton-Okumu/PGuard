@@ -232,6 +232,62 @@ class SocialAppGuardsTest {
             "Funny cat, 1.2M views - play Short"
         )
         assertFalse(SocialAppGuards.isShortsScreenSignature(homeFeedTexts))
+
+        // YouTube Community image posts have Like/Dislike/Comment/Share without Remix or video-specific labels
+        val communityImagePostTexts = listOf(
+            "Tech Channel",
+            "2 hours ago",
+            "Check out our new studio setup photo!",
+            "Like",
+            "Dislike",
+            "Comment",
+            "Share"
+        )
+        assertFalse(SocialAppGuards.isShortsScreenSignature(communityImagePostTexts))
+
+        val communityPostWithDescTexts = listOf(
+            "Like this post along with 1.4K others",
+            "Dislike this post",
+            "View 89 comments",
+            "Share"
+        )
+        assertFalse(SocialAppGuards.isShortsScreenSignature(communityPostWithDescTexts))
+    }
+
+    @Test
+    fun `whatsapp recognizes selected Chats Calls and Communities tabs so off-screen Updates never re-block`() {
+        assertTrue(
+            SocialAppGuards.isWhatsAppNonUpdatesTabSelected(
+                viewId = "com.whatsapp:id/chats_tab",
+                desc = "Chats",
+                text = "Chats",
+                isSelected = true
+            )
+        )
+        assertTrue(
+            SocialAppGuards.isWhatsAppNonUpdatesTabSelected(
+                viewId = "",
+                desc = "Chats, Selected",
+                text = "Chats",
+                isSelected = false
+            )
+        )
+        assertFalse(
+            SocialAppGuards.isWhatsAppNonUpdatesTabSelected(
+                viewId = "com.whatsapp:id/chats_tab",
+                desc = "Chats",
+                text = "Chats",
+                isSelected = false
+            )
+        )
+        assertFalse(
+            SocialAppGuards.isWhatsAppNonUpdatesTabSelected(
+                viewId = "com.whatsapp:id/updates_tab",
+                desc = "Updates",
+                text = "Updates",
+                isSelected = true
+            )
+        )
     }
 
     @Test

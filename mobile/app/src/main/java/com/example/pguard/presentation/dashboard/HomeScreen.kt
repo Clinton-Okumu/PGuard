@@ -17,8 +17,10 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -27,10 +29,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.findViewTreeViewModelStoreOwner
+import com.example.pguard.presentation.habits.HabitsManager
 import com.example.pguard.core.datastore.AuthDataStore
 import com.example.pguard.core.network.NetworkClient
 import com.example.pguard.core.network.model.UserDto
@@ -117,6 +123,29 @@ fun HomeScreen(
 
     LaunchedEffect(user?.email) {
         blockingViewModel.setCurrentUserEmail(user?.email)
+    }
+
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var lastAutoAuxSyncMs by remember { mutableLongStateOf(0L) }
+    val homeScope = rememberCoroutineScope()
+    DisposableEffect(lifecycleOwner, user?.id) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && user != null) {
+                blockingViewModel.autoSyncIfNeeded()
+                val now = System.currentTimeMillis()
+                if ((now - lastAutoAuxSyncMs) >= 30_000L) {
+                    lastAutoAuxSyncMs = now
+                    blocklistViewModel.loadBlocklist()
+                    homeScope.launch {
+                        HabitsManager.syncCalendarWithBackend(context, user.id)
+                    }
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     val tabs = remember { PGuardTab.entries }

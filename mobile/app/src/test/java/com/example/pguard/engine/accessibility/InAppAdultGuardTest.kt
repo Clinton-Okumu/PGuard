@@ -362,4 +362,23 @@ class InAppAdultGuardTest {
             )
         )
     }
+
+    @Test
+    fun `reddit browser feed allows gaming news headline mentioning pornhub without NSFW signals`() {
+        val redditFeedTexts = listOf(
+            "r/gaming · 3h ago",
+            "Real Life Strip Club Says It's Had 'Hundreds of Inquiries' From GTA 6 Fans, as Pornhub Traffic Plummets",
+            "IGN",
+            "3.8K upvotes",
+            "420 comments"
+        )
+        assertNull(
+            InAppAdultGuard.findAdultScreenMatch(
+                packageName = "com.android.chrome",
+                activeUrl = "https://www.reddit.com/",
+                visibleTexts = redditFeedTexts,
+                isBrowser = true
+            )
+        )
+    }
 }

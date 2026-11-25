@@ -946,7 +946,18 @@ class PGuardAccessibilityService : AccessibilityService() {
 
     private fun shouldBlockPageSnippet(input: String): Boolean {
         if (shouldBlockCustomOrSocialUrl(input)) return true
-        return isAdultBlockingEnabled && contentFilter.findAdultPageContent(listOf(input)) != null
+        if (!isAdultBlockingEnabled) return false
+        // Passive event snippets (scroll / content updates) only instant-block on actual adult
+        // domains/URLs; plain-text page copy is evaluated intelligently by runBrowserDeepScan.
+        val trimmed = input.trim()
+        val looksLikeUrl = trimmed.startsWith("http://", ignoreCase = true) ||
+            trimmed.startsWith("https://", ignoreCase = true) ||
+            (trimmed.contains('.') && trimmed.none { it.isWhitespace() })
+        return if (looksLikeUrl) {
+            contentFilter.isAdultContent(trimmed)
+        } else {
+            contentFilter.containsEmbeddedAdultDomain(trimmed)
+        }
     }
 
     private fun isYouTubeShortsUrl(input: String): Boolean {

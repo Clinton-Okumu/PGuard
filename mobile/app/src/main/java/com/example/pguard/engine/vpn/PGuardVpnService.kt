@@ -293,6 +293,8 @@ class PGuardVpnService : VpnService() {
             val builder = Builder()
                 .setSession(getString(R.string.vpn_service_label))
                 .setMtu(MTU)
+                .allowBypass()
+                .setUnderlyingNetworks(null)
                 .addAddress("10.111.222.1", 32)
                 .addDnsServer("10.111.222.2")
                 .addRoute("10.111.222.2", 32)
@@ -308,10 +310,18 @@ class PGuardVpnService : VpnService() {
                 builder.setMetered(false)
             }
 
-            try {
-                builder.addDisallowedApplication(packageName)
-            } catch (e: Exception) {
-                Log.w(TAG, "Could not disallow own package on VPN builder: ${e.message}")
+            // Exclude PGuard itself and Android's shell/ADB daemon so Wireless Debugging
+            // (ADB over Wi-Fi / mDNS) and local developer connections continue working while DNS Shield is active.
+            val disallowedPackages = listOf(
+                packageName,
+                "com.android.shell"
+            )
+            for (pkg in disallowedPackages) {
+                try {
+                    builder.addDisallowedApplication(pkg)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Could not disallow $pkg on VPN builder: ${e.message}")
+                }
             }
 
             builder.establish()

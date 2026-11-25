@@ -67,6 +67,7 @@ import com.example.pguard.presentation.blocklist.BlocklistViewModel
 import com.example.pguard.presentation.dashboard.AccountabilityMode
 import com.example.pguard.presentation.dashboard.BlockingViewModel
 import com.example.pguard.presentation.dashboard.ProtectedAction
+import com.example.pguard.presentation.dashboard.SyncState
 import com.example.pguard.presentation.dashboard.TimeDelayActiveBanner
 import com.example.pguard.presentation.dashboard.openAccessibilitySettings
 import com.example.pguard.presentation.dashboard.openAutoStartSettings
@@ -213,15 +214,21 @@ fun SettingsScreen(
             )
             SettingDivider()
 
+            val vmSyncState = blockingUiState?.syncState ?: SyncState.IDLE
+            val isCurrentlySyncing = isSyncing || vmSyncState == SyncState.SYNCING
+            val syncSubtitle = when {
+                user == null -> "Sign in to automatically sync settings, blocklist & streak"
+                isCurrentlySyncing -> "Syncing automatically..."
+                vmSyncState == SyncState.PENDING_RETRY -> "Waiting for connection • Retries automatically"
+                vmSyncState == SyncState.SYNCED -> "Auto-sync active • Up to date"
+                else -> "Auto-sync active • Settings, blocklist & streak"
+            }
+
             SettingItemRow(
                 iconRes = R.drawable.ic_settings_sync,
-                title = "Sync Data Now",
-                subtitle = if (isSyncing) {
-                    "Syncing settings, blocklist & streak..."
-                } else {
-                    "Sync settings, blocklist & streak"
-                },
-                trailingContent = if (isSyncing) {
+                title = "Cloud Sync",
+                subtitle = syncSubtitle,
+                trailingContent = if (isCurrentlySyncing) {
                     {
                         CircularProgressIndicator(
                             modifier = Modifier.size(18.dp),
@@ -233,57 +240,17 @@ fun SettingsScreen(
                     null
                 },
                 onClick = {
-                    if (isSyncing) return@SettingItemRow
+                    if (isCurrentlySyncing) return@SettingItemRow
                     if (user == null) {
-                        Toast.makeText(
-                            context,
-                            "Sign in to sync settings across devices.",
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        onSignInClick()
                         return@SettingItemRow
                     }
                     coroutineScope.launch {
                         isSyncing = true
                         try {
-                            val settingsResult = if (blockingViewModel != null) {
-                                blockingViewModel.syncSettingsNow()
-                            } else {
-                                val repo = SettingsRepository(NetworkClient.getSettingsApiService(context))
-                                repo.fetchSettings().map { s ->
-                                    if (!BlockingPreferences.isLocalDirty) {
-                                        BlockingPreferences.saveSettings(
-                                            context = context,
-                                            adult = s.blockAdultContent,
-                                            shorts = s.blockShorts,
-                                            whatsapp = s.blockWhatsAppChannels,
-                                            instagramReels = s.blockInstagramReels,
-                                            tiktok = s.blockTikTok,
-                                            uninstall = s.uninstallProtection,
-                                            unsupportedBrowsers = s.blockUnsupportedBrowsers,
-                                            newInstalledApps = s.blockNewlyInstalledApps,
-                                            message = s.blockedScreenMessage,
-                                            countdown = s.blockedScreenCountdown,
-                                            redirect = s.redirectUrl,
-                                            markDirty = false
-                                        )
-                                        BlockingPreferences.saveAccountabilityMode(context, s.accountabilityMode)
-                                    }
-                                }
-                            }
+                            blockingViewModel?.syncSettingsNow()
                             blocklistViewModel?.loadBlocklist()
                             HabitsManager.syncCalendarWithBackend(context, user.id)
-                            settingsResult.fold(
-                                onSuccess = {
-                                    Toast.makeText(context, "Data synced successfully", Toast.LENGTH_SHORT).show()
-                                },
-                                onFailure = { error ->
-                                    Toast.makeText(
-                                        context,
-                                        "Sync failed: ${error.localizedMessage ?: "Unable to reach server"}",
-                                        Toast.LENGTH_LONG
-                                    ).show()
-                                }
-                            )
                         } finally {
                             isSyncing = false
                         }

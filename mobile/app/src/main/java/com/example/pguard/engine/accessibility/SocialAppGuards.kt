@@ -1,5 +1,6 @@
 package com.example.pguard.engine.accessibility
 
+import android.graphics.Rect
 import android.os.Build
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -159,6 +160,8 @@ object SocialAppGuards {
      */
     internal fun isShortsScreenSignature(texts: Collection<String>): Boolean {
         if (texts.isEmpty()) return false
+        var hasVideoLike = false
+        var hasVideoDislike = false
         var hasLike = false
         var hasDislike = false
         var hasComments = false
@@ -169,14 +172,22 @@ object SocialAppGuards {
             val lower = raw.trim().lowercase(Locale.ROOT)
             if (lower.isEmpty()) continue
 
-            if (REGULAR_YOUTUBE_WATCH_MARKERS.any { marker -> lower.contains(marker) }) {
+            if (REGULAR_YOUTUBE_WATCH_MARKERS.any { marker -> lower.contains(marker) } ||
+                NON_SHORTS_YOUTUBE_MARKERS.any { marker -> lower.contains(marker) }
+            ) {
                 return false
             }
 
-            if (!hasLike && (lower.startsWith("like this video") || lower == "like")) {
+            if (!hasVideoLike && lower.startsWith("like this video")) {
+                hasVideoLike = true
+                hasLike = true
+            } else if (!hasLike && lower == "like") {
                 hasLike = true
             }
-            if (!hasDislike && (lower.startsWith("dislike this video") || lower == "dislike")) {
+            if (!hasVideoDislike && lower.startsWith("dislike this video")) {
+                hasVideoDislike = true
+                hasDislike = true
+            } else if (!hasDislike && lower == "dislike") {
                 hasDislike = true
             }
             if (!hasComments && (
@@ -201,8 +212,10 @@ object SocialAppGuards {
             (if (hasShare) 1 else 0) +
             (if (hasRemix) 1 else 0)
 
-        // Require Dislike OR Remix alongside at least 2 other Shorts overlay actions (>=3 total)
-        return signals >= 3 && (hasDislike || hasRemix)
+        // Community image posts expose bare "Like" + "Dislike" + "Comment" + "Share" without
+        // "Remix" or video-specific "like this video" / "dislike this video" descriptions.
+        return (hasRemix && signals >= 3) ||
+            (hasVideoLike && hasVideoDislike && (hasComments || hasShare))
     }
 
     fun isShortsActiveInHierarchy(node: AccessibilityNodeInfo?, depth: Int = 0): Boolean {
@@ -211,22 +224,35 @@ object SocialAppGuards {
 
     fun isShortsActiveInHierarchy(roots: List<AccessibilityNodeInfo>): Boolean {
         val collectedTexts = ArrayList<String>(128)
+        var nonShortsTabSelected = false
         val directMatch = bfsMatchesAny(roots) { node, viewId, desc, text, stateDesc, parentSelected ->
             if (collectedTexts.size < 250) {
                 if (desc.isNotBlank()) collectedTexts.add(desc)
                 if (text.isNotBlank()) collectedTexts.add(text)
+            }
+            val isSelected = node.isSelected || node.isChecked
+            val lowerDesc = desc.trim().lowercase(Locale.ROOT)
+            val lowerText = text.trim().lowercase(Locale.ROOT)
+            val lowerState = stateDesc.trim().lowercase(Locale.ROOT)
+            if (!nonShortsTabSelected &&
+                (isSelected || parentSelected || lowerState.contains("selected") || lowerDesc.contains("selected")) &&
+                (lowerText in NON_SHORTS_YOUTUBE_TABS ||
+                    lowerDesc in NON_SHORTS_YOUTUBE_TABS ||
+                    NON_SHORTS_YOUTUBE_TABS.any { tab -> lowerDesc.startsWith("$tab,") || lowerDesc.startsWith("$tab tab") })
+            ) {
+                nonShortsTabSelected = true
             }
             isShortsNodeActive(
                 viewId = viewId,
                 desc = desc,
                 text = text,
                 stateDesc = stateDesc,
-                isSelected = node.isSelected || node.isChecked,
+                isSelected = isSelected,
                 isFocused = node.isFocused,
                 parentSelected = parentSelected
             )
         }
-        return directMatch || isShortsScreenSignature(collectedTexts)
+        return directMatch || (!nonShortsTabSelected && isShortsScreenSignature(collectedTexts))
     }
 
     fun isWhatsAppPackage(packageName: String): Boolean {
@@ -345,13 +371,65 @@ object SocialAppGuards {
         }
     }
 
+    internal fun isWhatsAppNonUpdatesTabSelected(
+        viewId: String,
+        desc: String,
+        text: String,
+        stateDesc: String = "",
+        isSelected: Boolean = false,
+        parentSelected: Boolean = false
+    ): Boolean {
+        val lowerId = viewId.lowercase(Locale.ROOT)
+        val lowerDesc = desc.trim().lowercase(Locale.ROOT)
+        val lowerText = text.trim().lowercase(Locale.ROOT)
+        val lowerState = stateDesc.trim().lowercase(Locale.ROOT)
+        val selected = isSelected ||
+            parentSelected ||
+            lowerState.contains("selected") ||
+            lowerDesc.contains("selected")
+        if (!selected) return false
+
+        if (lowerId.contains("chats_tab") ||
+            lowerId.contains("calls_tab") ||
+            lowerId.contains("communities_tab") ||
+            lowerId.contains("conversations_tab")
+        ) {
+            return true
+        }
+        return lowerText in WHATSAPP_NON_UPDATES_TABS ||
+            lowerDesc in WHATSAPP_NON_UPDATES_TABS ||
+            WHATSAPP_NON_UPDATES_TABS.any { tab ->
+                lowerDesc.startsWith("$tab,") || lowerDesc.startsWith("$tab tab")
+            }
+    }
+
     fun isWhatsAppChannelDirectoryActive(node: AccessibilityNodeInfo?, depth: Int = 0): Boolean =
         isWhatsAppChannelDirectoryActive(listOfNotNull(node))
 
     fun isWhatsAppChannelDirectoryActive(roots: List<AccessibilityNodeInfo>): Boolean {
-        return bfsMatchesAny(roots) { _, viewId, desc, text, _, _ ->
-            isWhatsAppChannelNodeActive(viewId = viewId, desc = desc, text = text)
+        var matchedChannelNode = false
+        var nonUpdatesTabSelected = false
+        bfsMatchesAny(roots) { node, viewId, desc, text, stateDesc, parentSelected ->
+            if (isWhatsAppNonUpdatesTabSelected(
+                    viewId = viewId,
+                    desc = desc,
+                    text = text,
+                    stateDesc = stateDesc,
+                    isSelected = node.isSelected || node.isChecked,
+                    parentSelected = parentSelected
+                )
+            ) {
+                nonUpdatesTabSelected = true
+                return@bfsMatchesAny true
+            }
+            if (isWhatsAppChannelNodeActive(viewId = viewId, desc = desc, text = text)) {
+                matchedChannelNode = true
+            }
+            false
         }
+        // If Chats / Calls / Communities tab is visibly selected, the user is not on Channels
+        // (off-screen ViewPager Updates fragments must never re-trigger a Channels block).
+        return matchedChannelNode && !nonUpdatesTabSelected
     }
 
     fun isTikTokPackage(packageName: String): Boolean {
@@ -501,6 +579,15 @@ object SocialAppGuards {
         ) -> Boolean
     ): Boolean {
         if (roots.isEmpty()) return false
+        val viewportRect = Rect()
+        try {
+            roots.firstOrNull()?.getBoundsInScreen(viewportRect)
+        } catch (_: Exception) {
+            viewportRect.setEmpty()
+        }
+        val hasViewport = viewportRect.width() > 0 && viewportRect.height() > 0
+        val nodeRect = Rect()
+
         val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
         for (root in roots.distinct()) {
             queue.addLast(root to 0)
@@ -511,23 +598,41 @@ object SocialAppGuards {
             val (node, depth) = queue.removeFirst()
             visited++
 
-            val viewId = node.viewIdResourceName ?: ""
-            val desc = node.contentDescription?.toString() ?: ""
-            val text = node.text?.toString() ?: ""
-            val stateDesc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                node.stateDescription?.toString() ?: ""
-            } else {
-                ""
-            }
-            val parentSelected = try {
-                val p = node.parent
-                (p?.isSelected == true) || (p?.isChecked == true) || (p?.parent?.isSelected == true)
+            val isVisible = try {
+                node.isVisibleToUser
             } catch (_: Exception) {
-                false
+                true
+            }
+            val isOnScreen = if (isVisible && hasViewport) {
+                try {
+                    node.getBoundsInScreen(nodeRect)
+                    nodeRect.isEmpty || Rect.intersects(viewportRect, nodeRect)
+                } catch (_: Exception) {
+                    true
+                }
+            } else {
+                isVisible
             }
 
-            if (predicate(node, viewId, desc, text, stateDesc, parentSelected)) {
-                return true
+            if (isOnScreen) {
+                val viewId = node.viewIdResourceName ?: ""
+                val desc = node.contentDescription?.toString() ?: ""
+                val text = node.text?.toString() ?: ""
+                val stateDesc = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    node.stateDescription?.toString() ?: ""
+                } else {
+                    ""
+                }
+                val parentSelected = try {
+                    val p = node.parent
+                    (p?.isSelected == true) || (p?.isChecked == true) || (p?.parent?.isSelected == true)
+                } catch (_: Exception) {
+                    false
+                }
+
+                if (predicate(node, viewId, desc, text, stateDesc, parentSelected)) {
+                    return true
+                }
             }
 
             if (depth < MAX_HIERARCHY_DEPTH) {
@@ -552,6 +657,50 @@ object SocialAppGuards {
         "next video",
         "previous video",
         "play next"
+    )
+
+    private val NON_SHORTS_YOUTUBE_MARKERS = listOf(
+        "like this post",
+        "dislike this post",
+        "comment on this post",
+        "community post",
+        "image post",
+        "search youtube",
+        "notifications"
+    )
+
+    private val NON_SHORTS_YOUTUBE_TABS = setOf(
+        "home",
+        "subscriptions",
+        "you",
+        "library",
+        "inicio",
+        "suscripciones",
+        "tú",
+        "accueil",
+        "abonnements",
+        "vous"
+    )
+
+    private val WHATSAPP_NON_UPDATES_TABS = setOf(
+        "chats",
+        "calls",
+        "communities",
+        "llamadas",
+        "comunidades",
+        "discussions",
+        "appels",
+        "communautés",
+        "anrufe",
+        "conversas",
+        "chamadas",
+        "comunidades",
+        "panggilan",
+        "komunitas",
+        "sohbetler",
+        "aramalar",
+        "soga",
+        "simu"
     )
 
     private val ACTIVE_SHORTS_VIEW_IDS = listOf(

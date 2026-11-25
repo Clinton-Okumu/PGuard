@@ -601,7 +601,8 @@ object BrowserInspector {
         if (roots.isEmpty()) return CollectedScreenContent(emptyList(), emptyList())
         val visibleTexts = LinkedHashSet<String>()
         val fallbackTexts = LinkedHashSet<String>()
-        val viewIdsOut = LinkedHashSet<String>()
+        val visibleViewIds = LinkedHashSet<String>()
+        val fallbackViewIds = LinkedHashSet<String>()
         val queue = ArrayDeque<Pair<AccessibilityNodeInfo, Int>>()
         var visited = 0
 
@@ -610,14 +611,9 @@ object BrowserInspector {
         }
 
         while (queue.isNotEmpty() && visited < maxVisitedNodes) {
-            if (visibleTexts.size >= maxItems && viewIdsOut.size >= maxItems) break
+            if (visibleTexts.size >= maxItems && visibleViewIds.size >= maxItems) break
             val (node, depth) = queue.removeFirst()
             visited++
-
-            val viewId = node.viewIdResourceName?.trim()
-            if (!viewId.isNullOrBlank() && viewIdsOut.size < maxItems) {
-                viewIdsOut.add(viewId)
-            }
 
             val isVisible = try {
                 node.isVisibleToUser
@@ -625,6 +621,12 @@ object BrowserInspector {
                 true
             }
             val textBucket = if (isVisible) visibleTexts else fallbackTexts
+            val viewIdBucket = if (isVisible) visibleViewIds else fallbackViewIds
+
+            val viewId = node.viewIdResourceName?.trim()
+            if (!viewId.isNullOrBlank() && viewIdBucket.size < maxItems) {
+                viewIdBucket.add(viewId)
+            }
 
             fun recordText(raw: CharSequence?) {
                 val value = raw?.toString()?.trim()
@@ -652,18 +654,19 @@ object BrowserInspector {
             }
         }
 
-        val combinedTexts = LinkedHashSet<String>(visibleTexts.size + fallbackTexts.size)
-        for (text in visibleTexts) {
-            if (combinedTexts.size >= maxItems) break
-            combinedTexts.add(text)
+        // Only use fallback (non-visible) nodes when no visible nodes were reported at all,
+        // so off-screen browser/feed DOM items (e.g. scrolled-away Reddit posts) are never scanned.
+        val finalTexts = if (visibleTexts.isNotEmpty()) {
+            visibleTexts.take(maxItems)
+        } else {
+            fallbackTexts.take(maxItems)
         }
-        if (combinedTexts.size < maxItems) {
-            for (text in fallbackTexts) {
-                if (combinedTexts.size >= maxItems) break
-                combinedTexts.add(text)
-            }
+        val finalViewIds = if (visibleViewIds.isNotEmpty() || visibleTexts.isNotEmpty()) {
+            visibleViewIds.take(maxItems)
+        } else {
+            fallbackViewIds.take(maxItems)
         }
-        return CollectedScreenContent(combinedTexts.toList(), viewIdsOut.toList())
+        return CollectedScreenContent(finalTexts, finalViewIds)
     }
 
     /**

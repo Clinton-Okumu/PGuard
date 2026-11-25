@@ -234,4 +234,26 @@ class ContentFilterTest {
         assertTrue(filter.isAdultDomain("motherless.com"))
         assertTrue(filter.isAdultContent("https://hitomi.la/galleries/1"))
     }
+
+    @Test
+    fun `does not false block single editorial news headline mentioning an adult brand`() {
+        val redditGamingFeed = listOf(
+            "r/gaming",
+            "Real Life Strip Club Says It's Had 'Hundreds of Inquiries' From GTA 6 Fans, as Pornhub Traffic Plummets",
+            "4.2k upvotes",
+            "512 comments"
+        )
+        assertTrue(filter.findAdultPageContent(redditGamingFeed) == null)
+
+        // Direct navigation, search input, or embedded adult domain link still blocks
+        assertTrue(filter.isAdultContent("pornhub"))
+        assertTrue(filter.isAdultContent("https://www.pornhub.com/"))
+        assertTrue(filter.findAdultPageContent(listOf("Check out pornhub.com/video/123")) != null)
+        // Editorial headline combined with corroborating adult text on screen still blocks
+        assertTrue(
+            filter.findAdultPageContent(
+                redditGamingFeed + listOf("Watch nude clips here")
+            ) != null
+        )
+    }
 }

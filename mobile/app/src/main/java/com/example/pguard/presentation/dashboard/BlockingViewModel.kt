@@ -42,11 +42,20 @@ data class InfoDialogState(
     val message: String
 )
 
+enum class SyncState {
+    IDLE,
+    SYNCING,
+    SYNCED,
+    PENDING_RETRY
+}
+
 data class BlockingUiState(
     val settings: UserSettingsDto = UserSettingsDto(),
     val partner: AccountabilityPartnerDto? = null,
     val isPartnerLinked: Boolean = false,
     val isLoading: Boolean = false,
+    val syncState: SyncState = SyncState.IDLE,
+    val lastSyncedAtMs: Long = 0L,
     val errorMessage: String? = null,
     val editor: SettingsEditor? = null,
     val editorText: String = "",
@@ -88,8 +97,12 @@ class BlockingViewModel(
 ) : ViewModel() {
 
     private var currentUserEmail: String? = null
+    private var isUserSignedIn: Boolean = authDataStore == null
     private var partnerPollingJob: Job? = null
     private var loadDataJob: Job? = null
+    private var updateSettingJob: Job? = null
+    private var autoSyncRetryJob: Job? = null
+    private var autoSyncRetryAttempt: Int = 0
     private var pendingDeviceAdminActivation: Boolean = false
 
     private val resolvedContext: Context?
@@ -135,17 +148,31 @@ class BlockingViewModel(
                     .distinctUntilChangedBy { it?.id }
                     .collect { user ->
                         currentUserEmail = user?.email
+                        isUserSignedIn = user != null
                         if (user != null) {
+                            autoSyncRetryAttempt = 0
                             loadData()
                         } else {
                             stopPartnerPolling()
                             loadDataJob?.cancel()
                             loadDataJob = null
+                            updateSettingJob?.cancel()
+                            updateSettingJob = null
+                            autoSyncRetryJob?.cancel()
+                            autoSyncRetryJob = null
+                            autoSyncRetryAttempt = 0
                             // Only clear partner UI state if local fail-closed cache is already cleared
                             if (!BlockingPreferences.isPartnerLinkedCached) {
-                                _uiState.update { it.copy(isLoading = false, partner = null, isPartnerLinked = false) }
+                                _uiState.update {
+                                    it.copy(
+                                        isLoading = false,
+                                        syncState = SyncState.IDLE,
+                                        partner = null,
+                                        isPartnerLinked = false
+                                    )
+                                }
                             } else {
-                                _uiState.update { it.copy(isLoading = false) }
+                                _uiState.update { it.copy(isLoading = false, syncState = SyncState.IDLE) }
                             }
                         }
                     }
@@ -232,20 +259,56 @@ class BlockingViewModel(
     }
 
     fun loadData() {
+        if (!isUserSignedIn) return
         loadDataJob?.cancel()
         loadDataJob = viewModelScope.launch {
             loadDataInternal()
         }
     }
 
+    /**
+     * Automatically syncs settings in the background on app resume or when local changes
+     * are pending, without requiring the user to tap a manual sync button.
+     */
+    fun autoSyncIfNeeded(minIntervalMs: Long = 30_000L) {
+        if (!isUserSignedIn) return
+        if (loadDataJob?.isActive == true) return
+        val state = _uiState.value
+        val now = System.currentTimeMillis()
+        val needsSync = BlockingPreferences.isLocalDirty ||
+            state.syncState == SyncState.PENDING_RETRY ||
+            state.lastSyncedAtMs == 0L ||
+            (now - state.lastSyncedAtMs) >= minIntervalMs
+        if (needsSync) {
+            loadData()
+        }
+    }
+
     suspend fun syncSettingsNow(): Result<Unit> {
+        if (!isUserSignedIn) return Result.success(Unit)
         loadDataJob?.cancel()
         loadDataJob = null
         return loadDataInternal()
     }
 
+    private fun scheduleAutoSyncRetry() {
+        if (!isUserSignedIn) return
+        if (autoSyncRetryJob?.isActive == true) return
+        val backoffMs = longArrayOf(5_000L, 15_000L, 30_000L, 60_000L)
+        if (autoSyncRetryAttempt >= backoffMs.size) return
+        val delayMs = backoffMs[autoSyncRetryAttempt]
+        autoSyncRetryAttempt++
+        autoSyncRetryJob = viewModelScope.launch {
+            delay(delayMs)
+            autoSyncRetryJob = null
+            if (isUserSignedIn) {
+                loadData()
+            }
+        }
+    }
+
     private suspend fun loadDataInternal(): Result<Unit> {
-        _uiState.update { it.copy(isLoading = true, errorMessage = null) }
+        _uiState.update { it.copy(isLoading = true, syncState = SyncState.SYNCING, errorMessage = null) }
 
         return coroutineScope {
             val settingsDeferred = async { settingsRepository.fetchSettings() }
@@ -367,8 +430,10 @@ class BlockingViewModel(
                 )
             }
 
-            if (shouldPushLocal && settingsToPush != null) {
-                pushSettingsToServer(settingsToPush!!)
+            val pushResult = if (shouldPushLocal && settingsToPush != null) {
+                pushSettingsToServerSuspend(settingsToPush!!)
+            } else {
+                Result.success(Unit)
             }
 
             if (partnerSuccess && partnerDto != null && !isLinked && partnerDto.status == "pending") {
@@ -377,11 +442,25 @@ class BlockingViewModel(
                 stopPartnerPolling()
             }
 
-            if (settingsResult.isSuccess) {
+            val finalSuccess = settingsResult.isSuccess && pushResult.isSuccess
+            if (finalSuccess) {
+                autoSyncRetryAttempt = 0
+                autoSyncRetryJob?.cancel()
+                autoSyncRetryJob = null
+                _uiState.update {
+                    it.copy(
+                        syncState = SyncState.SYNCED,
+                        lastSyncedAtMs = System.currentTimeMillis()
+                    )
+                }
                 Result.success(Unit)
             } else {
+                _uiState.update { it.copy(syncState = SyncState.PENDING_RETRY) }
+                scheduleAutoSyncRetry()
                 Result.failure(
-                    settingsResult.exceptionOrNull() ?: IllegalStateException("Unable to reach server")
+                    settingsResult.exceptionOrNull()
+                        ?: pushResult.exceptionOrNull()
+                        ?: IllegalStateException("Unable to reach server")
                 )
             }
         }
@@ -433,37 +512,57 @@ class BlockingViewModel(
             if (it.accountabilityMode.isBlank()) it.copy(accountabilityMode = currentState.accountabilityMode.code) else it
         }
         syncSettingsToAccessibilityService(updatedLocal, markDirty = true)
-        _uiState.update { it.copy(settings = updatedLocal) }
+        _uiState.update {
+            it.copy(
+                settings = updatedLocal,
+                syncState = if (isUserSignedIn) SyncState.SYNCING else SyncState.IDLE
+            )
+        }
 
-        val request = UpdateSettingsRequest(
-            blockAdultContent = updatedLocal.blockAdultContent,
-            blockShorts = updatedLocal.blockShorts,
-            blockWhatsAppChannels = updatedLocal.blockWhatsAppChannels,
-            blockInstagramReels = updatedLocal.blockInstagramReels,
-            blockTikTok = updatedLocal.blockTikTok,
-            uninstallProtection = updatedLocal.uninstallProtection,
-            blockUnsupportedBrowsers = updatedLocal.blockUnsupportedBrowsers,
-            blockNewlyInstalledApps = updatedLocal.blockNewlyInstalledApps,
-            blockedScreenMessage = updatedLocal.blockedScreenMessage,
-            blockedScreenCountdown = updatedLocal.blockedScreenCountdown,
-            redirectUrl = updatedLocal.redirectUrl,
-            accountabilityMode = updatedLocal.accountabilityMode
-        )
+        if (!isUserSignedIn) return
 
-        viewModelScope.launch {
+        // Cancel any superseded in-flight push so rapid toggles never overwrite newer local state
+        updateSettingJob?.cancel()
+        updateSettingJob = viewModelScope.launch {
+            delay(250L) // Brief debounce coalesces rapid multi-toggle edits into a single PUT
+            val latestState = _uiState.value
+            val latest = latestState.settings.let {
+                if (it.accountabilityMode.isBlank()) it.copy(accountabilityMode = latestState.accountabilityMode.code) else it
+            }
+            val request = UpdateSettingsRequest(
+                blockAdultContent = latest.blockAdultContent,
+                blockShorts = latest.blockShorts,
+                blockWhatsAppChannels = latest.blockWhatsAppChannels,
+                blockInstagramReels = latest.blockInstagramReels,
+                blockTikTok = latest.blockTikTok,
+                uninstallProtection = latest.uninstallProtection,
+                blockUnsupportedBrowsers = latest.blockUnsupportedBrowsers,
+                blockNewlyInstalledApps = latest.blockNewlyInstalledApps,
+                blockedScreenMessage = latest.blockedScreenMessage,
+                blockedScreenCountdown = latest.blockedScreenCountdown,
+                redirectUrl = latest.redirectUrl,
+                accountabilityMode = latest.accountabilityMode
+            )
             settingsRepository.updateSettings(request).fold(
                 onSuccess = { updatedServer ->
                     BlockingPreferences.markLocalDirty(resolvedContext, false)
                     syncSettingsToAccessibilityService(updatedServer, markDirty = false)
+                    autoSyncRetryAttempt = 0
+                    autoSyncRetryJob?.cancel()
+                    autoSyncRetryJob = null
                     _uiState.update {
                         it.copy(
                             settings = updatedServer,
-                            accountabilityMode = AccountabilityMode.fromCode(updatedServer.accountabilityMode)
+                            accountabilityMode = AccountabilityMode.fromCode(updatedServer.accountabilityMode),
+                            syncState = SyncState.SYNCED,
+                            lastSyncedAtMs = System.currentTimeMillis()
                         )
                     }
                 },
                 onFailure = { error ->
-                    android.util.Log.w("BlockingViewModel", "Backend sync failed, keeping local protection setting: ${error.message}")
+                    android.util.Log.w("BlockingViewModel", "Backend sync failed, will retry automatically: ${error.message}")
+                    _uiState.update { it.copy(syncState = SyncState.PENDING_RETRY) }
+                    scheduleAutoSyncRetry()
                 }
             )
         }
@@ -1433,7 +1532,7 @@ class BlockingViewModel(
         )
     }
 
-    private fun pushSettingsToServer(settings: UserSettingsDto) {
+    private suspend fun pushSettingsToServerSuspend(settings: UserSettingsDto): Result<Unit> {
         val request = UpdateSettingsRequest(
             blockAdultContent = settings.blockAdultContent,
             blockShorts = settings.blockShorts,
@@ -1448,12 +1547,10 @@ class BlockingViewModel(
             redirectUrl = settings.redirectUrl,
             accountabilityMode = settings.accountabilityMode.ifBlank { _uiState.value.accountabilityMode.code }
         )
-        viewModelScope.launch {
-            settingsRepository.updateSettings(request).onSuccess {
-                BlockingPreferences.markLocalDirty(resolvedContext, false)
-            }.onFailure { err ->
-                android.util.Log.w("BlockingViewModel", "Failed to sync local protections to server: ${err.message}")
-            }
+        return settingsRepository.updateSettings(request).map {
+            BlockingPreferences.markLocalDirty(resolvedContext, false)
+        }.onFailure { err ->
+            android.util.Log.w("BlockingViewModel", "Failed to sync local protections to server: ${err.message}")
         }
     }
 }
