@@ -14,3 +14,6 @@ Backend/bin/
 Backend/.env
 *.env
 
+.neon
+node_modules/
+.env.local

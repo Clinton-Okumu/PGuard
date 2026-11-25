@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -12,34 +13,48 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-func Open() (*gorm.DB, error) {
-	_ = godotenv.Load(".env", "Backend/.env")
+func cleanEnvValue(val string) string {
+	return strings.Trim(strings.TrimSpace(val), `"'`)
+}
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		host := os.Getenv("DB_HOST")
-		if host == "" {
-			host = "127.0.0.1"
-		}
-		port := os.Getenv("DB_PORT")
-		if port == "" {
-			port = "5432"
-		}
-		user := os.Getenv("DB_USER")
-		if user == "" {
-			user = os.Getenv("USER")
-		}
-		if user == "" {
-			user = "postgres"
-		}
-		password := os.Getenv("DB_PASSWORD")
-		dbname := os.Getenv("DB_NAME")
-		if dbname == "" {
-			dbname = "pguard_db"
-		}
-		dsn = fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable", host, user, password, dbname, port)
+func Open() (*gorm.DB, error) {
+	for _, f := range []string{".env.local", "../.env.local", ".env", "Backend/.env"} {
+		_ = godotenv.Load(f)
 	}
 
+	dsn := cleanEnvValue(os.Getenv("DATABASE_URL"))
+	if dsn == "" {
+		dsn = defaultDSN()
+	}
+
+	return openWithDSN(dsn)
+}
+
+func defaultDSN() string {
+	host := os.Getenv("DB_HOST")
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	port := os.Getenv("DB_PORT")
+	if port == "" {
+		port = "5432"
+	}
+	user := os.Getenv("DB_USER")
+	if user == "" {
+		user = os.Getenv("USER")
+	}
+	if user == "" {
+		user = "postgres"
+	}
+	password := os.Getenv("DB_PASSWORD")
+	dbname := os.Getenv("DB_NAME")
+	if dbname == "" {
+		dbname = "pguard_db"
+	}
+	return fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable", host, user, password, dbname, port)
+}
+
+func openWithDSN(dsn string) (*gorm.DB, error) {
 	gormLogger := logger.New(
 		log.New(os.Stdout, "\r\n", log.LstdFlags),
 		logger.Config{
@@ -58,9 +73,10 @@ func Open() (*gorm.DB, error) {
 	}
 
 	if sqlDB, err := db.DB(); err == nil {
-		sqlDB.SetMaxOpenConns(25)
-		sqlDB.SetMaxIdleConns(10)
+		sqlDB.SetMaxOpenConns(15)
+		sqlDB.SetMaxIdleConns(2)
 		sqlDB.SetConnMaxLifetime(5 * time.Minute)
+		sqlDB.SetConnMaxIdleTime(1 * time.Minute)
 	}
 
 	fmt.Println("connected to database")
@@ -68,7 +84,16 @@ func Open() (*gorm.DB, error) {
 }
 
 func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(
+	migrateDB := db
+	if unpooledDSN := cleanEnvValue(os.Getenv("DATABASE_URL_UNPOOLED")); unpooledDSN != "" && unpooledDSN != cleanEnvValue(os.Getenv("DATABASE_URL")) {
+		if directDB, err := openWithDSN(unpooledDSN); err == nil {
+			migrateDB = directDB
+			if sqlDB, err := directDB.DB(); err == nil {
+				defer sqlDB.Close()
+			}
+		}
+	}
+	return migrateDB.AutoMigrate(
 		&User{},
 		&RefreshToken{},
 		&UserSettings{},

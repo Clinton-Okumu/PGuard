@@ -1,0 +1,7 @@
+.env
+*.env
+bin/
+.git/
+*.test
+*.out
+README.md

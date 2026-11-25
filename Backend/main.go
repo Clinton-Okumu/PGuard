@@ -41,7 +41,9 @@ func localIPv4() string {
 }
 
 func main() {
-	_ = godotenv.Load(".env", "Backend/.env")
+	for _, f := range []string{".env.local", "../.env.local", ".env", "Backend/.env"} {
+		_ = godotenv.Load(f)
+	}
 
 	// 1. Read PORT from env first
 	port := os.Getenv("PORT")

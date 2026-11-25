@@ -22,12 +22,12 @@ fun escapeBuildConfigString(value: String): String =
     value.replace("\\", "\\\\").replace("\"", "\\\"")
 
 val debugApiBaseUrl = normalizeBaseUrl(
-    localProperties.getProperty("pguard.apiBaseUrl") ?: "http://192.168.100.80:8080/"
+    localProperties.getProperty("pguard.apiBaseUrl") ?: "https://pguard.orkestr.run/"
 )
 val releaseApiBaseUrl = normalizeBaseUrl(
-    localProperties.getProperty("pguard.releaseApiBaseUrl") ?: "https://api.pguard.app/"
+    localProperties.getProperty("pguard.releaseApiBaseUrl") ?: "https://pguard.orkestr.run/"
 )
-val googleWebClientId = (localProperties.getProperty("pguard.googleWebClientId") ?: "").trim()
+val googleWebClientId = (localProperties.getProperty("pguard.googleWebClientId") ?: "146143329754-t7ded9rqac7lvh81i3us31t4fgns9ldc.apps.googleusercontent.com").trim()
 
 android {
     namespace = "com.example.pguard"

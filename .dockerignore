@@ -1,0 +1,14 @@
+.git/
+.github/
+.neon
+.agents/
+node_modules/
+mobile/
+Website/
+Backend/bin/
+Backend/.env
+*.env
+.env.local
+*.test
+*.out
+README.md

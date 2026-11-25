@@ -1,0 +1,12 @@
+{
+  "name": "pguard",
+  "private": true,
+  "scripts": {
+    "build": "cd Backend && go build -o bin/server ./main.go && cd ../Website && npm run build",
+    "start": "cd Backend && go run ./main.go"
+  },
+  "dependencies": {
+    "@neon/config": "^1.14.7",
+    "@neon/env": "^2.1.10"
+  }
+}
