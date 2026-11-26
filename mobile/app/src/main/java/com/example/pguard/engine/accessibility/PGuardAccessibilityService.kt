@@ -1,6 +1,7 @@
 package com.example.pguard.engine.accessibility
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -12,6 +13,7 @@ import android.provider.Settings
 import android.text.TextUtils
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import android.widget.Toast
@@ -164,10 +166,46 @@ class PGuardAccessibilityService : AccessibilityService() {
         )
 
         /**
-         * Checks whether PGuard's accessibility service has been enabled in Android Settings.
+         * Checks whether PGuard's accessibility service is genuinely enabled and active.
+         *
+         * On MIUI/HyperOS, Android can leave PGuard in `ENABLED_ACCESSIBILITY_SERVICES`
+         * even after marking it as crashed/unbound (`accessibility_enabled = 0` or not
+         * present in AccessibilityManager's active service list). Checking live binding
+         * plus `ACCESSIBILITY_ENABLED` & `AccessibilityManager` prevents false "Active" UI.
          */
         fun isEnabled(context: Context): Boolean {
+            if (_isRunning.value) return true
+
+            val accessibilityEnabled = try {
+                Settings.Secure.getInt(
+                    context.contentResolver,
+                    Settings.Secure.ACCESSIBILITY_ENABLED,
+                    0
+                ) == 1
+            } catch (_: Exception) {
+                false
+            }
+            if (!accessibilityEnabled) return false
+
             val expectedServiceName = "${context.packageName}/${PGuardAccessibilityService::class.java.canonicalName}"
+            val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+            if (am != null) {
+                try {
+                    val activeServices = am.getEnabledAccessibilityServiceList(
+                        AccessibilityServiceInfo.FEEDBACK_ALL_MASK
+                    )
+                    val isBoundInManager = activeServices.any { info ->
+                        val si = info.resolveInfo?.serviceInfo
+                        val id = info.id
+                        (si != null &&
+                            si.packageName.equals(context.packageName, ignoreCase = true) &&
+                            si.name.equals(PGuardAccessibilityService::class.java.canonicalName, ignoreCase = true)) ||
+                            id.equals(expectedServiceName, ignoreCase = true)
+                    }
+                    return isBoundInManager
+                } catch (_: Exception) {}
+            }
+
             val enabledServices = Settings.Secure.getString(
                 context.contentResolver,
                 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES

@@ -115,6 +115,7 @@ fun BlockingScreen(
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsState()
     val isVpnRunning by PGuardVpnService.isRunning.collectAsState()
+    val isAccessibilityRunning by PGuardAccessibilityService.isRunning.collectAsState()
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var showVpnDialog by remember { mutableStateOf(false) }
@@ -180,7 +181,7 @@ fun BlockingScreen(
         }
     }
 
-    LaunchedEffect(state.isDnsVpnEnabled, isVpnRunning, state.settings.uninstallProtection) {
+    LaunchedEffect(state.isDnsVpnEnabled, isVpnRunning, isAccessibilityRunning, state.settings.uninstallProtection) {
         alerts = readPermissionAlerts(
             context = context,
             dnsVpnEnabled = state.isDnsVpnEnabled,
