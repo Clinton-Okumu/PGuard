@@ -252,6 +252,34 @@ class SocialAppGuardsTest {
             "Share"
         )
         assertFalse(SocialAppGuards.isShortsScreenSignature(communityPostWithDescTexts))
+
+        // Regular YouTube video watch page with auto-hidden player controls (no Minimize/Fullscreen visible)
+        val regularWatchControlsHiddenTexts = listOf(
+            "Video player",
+            "How to Build a Clean Architecture App",
+            "120K views · 3 days ago ...more",
+            "Tech Channel",
+            "Subscribe",
+            "like this video along with 4,500 other people",
+            "Dislike this video",
+            "Share",
+            "Remix",
+            "Download",
+            "Save",
+            "Comments"
+        )
+        assertFalse(SocialAppGuards.isShortsScreenSignature(regularWatchControlsHiddenTexts))
+
+        // Regular YouTube fullscreen video quick-actions bar
+        val regularFullscreenVideoTexts = listOf(
+            "like this video along with 4,500 other people",
+            "Dislike this video",
+            "Comments",
+            "Save",
+            "Share",
+            "More videos"
+        )
+        assertFalse(SocialAppGuards.isShortsScreenSignature(regularFullscreenVideoTexts))
     }
 
     @Test

@@ -173,6 +173,7 @@ object SocialAppGuards {
             if (lower.isEmpty()) continue
 
             if (REGULAR_YOUTUBE_WATCH_MARKERS.any { marker -> lower.contains(marker) } ||
+                lower in REGULAR_YOUTUBE_EXACT_BUTTONS ||
                 NON_SHORTS_YOUTUBE_MARKERS.any { marker -> lower.contains(marker) }
             ) {
                 return false
@@ -212,10 +213,11 @@ object SocialAppGuards {
             (if (hasShare) 1 else 0) +
             (if (hasRemix) 1 else 0)
 
-        // Community image posts expose bare "Like" + "Dislike" + "Comment" + "Share" without
-        // "Remix" or video-specific "like this video" / "dislike this video" descriptions.
-        return (hasRemix && signals >= 3) ||
-            (hasVideoLike && hasVideoDislike && (hasComments || hasShare))
+        // Regular watch pages (portrait with auto-hidden player controls, or fullscreen) still show
+        // Like/Dislike/Share/Remix/Comments pills. Require Shorts-specific phrasing ("view X comments",
+        // "share this video", or "remix this") alongside like/dislike, and reject any regular watch markers.
+        return (hasRemix && hasVideoLike && hasVideoDislike && (hasComments || hasShare)) ||
+            (hasVideoLike && hasVideoDislike && hasComments && hasShare && signals >= 4)
     }
 
     fun isShortsActiveInHierarchy(node: AccessibilityNodeInfo?, depth: Int = 0): Boolean {
@@ -225,10 +227,15 @@ object SocialAppGuards {
     fun isShortsActiveInHierarchy(roots: List<AccessibilityNodeInfo>): Boolean {
         val collectedTexts = ArrayList<String>(128)
         var nonShortsTabSelected = false
+        var regularWatchViewPresent = false
         val directMatch = bfsMatchesAny(roots) { node, viewId, desc, text, stateDesc, parentSelected ->
             if (collectedTexts.size < 250) {
                 if (desc.isNotBlank()) collectedTexts.add(desc)
                 if (text.isNotBlank()) collectedTexts.add(text)
+            }
+            val lowerId = viewId.lowercase(Locale.ROOT)
+            if (!regularWatchViewPresent && REGULAR_YOUTUBE_WATCH_VIEW_IDS.any { lowerId.contains(it) }) {
+                regularWatchViewPresent = true
             }
             val isSelected = node.isSelected || node.isChecked
             val lowerDesc = desc.trim().lowercase(Locale.ROOT)
@@ -252,7 +259,7 @@ object SocialAppGuards {
                 parentSelected = parentSelected
             )
         }
-        return directMatch || (!nonShortsTabSelected && isShortsScreenSignature(collectedTexts))
+        return directMatch || (!nonShortsTabSelected && !regularWatchViewPresent && isShortsScreenSignature(collectedTexts))
     }
 
     fun isWhatsAppPackage(packageName: String): Boolean {
@@ -646,9 +653,24 @@ object SocialAppGuards {
         return false
     }
 
+    private val REGULAR_YOUTUBE_WATCH_VIEW_IDS = listOf(
+        "watch_player",
+        "next_gen_watch_layout",
+        "watch_while_time_bar",
+        "watch_list",
+        "watch_metadata",
+        "fullscreen_button",
+        "player_fragment_container",
+        "related_chip_cloud",
+        "player_overlays_container",
+        "time_bar_current_time",
+        "time_bar_total_time"
+    )
+
     private val REGULAR_YOUTUBE_WATCH_MARKERS = listOf(
         "enter fullscreen",
         "exit fullscreen",
+        "full screen",
         "minimize",
         "collapse",
         "autoplay is",
@@ -656,7 +678,23 @@ object SocialAppGuards {
         "download video",
         "next video",
         "previous video",
-        "play next"
+        "play next",
+        "video player",
+        "expand description",
+        "...more",
+        "more videos",
+        "up next",
+        "seek slider",
+        "playback settings",
+        "video settings"
+    )
+
+    private val REGULAR_YOUTUBE_EXACT_BUTTONS = setOf(
+        "save",
+        "download",
+        "clip",
+        "thanks",
+        "chapters"
     )
 
     private val NON_SHORTS_YOUTUBE_MARKERS = listOf(
